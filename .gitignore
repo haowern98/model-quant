@@ -18,6 +18,11 @@ src-tauri/target/
 # Temp scaffold
 _scaffold_temp/
 
+# Project docs (not part of the app build)
+CLAUDE.md
+2026-05-23-model-surgery-design.md
+docs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
