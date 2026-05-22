@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0B0D0F;
+  --bg-surface: #141619;
+  --bg-surface-alt: #1A1C20;
+  --border-default: #262830;
+  --accent-copper: #C8926A;
+  --accent-copper-bright: #E8B88A;
+  --accent-solder: #D4A843;
+  --accent-signal: #5C9A6B;
+  --text-primary: #E8E4DF;
+  --text-secondary: #8A8680;
+  --text-muted: #5C5955;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+}
