@@ -33,8 +33,16 @@ pub fn run_benchmark(
 
     progress.loading(0.7);
 
-    let vram_allocated_mb = 0.0;
-    let vram_peak_mb = 0.0;
+    // Measure VRAM via C++ profiler
+    unsafe { crate::ffi::profiler_bindings::profiler_reset_peak(); }
+    let mut vram_allocated_mb = 0.0f64;
+    let mut vram_peak_mb = 0.0f64;
+    unsafe {
+        crate::ffi::profiler_bindings::profiler_get_vram(
+            &mut vram_allocated_mb,
+            &mut vram_peak_mb,
+        );
+    }
 
     progress.benchmarking(0.5);
 

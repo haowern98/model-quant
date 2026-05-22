@@ -10,6 +10,9 @@ use commands::model::ModelState;
 use commands::quant::RecipeStore;
 
 pub fn run() {
+    // Init C++ profiler (CUDA or stub, depending on build)
+    unsafe { crate::ffi::profiler_bindings::profiler_init(); }
+
     tauri::Builder::default()
         .manage(ModelState(Mutex::new(None)))
         .manage(RecipeStore(Mutex::new(None)))
@@ -27,4 +30,6 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    unsafe { crate::ffi::profiler_bindings::profiler_shutdown(); }
 }
