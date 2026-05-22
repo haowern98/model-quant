@@ -1,0 +1,68 @@
+use model_surgery::gguf::reader::parse_gguf;
+use model_surgery::quant::recipe::{QuantType, RecipeState};
+use model_surgery::quant::engine::estimate_quantized_size;
+
+#[test]
+fn test_gguf_parse_invalid_file() {
+    let result = parse_gguf(std::path::Path::new("nonexistent.gguf"));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_recipe_full_workflow() {
+    let tensors = vec![
+        "tok_embeddings.weight".to_string(),
+        "layers.0.attention.wq.weight".to_string(),
+        "layers.0.feed_forward.w1.weight".to_string(),
+        "output.weight".to_string(),
+    ];
+
+    let mut recipe = RecipeState::new("test.gguf".into(), tensors.clone(), QuantType::Q4_K_M);
+
+    // Assign attention tensors to Q6_K
+    recipe.assign_by_pattern("all_attn", QuantType::Q6_K);
+
+    // Assign embeddings to Q8_0
+    recipe.assign_by_pattern("all_embeddings", QuantType::Q8_0);
+
+    // Verify
+    let emb = recipe.assignments.iter().find(|a| a.tensor_name == "tok_embeddings.weight").unwrap();
+    assert_eq!(emb.quant_type, QuantType::Q8_0);
+
+    let attn = recipe.assignments.iter().find(|a| a.tensor_name.contains("attention")).unwrap();
+    assert_eq!(attn.quant_type, QuantType::Q6_K);
+
+    let ffn = recipe.assignments.iter().find(|a| a.tensor_name.contains("feed_forward")).unwrap();
+    assert_eq!(ffn.quant_type, QuantType::Q4_K_M);
+
+    // JSON roundtrip
+    let json = serde_json::to_string(&recipe).unwrap();
+    let deserialized: RecipeState = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.assignments.len(), 4);
+
+    // Estimate VRAM
+    let shapes: Vec<Vec<u64>> = tensors.iter().map(|_| vec![4096, 4096]).collect();
+    let vram = model_surgery::quant::engine::estimate_vram_mb(&recipe, &shapes);
+    assert!(vram > 0.0);
+}
+
+#[test]
+fn test_quant_type_bits() {
+    assert_eq!(QuantType::F16.bits_per_weight(), 16.0);
+    assert_eq!(QuantType::Q8_0.bits_per_weight(), 8.0);
+    assert_eq!(QuantType::Q4_K_M.bits_per_weight(), 4.8);
+    assert_eq!(QuantType::Q2_K.bits_per_weight(), 2.6);
+}
+
+#[test]
+fn test_estimate_quantized_size() {
+    let shape = vec![4096, 4096];
+    let f16_size = estimate_quantized_size(&shape, 16.0);
+    let q8_size = estimate_quantized_size(&shape, 8.0);
+    let q4_size = estimate_quantized_size(&shape, 4.8);
+
+    assert_eq!(f16_size, 33_554_432);
+    assert_eq!(q8_size, 16_777_216);
+    assert!(q4_size < f16_size);
+    assert!(q4_size < q8_size);
+}
