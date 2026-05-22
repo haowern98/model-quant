@@ -10,7 +10,7 @@ import { useModel } from './hooks/useModel';
 import { useRecipe } from './hooks/useRecipe';
 import { useProgress } from './hooks/useProgress';
 import { testRecipe, saveRecipe, loadRecipe, exportGguf } from './lib/tauri-bridge';
-import type { BenchmarkResult, QuantType, AssignPattern } from './types';
+import type { BenchmarkResult } from './types';
 import { setMockInvoke } from './lib/tauri-bridge';
 import { createMockBridge } from '../tests/mocks/tauri-bridge';
 
@@ -22,7 +22,7 @@ if (typeof window !== 'undefined') {
 }
 
 function App() {
-  const { model, modelPath, loading: modelLoading, openModel, getTensorsForLayer } = useModel();
+  const { model, modelPath, openModel, getTensorsForLayer } = useModel();
   const { recipe, initRecipe, assignQuant, assignAll, assignByPattern, setProfile, getAssignments } = useRecipe();
   const { progress, running, startOperation, endOperation } = useProgress();
 
