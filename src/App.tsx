@@ -29,6 +29,7 @@ function App() {
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
   const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
 
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
@@ -103,8 +104,11 @@ function App() {
       if (selected && typeof selected === 'string') {
         const loaded: RecipeState = await loadRecipe(selected);
         setRecipeState(loaded);
+        setAppError(null);
       }
-    } catch { /* browser fallback: no-op */ }
+    } catch (e) {
+      setAppError((e as Error).message);
+    }
   }, [setRecipeState]);
 
   const selectedTensors = selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
@@ -140,9 +144,9 @@ function App() {
           }
           detail={
             <div className="h-full min-h-0 flex flex-col">
-              {modelError && (
+              {(modelError || appError) && (
                 <div className="shrink-0 border-b border-red-500/40 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-                  {modelError}
+                  {modelError ?? appError}
                 </div>
               )}
               <div className="flex-1 min-h-0">

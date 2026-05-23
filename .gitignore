@@ -15,6 +15,11 @@ dist-ssr
 # Rust
 src-tauri/target/
 
+# Local model downloads and Hugging Face cache
+models/
+*.gguf
+*.safetensors
+
 # Temp scaffold
 _scaffold_temp/
 
