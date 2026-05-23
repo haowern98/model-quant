@@ -6,12 +6,11 @@ import { assignQuant as assignQuantCmd, assignAll as assignAllCmd, assignByPatte
 export function useRecipe() {
   const [recipe, setRecipe] = useState<RecipeState | null>(null);
 
-  const initRecipe = useCallback((modelPath: string, tensorNames: string[], currentQuant: string) => {
-    const defaultQuant = toTargetQuant(currentQuant);
+  const initRecipe = useCallback((modelPath: string, tensors: { name: string; currentQuant: string }[]) => {
     setRecipe({
       id: `${Date.now()}`,
       baseModel: modelPath,
-      assignments: tensorNames.map(name => ({ tensorName: name, quantType: defaultQuant })),
+      assignments: tensors.map(t => ({ tensorName: t.name, quantType: toTargetQuant(t.currentQuant) })),
       profile: null,
       status: 'draft',
     });

@@ -20,7 +20,8 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
           <tr className="border-b border-border-default text-text-muted text-xs uppercase tracking-wider">
             <th className="text-left px-4 py-2 font-medium">Tensor</th>
             <th className="text-left px-4 py-2 font-medium">Shape</th>
-            <th className="text-left px-4 py-2 font-medium">Quant</th>
+            <th className="text-left px-4 py-2 font-medium">Current Quant</th>
+            <th className="text-left px-4 py-2 font-medium">Target Quant</th>
             <th className="text-right px-4 py-2 font-medium">Current</th>
             <th className="text-right px-4 py-2 font-medium">Target</th>
           </tr>
@@ -28,10 +29,6 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
         <tbody>
           {tensors.map(t => {
             const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
-            const currentQuantOption = QUANT_TYPES.find(q => q.value === t.currentQuant);
-            const quantOptions = currentQuantOption
-              ? QUANT_TYPES
-              : [{ value: t.currentQuant, label: t.currentQuant }, ...QUANT_TYPES];
             const currentSize = t.sizeBytes;
             const targetSize = estQuantSize(t.shape, QUANT_TYPES.find(q => q.value === assignedQuant)!.bitsPerWeight);
             return (
@@ -40,14 +37,15 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
                   {formatTensorName(t.name)}
                 </td>
                 <td className="px-4 py-2 font-mono text-text-muted text-xs">[{t.shape.join(', ')}]</td>
+                <td className="px-4 py-2 font-mono text-text-muted text-xs">{t.currentQuant}</td>
                 <td className="px-4 py-2">
                   <select
-                    value={t.currentQuant}
+                    value={assignedQuant}
                     onChange={e => onAssignQuant(t.name, e.target.value as QuantType)}
                     className="bg-bg-surface-alt border border-border-default rounded px-1 py-0.5 text-xs text-text-primary
                                focus:outline-none focus:border-accent-copper font-mono"
                   >
-                    {quantOptions.map(q => (
+                    {QUANT_TYPES.map(q => (
                       <option key={q.value} value={q.value}>{q.label}</option>
                     ))}
                   </select>

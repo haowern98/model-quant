@@ -12,7 +12,6 @@ import { useProgress } from './hooks/useProgress';
 import { isTauri } from '@tauri-apps/api/core';
 import { testRecipe, saveRecipe, loadRecipe, exportGguf } from './lib/tauri-bridge';
 import type { BenchmarkResult, RecipeState } from './types';
-import { toTargetQuant } from './types';
 import { setMockInvoke } from './lib/tauri-bridge';
 
 // Auto-inject the mock bridge only in plain browser runs.
@@ -61,7 +60,7 @@ function App() {
   useEffect(() => {
     if (!model || recipe) return;
     const tensors = model.tensors.map(t => ({ name: t.name, currentQuant: t.currentQuant }));
-    initRecipe(modelPath ?? 'unknown.gguf', tensors.map(t => t.name), toTargetQuant(tensors[0]?.currentQuant));
+    initRecipe(modelPath ?? 'unknown.gguf', tensors);
   }, [model, modelPath, recipe, initRecipe]);
 
   const handleTest = useCallback(async () => {

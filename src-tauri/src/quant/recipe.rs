@@ -3,11 +3,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum QuantType {
+    F32,
+    BF16,
     F16,
     Q8_0,
     Q6_K,
+    Q5_K,
     Q5_K_M,
+    Q4_K,
     Q4_K_M,
+    Q3_K,
     Q3_K_M,
     Q2_K,
 }
@@ -15,11 +20,16 @@ pub enum QuantType {
 impl QuantType {
     pub fn bits_per_weight(&self) -> f32 {
         match self {
+            QuantType::F32 => 32.0,
+            QuantType::BF16 => 16.0,
             QuantType::F16 => 16.0,
             QuantType::Q8_0 => 8.0,
             QuantType::Q6_K => 6.6,
+            QuantType::Q5_K => 5.5,
             QuantType::Q5_K_M => 5.3,
+            QuantType::Q4_K => 4.5,
             QuantType::Q4_K_M => 4.8,
+            QuantType::Q3_K => 3.4,
             QuantType::Q3_K_M => 3.9,
             QuantType::Q2_K => 2.6,
         }
@@ -69,6 +79,24 @@ impl RecipeState {
             .map(|tensor_name| QuantAssignment {
                 tensor_name,
                 quant_type: default_quant.clone(),
+            })
+            .collect();
+
+        RecipeState {
+            id: chrono::Utc::now().timestamp_millis().to_string(),
+            base_model,
+            assignments,
+            profile: None,
+            status: RecipeStatus::Draft,
+        }
+    }
+
+    pub fn from_current_quants(base_model: String, tensors: Vec<(String, QuantType)>) -> Self {
+        let assignments = tensors
+            .into_iter()
+            .map(|(tensor_name, quant_type)| QuantAssignment {
+                tensor_name,
+                quant_type,
             })
             .collect();
 

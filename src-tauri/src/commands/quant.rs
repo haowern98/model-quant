@@ -45,11 +45,16 @@ pub async fn assign_by_pattern(
 
 fn parse_quant_type(s: &str) -> Result<QuantType, String> {
     match s {
+        "F32" => Ok(QuantType::F32),
+        "BF16" => Ok(QuantType::BF16),
         "F16" => Ok(QuantType::F16),
         "Q8_0" => Ok(QuantType::Q8_0),
         "Q6_K" => Ok(QuantType::Q6_K),
+        "Q5_K" => Ok(QuantType::Q5_K),
         "Q5_K_M" => Ok(QuantType::Q5_K_M),
+        "Q4_K" => Ok(QuantType::Q4_K),
         "Q4_K_M" => Ok(QuantType::Q4_K_M),
+        "Q3_K" => Ok(QuantType::Q3_K),
         "Q3_K_M" => Ok(QuantType::Q3_K_M),
         "Q2_K" => Ok(QuantType::Q2_K),
         _ => Err(format!("Unknown quant type: {}", s)),
