@@ -14,6 +14,7 @@ pub fn run() {
     unsafe { crate::ffi::profiler_bindings::profiler_init(); }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(ModelState(Mutex::new(None)))
         .manage(RecipeStore(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![

@@ -12,6 +12,14 @@ export const QUANT_TYPES: { value: QuantType; label: string; bitsPerWeight: numb
   { value: 'Q2_K',  label: 'Q2_K',   bitsPerWeight: 2.6,  quality: 'Maximum compression' },
 ];
 
+export function isQuantType(value: string): value is QuantType {
+  return QUANT_TYPES.some(q => q.value === value);
+}
+
+export function toTargetQuant(value: string | null | undefined, fallback: QuantType = 'Q4_K_M'): QuantType {
+  return value && isQuantType(value) ? value : fallback;
+}
+
 // ---- Model ----
 
 export interface ModelMetadata {
@@ -24,16 +32,16 @@ export interface ModelMetadata {
 export interface TensorInfo {
   name: string;
   shape: number[];
-  currentQuant: QuantType;
+  currentQuant: string;
   sizeBytes: number;
   layerIndex: number;
-  layerGroup: 'embedding' | 'attention' | 'output_norm' | 'output';
+  layerGroup: 'embedding' | 'attention' | 'norm' | 'output_norm' | 'output' | 'other';
 }
 
 export interface ModelInfo {
   metadata: ModelMetadata;
   tensors: TensorInfo[];
-  currentUniformQuant: QuantType;
+  currentUniformQuant: string;
   totalSizeBytes: number;
 }
 

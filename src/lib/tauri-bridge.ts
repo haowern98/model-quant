@@ -6,7 +6,7 @@ try {
   const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
   invokeFn = tauriInvoke;
 } catch {
-  invokeFn = (_cmd: string, _args?: Record<string, unknown>) => {
+  invokeFn = () => {
     throw new Error('Tauri bridge not available. Inject mock via setMockInvoke().');
   };
 }

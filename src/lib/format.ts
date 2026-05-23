@@ -16,3 +16,9 @@ export function estQuantSize(shape: number[], bitsPerWeight: number): number {
   const elements = shape.reduce((a, b) => a * b, 1);
   return Math.round(elements * bitsPerWeight / 8);
 }
+
+export function formatTensorName(name: string): string {
+  return name
+    .replace(/^blk\.\d+\./, '')
+    .replace(/^layers\.\d+\./, '');
+}

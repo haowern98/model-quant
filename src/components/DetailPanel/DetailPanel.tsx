@@ -10,14 +10,16 @@ interface DetailPanelProps {
 }
 
 export function DetailPanel({ tensors, assignments, profile, onAssignQuant }: DetailPanelProps) {
+  const title = tensors.length > 0
+    ? `${tensors[0].layerIndex < 0 ? 'Global tensors' : `Layer ${tensors[0].layerIndex}`} - ${tensors.length} tensors`
+    : 'No layer selected';
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1">
         <div className="px-4 py-3 border-b border-border-default">
           <h2 className="font-heading text-base font-semibold text-text-primary uppercase tracking-wider">
-            {tensors.length > 0
-              ? `Layer ${tensors[0].layerIndex} — ${tensors.length} tensors`
-              : 'No layer selected'}
+            {title}
           </h2>
         </div>
         <TensorTable tensors={tensors} assignments={assignments} onAssignQuant={onAssignQuant} />

@@ -1,4 +1,5 @@
 import type { ModelInfo, RecipeState, QuantType, AssignPattern } from '../../src/types';
+import { toTargetQuant } from '../../src/types';
 
 export function createMockBridge() {
   const mockModel: ModelInfo = {
@@ -24,16 +25,16 @@ export function createMockBridge() {
     totalSizeBytes: 4_920_000_000,
   };
 
-  let recipe: RecipeState = {
+  const recipe: RecipeState = {
     id: 'mock-recipe',
     baseModel: 'mock-model.gguf',
-    assignments: mockModel.tensors.map(t => ({ tensorName: t.name, quantType: t.currentQuant })),
+    assignments: mockModel.tensors.map(t => ({ tensorName: t.name, quantType: toTargetQuant(t.currentQuant) })),
     profile: null,
     status: 'draft',
   };
 
   const handlers: Record<string, (args?: Record<string, unknown>) => unknown> = {
-    open_model: (_args) => mockModel,
+    open_model: () => mockModel,
     get_tensors: () => mockModel.tensors,
     assign_quant: (args) => {
       const { tensorNames, quantType } = args!;
@@ -64,7 +65,7 @@ export function createMockBridge() {
       recipe.status = 'draft';
       return recipe;
     },
-    test_recipe: (_args) => ({
+    test_recipe: () => ({
       promptEvalTps: 1247,
       tokenGenTps: 88.3,
       ttftMs: 412,

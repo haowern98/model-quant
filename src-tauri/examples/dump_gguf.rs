@@ -3,21 +3,21 @@ use std::fs::File;
 use std::io::Read;
 
 fn read_string(buf: &[u8], offset: &mut usize) -> String {
-    let len = u64::from_le_bytes(buf[*offset..*offset+8].try_into().unwrap()) as usize;
+    let len = u64::from_le_bytes(buf[*offset..*offset + 8].try_into().unwrap()) as usize;
     *offset += 8;
-    let s = String::from_utf8_lossy(&buf[*offset..*offset+len]).to_string();
+    let s = String::from_utf8_lossy(&buf[*offset..*offset + len]).to_string();
     *offset += len;
     s
 }
 
 fn read_u32(buf: &[u8], offset: &mut usize) -> u32 {
-    let v = u32::from_le_bytes(buf[*offset..*offset+4].try_into().unwrap());
+    let v = u32::from_le_bytes(buf[*offset..*offset + 4].try_into().unwrap());
     *offset += 4;
     v
 }
 
 fn read_u64(buf: &[u8], offset: &mut usize) -> u64 {
-    let v = u64::from_le_bytes(buf[*offset..*offset+8].try_into().unwrap());
+    let v = u64::from_le_bytes(buf[*offset..*offset + 8].try_into().unwrap());
     *offset += 8;
     v
 }
@@ -28,7 +28,9 @@ fn skip_value(buf: &[u8], offset: &mut usize, value_type: u32) {
         2 | 3 => *offset += 2,
         4 | 5 | 6 => *offset += 4,
         10 | 11 | 12 => *offset += 8,
-        8 => { let _ = read_string(buf, offset); }
+        8 => {
+            let _ = read_string(buf, offset);
+        }
         9 => {
             let elem_type = read_u32(buf, offset);
             let count = read_u64(buf, offset) as usize;
@@ -66,13 +68,10 @@ fn main() {
     for i in 0..metadata_count {
         let key = read_string(&buf, &mut offset);
         let value_type = read_u32(&buf, &mut offset);
-        let type_name = ["u8","i8","u16","i16","u32","i32","f32","bool","string","array","u64","i64","f64"].get(value_type as usize).unwrap_or(&"?");
-        match value_type {
-            0..=7 | 10..=12 => { skip_value(&buf, &mut offset, value_type); }
-            8 => { let val = read_string(&buf, &mut offset); }
-            9 => { skip_value(&buf, &mut offset, value_type); }
-            _ => {}
-        }
+        let type_name = ["u8", "i8", "u16", "i16", "u32", "i32", "f32", "bool", "string", "array", "u64", "i64", "f64"]
+            .get(value_type as usize)
+            .unwrap_or(&"?");
+        skip_value(&buf, &mut offset, value_type);
         if i < 5 {
             println!("  [{}] key=\"{}\" type={}", i, key, type_name);
         }
@@ -87,15 +86,16 @@ fn main() {
         for d in 0..n_dims {
             let dim = read_u64(&buf, &mut offset);
             print!("{}", dim);
-            if d + 1 < n_dims { print!(", "); }
+            if d + 1 < n_dims {
+                print!(", ");
+            }
         }
         let ggml_type = read_u32(&buf, &mut offset);
         let tensor_offset_u64 = read_u64(&buf, &mut offset);
         print!("] type={} data_offset={}", ggml_type, tensor_offset_u64);
 
-        // Check what bytes come after
         if i + 1 < tensor_count {
-            let peek = &buf[offset..offset+8];
+            let peek = &buf[offset..offset + 8];
             println!(" next_bytes={:02x?}", peek);
         } else {
             println!();

@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Main window permissions for local model file workflows.","local":true,"windows":["main"],"permissions":["core:default","dialog:default"]}}

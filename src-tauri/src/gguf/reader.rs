@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use super::types::{GgufMetadata, ModelInfo, TensorInfo};
@@ -27,24 +27,23 @@ impl std::fmt::Display for GgufError {
     }
 }
 
-fn read_string(buf: &[u8], offset: &mut usize) -> String {
-    let len = u64::from_le_bytes(buf[*offset..*offset + 8].try_into().unwrap()) as usize;
-    *offset += 8;
-    let s = String::from_utf8_lossy(&buf[*offset..*offset + len]).to_string();
-    *offset += len;
-    s
+fn read_string<R: Read>(reader: &mut R) -> Result<String, GgufError> {
+    let len = read_u64(reader)? as usize;
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
-fn read_u32(buf: &[u8], offset: &mut usize) -> u32 {
-    let v = u32::from_le_bytes(buf[*offset..*offset + 4].try_into().unwrap());
-    *offset += 4;
-    v
+fn read_u32<R: Read>(reader: &mut R) -> Result<u32, GgufError> {
+    let mut buf = [0u8; 4];
+    reader.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
 }
 
-fn read_u64(buf: &[u8], offset: &mut usize) -> u64 {
-    let v = u64::from_le_bytes(buf[*offset..*offset + 8].try_into().unwrap());
-    *offset += 8;
-    v
+fn read_u64<R: Read>(reader: &mut R) -> Result<u64, GgufError> {
+    let mut buf = [0u8; 8];
+    reader.read_exact(&mut buf)?;
+    Ok(u64::from_le_bytes(buf))
 }
 
 fn classify_tensor(name: &str, layer_index: i32) -> &'static str {
@@ -56,6 +55,8 @@ fn classify_tensor(name: &str, layer_index: i32) -> &'static str {
         "output_norm"
     } else if name.contains("norm") && layer_index >= 0 {
         "norm"
+    } else if layer_index < 0 {
+        "other"
     } else {
         "attention"
     }
@@ -77,78 +78,105 @@ fn extract_layer_index(name: &str) -> i32 {
 // GGUF value types per spec
 // 0=u8 1=i8 2=u16 3=i16 4=u32 5=i32 6=f32 7=bool
 // 8=string 9=array 10=u64 11=i64 12=f64
-fn skip_value(buf: &[u8], offset: &mut usize, value_type: u32) {
+fn skip_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<(), GgufError> {
     match value_type {
-        0 | 1 | 7 => *offset += 1,
-        2 | 3 => *offset += 2,
-        4 | 5 | 6 => *offset += 4,
-        10 | 11 | 12 => *offset += 8,
-        8 => { let _ = read_string(buf, offset); }
+        0 | 1 | 7 => { reader.seek(SeekFrom::Current(1))?; }
+        2 | 3 => { reader.seek(SeekFrom::Current(2))?; }
+        4 | 5 | 6 => { reader.seek(SeekFrom::Current(4))?; }
+        10 | 11 | 12 => { reader.seek(SeekFrom::Current(8))?; }
+        8 => { let _ = read_string(reader)?; }
         9 => {
-            let elem_type = read_u32(buf, offset);
-            let count = read_u64(buf, offset) as usize;
+            let elem_type = read_u32(reader)?;
+            let count = read_u64(reader)? as usize;
             for _ in 0..count {
-                skip_value(buf, offset, elem_type);
+                skip_value(reader, elem_type)?;
             }
         }
         _ => {} // unknown type, skip nothing (best effort)
     }
+    Ok(())
 }
 
 fn ggml_type_name(t: u32) -> &'static str {
     match t {
         0 => "F32", 1 => "F16",
-        7 => "Q4_0", 8 => "Q4_1", 10 => "Q8_0",
-        12 => "Q2_K", 14 => "Q3_K_M", 16 => "Q5_K_M",
-        17 => "Q6_K", 18 => "Q4_K_M",
+        2 => "Q4_0", 3 => "Q4_1",
+        6 => "Q5_0", 7 => "Q5_1",
+        8 => "Q8_0", 9 => "Q8_1",
+        10 => "Q2_K", 11 => "Q3_K", 12 => "Q4_K",
+        13 => "Q5_K", 14 => "Q6_K", 15 => "Q8_K",
+        16 => "IQ2_XXS", 17 => "IQ2_XS", 18 => "IQ3_XXS",
+        19 => "IQ1_S", 20 => "IQ4_NL", 21 => "IQ3_S",
+        22 => "IQ2_S", 23 => "IQ4_XS",
+        24 => "I8", 25 => "I16", 26 => "I32", 27 => "I64",
+        28 => "F64", 29 => "IQ1_M", 30 => "BF16",
+        31 => "TQ1_0", 32 => "TQ2_0",
         _ => "unknown",
     }
 }
 
-fn ggml_type_bits(t: u32) -> u32 {
+fn ggml_type_bits(t: u32) -> f32 {
     match t {
-        0 => 32, 1 => 16,
-        7 | 8 | 12 => 4, 10 => 8,
-        14 => 3, 16 => 5, 17 => 6, 18 => 4,
-        _ => 16,
+        0 => 32.0, 1 | 30 => 16.0,
+        2 | 3 => 4.0,
+        6 | 7 => 5.0,
+        8 | 9 | 15 | 24 => 8.0,
+        10 => 2.5625,
+        11 => 3.4375,
+        12 => 4.5,
+        13 => 5.5,
+        14 => 6.5625,
+        16 => 2.0625,
+        17 => 2.3125,
+        18 => 3.0625,
+        19 => 1.5625,
+        20 | 23 => 4.5,
+        21 => 3.4375,
+        22 => 2.5625,
+        25 => 16.0,
+        26 => 32.0,
+        27 | 28 => 64.0,
+        29 => 1.75,
+        31 => 1.6875,
+        32 => 2.625,
+        _ => 16.0,
     }
 }
 
 pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
     let mut file = File::open(path)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
 
-    let mut offset = 0usize;
-
-    let magic = read_u32(&buf, &mut offset);
+    let magic = read_u32(&mut file)?;
     if magic != GGUF_MAGIC {
         return Err(GgufError::InvalidMagic);
     }
 
-    let version = read_u32(&buf, &mut offset);
+    let version = read_u32(&mut file)?;
     if version != 3 && version != 2 {
         return Err(GgufError::UnsupportedVersion(version));
     }
 
-    let tensor_count = read_u64(&buf, &mut offset) as usize;
-    let metadata_kv_count = read_u64(&buf, &mut offset) as usize;
+    let tensor_count = read_u64(&mut file)? as usize;
+    let metadata_kv_count = read_u64(&mut file)? as usize;
 
     let mut model_name = String::new();
     let mut architecture = String::new();
 
     for _ in 0..metadata_kv_count {
-        let key = read_string(&buf, &mut offset);
-        let value_type = read_u32(&buf, &mut offset);
+        let key = read_string(&mut file)?;
+        let value_type = read_u32(&mut file)?;
 
         match key.as_str() {
             "general.name" | "general.architecture" => {
-                if key == "general.name" { model_name = read_string(&buf, &mut offset); }
-                else if key == "general.architecture" { architecture = read_string(&buf, &mut offset); }
-                else { let _ = read_string(&buf, &mut offset); }
+                let value = read_string(&mut file)?;
+                if key == "general.name" {
+                    model_name = value;
+                } else if key == "general.architecture" {
+                    architecture = value;
+                }
             }
             _ => {
-                skip_value(&buf, &mut offset, value_type);
+                skip_value(&mut file, value_type)?;
             }
         }
     }
@@ -157,23 +185,23 @@ pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
     let mut total_params: u64 = 0;
 
     for _ in 0..tensor_count {
-        let name = read_string(&buf, &mut offset);
-        let n_dims = read_u32(&buf, &mut offset) as usize;
+        let name = read_string(&mut file)?;
+        let n_dims = read_u32(&mut file)? as usize;
         let mut shape = Vec::with_capacity(n_dims);
         let mut elements: u64 = 1;
 
         for _ in 0..n_dims {
-            let dim = read_u64(&buf, &mut offset);
+            let dim = read_u64(&mut file)?;
             shape.push(dim);
             elements = elements.saturating_mul(dim);
         }
 
-        let ggml_type = read_u32(&buf, &mut offset);
-        offset += 8; // tensor data offset (u64)
+        let ggml_type = read_u32(&mut file)?;
+        let _tensor_data_offset = read_u64(&mut file)?;
 
         let quant_name = ggml_type_name(ggml_type);
         let bits = ggml_type_bits(ggml_type);
-        let size_bytes = elements.saturating_mul(bits as u64) / 8;
+        let size_bytes = (elements as f64 * bits as f64 / 8.0).ceil() as u64;
 
         total_params = total_params.saturating_add(elements);
 
@@ -192,9 +220,7 @@ pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
 
     tensors.sort_by_key(|t| t.layer_index);
 
-    let current_uniform_quant = tensors.first()
-        .map(|t| t.current_quant.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+    let current_uniform_quant = most_common_quant(&tensors);
 
     let total_size_bytes = tensors.iter().map(|t| t.size_bytes).sum();
 
@@ -209,6 +235,23 @@ pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
         current_uniform_quant,
         total_size_bytes,
     })
+}
+
+fn most_common_quant(tensors: &[TensorInfo]) -> String {
+    let mut counts = std::collections::HashMap::<&str, usize>::new();
+    for tensor in tensors {
+        if matches!(tensor.current_quant.as_str(), "F32" | "F16" | "BF16") {
+            continue;
+        }
+        *counts.entry(&tensor.current_quant).or_default() += 1;
+    }
+
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(quant, _)| quant.to_string())
+        .or_else(|| tensors.first().map(|t| t.current_quant.clone()))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(test)]

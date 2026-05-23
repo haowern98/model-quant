@@ -1,5 +1,5 @@
 import type { QuantType, RecipeProfile } from '../../types';
-import { QUANT_TYPES } from '../../types';
+import { QUANT_TYPES, toTargetQuant } from '../../types';
 import { formatBytes, estQuantSize } from '../../lib/format';
 import type { TensorInfo } from '../../types';
 
@@ -11,7 +11,7 @@ interface ProfilePanelProps {
 
 export function ProfilePanel({ tensors, assignments, profile }: ProfilePanelProps) {
   const totalTargetBytes = tensors.reduce((sum, t) => {
-    const qt = assignments[t.name] ?? t.currentQuant;
+    const qt = assignments[t.name] ?? toTargetQuant(t.currentQuant);
     const bpw = QUANT_TYPES.find(q => q.value === qt)!.bitsPerWeight;
     return sum + estQuantSize(t.shape, bpw);
   }, 0);

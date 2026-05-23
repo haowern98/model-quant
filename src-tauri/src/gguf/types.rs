@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GgufMetadata {
     pub name: String,
     pub architecture: String,
@@ -9,6 +10,7 @@ pub struct GgufMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TensorInfo {
     pub name: String,
     pub shape: Vec<u64>,
@@ -19,6 +21,7 @@ pub struct TensorInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     pub metadata: GgufMetadata,
     pub tensors: Vec<TensorInfo>,

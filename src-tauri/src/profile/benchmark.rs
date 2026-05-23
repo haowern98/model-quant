@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::progress::ProgressEmitter;
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BenchmarkResult {
     pub prompt_eval_tps: f64,
     pub token_gen_tps: f64,

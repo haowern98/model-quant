@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { AppShell } from './components/AppShell';
 import { Toolbar } from './components/Toolbar/Toolbar';
@@ -9,21 +9,22 @@ import { TestResultsModal } from './components/TestResultsModal/TestResultsModal
 import { useModel } from './hooks/useModel';
 import { useRecipe } from './hooks/useRecipe';
 import { useProgress } from './hooks/useProgress';
+import { isTauri } from '@tauri-apps/api/core';
 import { testRecipe, saveRecipe, loadRecipe, exportGguf } from './lib/tauri-bridge';
-import type { BenchmarkResult } from './types';
+import type { BenchmarkResult, RecipeState } from './types';
+import { toTargetQuant } from './types';
 import { setMockInvoke } from './lib/tauri-bridge';
-import { createMockBridge } from '../tests/mocks/tauri-bridge';
 
-// Auto-inject mock bridge when running in browser without Tauri
-if (typeof window !== 'undefined') {
-  try {
-    setMockInvoke(createMockBridge());
-  } catch { /* mock already set */ }
+// Auto-inject the mock bridge only in plain browser runs.
+if (typeof window !== 'undefined' && !isTauri()) {
+  void import('../tests/mocks/tauri-bridge')
+    .then(({ createMockBridge }) => setMockInvoke(createMockBridge()))
+    .catch(() => undefined);
 }
 
 function App() {
-  const { model, modelPath, openModel, getTensorsForLayer } = useModel();
-  const { recipe, initRecipe, assignQuant, assignAll, assignByPattern, setProfile, getAssignments } = useRecipe();
+  const { model, modelPath, error: modelError, openModel, getTensorsForLayer } = useModel();
+  const { recipe, initRecipe, setRecipeState, assignQuant, assignAll, assignByPattern, setProfile, getAssignments } = useRecipe();
   const { progress, running, startOperation, endOperation } = useProgress();
 
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null);
@@ -31,14 +32,14 @@ function App() {
   const [showResults, setShowResults] = useState(false);
 
   const handleOpenModel = useCallback(async () => {
+    let selected: string | null = null;
+
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
+      const dialogResult = await open({
         filters: [{ name: 'GGUF', extensions: ['gguf'] }],
       });
-      if (selected && typeof selected === 'string') {
-        await openModel(selected);
-      }
+      if (dialogResult && typeof dialogResult === 'string') selected = dialogResult;
     } catch {
       const input = document.createElement('input');
       input.type = 'file';
@@ -48,14 +49,17 @@ function App() {
         if (file) await openModel(file.name);
       };
       input.click();
+      return;
     }
+
+    if (selected) await openModel(selected);
   }, [openModel]);
 
-  // When model loads, init recipe
-  if (model && !recipe) {
+  useEffect(() => {
+    if (!model || recipe) return;
     const tensors = model.tensors.map(t => ({ name: t.name, currentQuant: t.currentQuant }));
-    initRecipe(modelPath ?? 'unknown.gguf', tensors.map(t => t.name), tensors[0]?.currentQuant ?? 'Q4_K_M');
-  }
+    initRecipe(modelPath ?? 'unknown.gguf', tensors.map(t => t.name), toTargetQuant(tensors[0]?.currentQuant));
+  }, [model, modelPath, recipe, initRecipe]);
 
   const handleTest = useCallback(async () => {
     if (!recipe) return;
@@ -95,11 +99,11 @@ function App() {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({ filters: [{ name: 'Recipe JSON', extensions: ['json'] }] });
       if (selected && typeof selected === 'string') {
-        const loaded = await loadRecipe(selected);
-        initRecipe(loaded.baseModel, loaded.assignments.map(a => a.tensorName), loaded.assignments[0]?.quantType ?? 'Q4_K_M');
+        const loaded: RecipeState = await loadRecipe(selected);
+        setRecipeState(loaded);
       }
     } catch { /* browser fallback: no-op */ }
-  }, [initRecipe]);
+  }, [setRecipeState]);
 
   const selectedTensors = selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
 
@@ -133,12 +137,19 @@ function App() {
             </div>
           }
           detail={
-            <DetailPanel
-              tensors={selectedTensors}
-              assignments={getAssignments}
-              profile={recipe?.profile ?? null}
-              onAssignQuant={assignQuant}
-            />
+            <div className="h-full flex flex-col">
+              {modelError && (
+                <div className="border-b border-red-500/40 bg-red-950/30 px-4 py-2 text-sm text-red-200">
+                  {modelError}
+                </div>
+              )}
+              <DetailPanel
+                tensors={selectedTensors}
+                assignments={getAssignments}
+                profile={recipe?.profile ?? null}
+                onAssignQuant={assignQuant}
+              />
+            </div>
           }
         />
       </div>

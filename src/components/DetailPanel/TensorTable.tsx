@@ -1,5 +1,5 @@
-import { type QuantType, QUANT_TYPES } from '../../types';
-import { formatBytes, estQuantSize } from '../../lib/format';
+import { type QuantType, QUANT_TYPES, toTargetQuant } from '../../types';
+import { formatBytes, estQuantSize, formatTensorName } from '../../lib/format';
 import type { TensorInfo } from '../../types';
 
 interface TensorTableProps {
@@ -27,12 +27,14 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
         </thead>
         <tbody>
           {tensors.map(t => {
-            const assignedQuant = assignments[t.name] ?? t.currentQuant;
+            const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
             const currentSize = t.sizeBytes;
             const targetSize = estQuantSize(t.shape, QUANT_TYPES.find(q => q.value === assignedQuant)!.bitsPerWeight);
             return (
               <tr key={t.name} className="border-b border-border-default/50 hover:bg-bg-surface-alt/50">
-                <td className="px-4 py-2 font-mono text-text-primary text-xs">{t.name.split('.').pop()}</td>
+                <td className="px-4 py-2 font-mono text-text-primary text-xs" title={t.name}>
+                  {formatTensorName(t.name)}
+                </td>
                 <td className="px-4 py-2 font-mono text-text-muted text-xs">[{t.shape.join(', ')}]</td>
                 <td className="px-4 py-2">
                   <select

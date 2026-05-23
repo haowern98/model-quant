@@ -1,4 +1,5 @@
 import type { TensorInfo } from '../../types';
+import { formatTensorName } from '../../lib/format';
 
 interface LayerTreeProps {
   tensors: TensorInfo[];
@@ -17,15 +18,19 @@ export function LayerTree({ tensors, selectedLayerIndex, onSelectLayer, filterTe
 
   const sorted = [...groups.entries()].sort(([a], [b]) => a - b);
 
-  const groupLabel = (layerIndex: number): string => {
-    if (layerIndex === -2) return 'Output';
-    if (layerIndex === -1) return 'Embedding';
+  const groupLabel = (layerIndex: number, groupTensors: TensorInfo[]): string => {
+    if (layerIndex < 0) {
+      const groups = new Set(groupTensors.map(t => t.layerGroup));
+      if (groups.size === 1 && groups.has('embedding')) return 'Embedding';
+      if (groups.size === 1 && groups.has('output')) return 'Output';
+      return 'Global tensors';
+    }
     return `Layer ${layerIndex}`;
   };
 
   const filtered = sorted.filter(([idx, ts]) => {
     if (!filterText) return true;
-    const label = groupLabel(idx).toLowerCase();
+    const label = groupLabel(idx, ts).toLowerCase();
     return label.includes(filterText.toLowerCase()) ||
       ts.some(t => t.name.toLowerCase().includes(filterText.toLowerCase()));
   });
@@ -42,12 +47,12 @@ export function LayerTree({ tensors, selectedLayerIndex, onSelectLayer, filterTe
                 : 'text-text-secondary hover:bg-bg-surface-alt hover:text-text-primary'
               }`}
           >
-            {groupLabel(layerIndex)}
+            {groupLabel(layerIndex, ts)}
             <span className="text-text-muted text-xs ml-2">({ts.length} tensors)</span>
           </button>
           {selectedLayerIndex === layerIndex && ts.map(t => (
             <div key={t.name} className="ml-4 px-2 py-0.5 text-xs text-text-muted font-mono truncate">
-              {t.name.split('.').pop()}
+              {formatTensorName(t.name)}
             </div>
           ))}
         </div>

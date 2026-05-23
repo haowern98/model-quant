@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProgressEvent {
     pub stage: ProgressStage,
     pub percent: f32,

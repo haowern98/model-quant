@@ -1,18 +1,24 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { RecipeState, QuantType, AssignPattern } from '../types';
+import { toTargetQuant } from '../types';
 import { assignQuant as assignQuantCmd, assignAll as assignAllCmd, assignByPattern as assignByPatternCmd } from '../lib/tauri-bridge';
 
 export function useRecipe() {
   const [recipe, setRecipe] = useState<RecipeState | null>(null);
 
-  const initRecipe = useCallback((modelPath: string, tensorNames: string[], currentQuant: QuantType) => {
+  const initRecipe = useCallback((modelPath: string, tensorNames: string[], currentQuant: string) => {
+    const defaultQuant = toTargetQuant(currentQuant);
     setRecipe({
       id: `${Date.now()}`,
       baseModel: modelPath,
-      assignments: tensorNames.map(name => ({ tensorName: name, quantType: currentQuant })),
+      assignments: tensorNames.map(name => ({ tensorName: name, quantType: defaultQuant })),
       profile: null,
       status: 'draft',
     });
+  }, []);
+
+  const setRecipeState = useCallback((nextRecipe: RecipeState) => {
+    setRecipe(nextRecipe);
   }, []);
 
   const assignQuant = useCallback(async (tensorName: string, quantType: QuantType) => {
@@ -44,5 +50,5 @@ export function useRecipe() {
     return map;
   }, [recipe]);
 
-  return { recipe, initRecipe, assignQuant, assignAll, assignByPattern, setProfile, getAssignments };
+  return { recipe, initRecipe, setRecipeState, assignQuant, assignAll, assignByPattern, setProfile, getAssignments };
 }

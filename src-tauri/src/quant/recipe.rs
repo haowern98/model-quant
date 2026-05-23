@@ -27,12 +27,14 @@ impl QuantType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QuantAssignment {
     pub tensor_name: String,
     pub quant_type: QuantType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecipeProfile {
     pub vram_estimate: f64,
     pub size_saved_vs_q8: f64,
@@ -51,6 +53,7 @@ pub enum RecipeStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecipeState {
     pub id: String,
     pub base_model: String,
