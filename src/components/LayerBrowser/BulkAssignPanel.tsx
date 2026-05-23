@@ -18,7 +18,7 @@ export function BulkAssignPanel({ onAssign, disabled }: BulkAssignPanelProps) {
   };
 
   return (
-    <div className="border-t border-border-default p-3 space-y-2">
+    <div className="shrink-0 border-t border-border-default p-3 space-y-2">
       <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Bulk Assign</h3>
       <div className="space-y-1">
         {PATTERNS.map(p => (

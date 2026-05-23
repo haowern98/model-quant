@@ -21,13 +21,13 @@ export function ProfilePanel({ tensors, assignments, profile }: ProfilePanelProp
   const q4Size = tensors.reduce((sum, t) => sum + estQuantSize(t.shape, 4.8), 0);
 
   const maxSize = Math.max(f16Size, q8Size, totalTargetBytes, q4Size);
-  const barPercent = (size: number) => `${Math.round((size / maxSize) * 100)}%`;
+  const barPercent = (size: number) => `${maxSize > 0 ? Math.round((size / maxSize) * 100) : 0}%`;
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="h-full p-3 space-y-3 overflow-hidden">
       <h3 className="font-heading text-sm font-semibold text-text-primary uppercase tracking-wider">Size Profile</h3>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {[
           { label: 'FP16', size: f16Size, color: 'bg-text-muted' },
           { label: 'Q8_0', size: q8Size, color: 'bg-text-secondary' },
@@ -36,7 +36,7 @@ export function ProfilePanel({ tensors, assignments, profile }: ProfilePanelProp
         ].map(({ label, size, color }) => (
           <div key={label} className="flex items-center gap-2">
             <span className="text-xs text-text-muted w-16 text-right font-mono">{label}</span>
-            <div className="flex-1 bg-bg-surface-alt rounded-full h-3 overflow-hidden">
+            <div className="flex-1 bg-bg-surface-alt rounded-full h-2.5 overflow-hidden">
               <div
                 className={`h-full rounded-full ${color} transition-all duration-300`}
                 style={{ width: barPercent(size) }}
@@ -48,7 +48,7 @@ export function ProfilePanel({ tensors, assignments, profile }: ProfilePanelProp
       </div>
 
       {profile && (
-        <div className="bg-bg-surface-alt rounded p-3 space-y-1 text-sm">
+        <div className="bg-bg-surface-alt rounded p-2 space-y-1 text-xs">
           <div className="flex justify-between">
             <span className="text-text-muted">VRAM estimate</span>
             <span className="text-text-primary font-mono">{formatBytes(profile.vramEstimate * 1024 * 1024)}</span>

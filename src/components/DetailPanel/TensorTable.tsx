@@ -14,9 +14,9 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="min-w-full overflow-x-auto">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="sticky top-0 z-10 bg-bg-primary">
           <tr className="border-b border-border-default text-text-muted text-xs uppercase tracking-wider">
             <th className="text-left px-4 py-2 font-medium">Tensor</th>
             <th className="text-left px-4 py-2 font-medium">Shape</th>

@@ -44,10 +44,13 @@ function App() {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = '.gguf';
+      input.style.display = 'none';
       input.onchange = async (e) => {
         const file = (e.target as HTMLInputElement).files?.[0];
         if (file) await openModel(file.name);
+        input.remove();
       };
+      document.body.appendChild(input);
       input.click();
       return;
     }
@@ -108,9 +111,9 @@ function App() {
   const selectedTensors = selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
 
   return (
-    <div className="h-screen flex flex-col bg-bg-primary">
+    <div className="h-screen min-h-0 overflow-hidden flex flex-col bg-bg-primary">
       <TitleBar />
-      <div className="flex-1">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <AppShell
           toolbar={
             <Toolbar
@@ -127,7 +130,7 @@ function App() {
             />
           }
           sidebar={
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col h-full min-h-0">
               <LayerBrowser
                 tensors={model?.tensors ?? []}
                 selectedLayerIndex={selectedLayerIndex}
@@ -137,18 +140,20 @@ function App() {
             </div>
           }
           detail={
-            <div className="h-full flex flex-col">
+            <div className="h-full min-h-0 flex flex-col">
               {modelError && (
-                <div className="border-b border-red-500/40 bg-red-950/30 px-4 py-2 text-sm text-red-200">
+                <div className="shrink-0 border-b border-red-500/40 bg-red-950/30 px-4 py-2 text-sm text-red-200">
                   {modelError}
                 </div>
               )}
-              <DetailPanel
-                tensors={selectedTensors}
-                assignments={getAssignments}
-                profile={recipe?.profile ?? null}
-                onAssignQuant={assignQuant}
-              />
+              <div className="flex-1 min-h-0">
+                <DetailPanel
+                  tensors={selectedTensors}
+                  assignments={getAssignments}
+                  profile={recipe?.profile ?? null}
+                  onAssignQuant={assignQuant}
+                />
+              </div>
             </div>
           }
         />

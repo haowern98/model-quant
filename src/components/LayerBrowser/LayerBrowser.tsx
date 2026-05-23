@@ -13,7 +13,7 @@ export function LayerBrowser({ tensors, selectedLayerIndex, onSelectLayer }: Lay
   const [filterText, setFilterText] = useState('');
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <SearchBar value={filterText} onChange={setFilterText} />
       <LayerTree
         tensors={tensors}

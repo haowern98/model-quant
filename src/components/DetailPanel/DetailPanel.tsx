@@ -15,16 +15,18 @@ export function DetailPanel({ tensors, assignments, profile, onAssignQuant }: De
     : 'No layer selected';
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex-1">
-        <div className="px-4 py-3 border-b border-border-default">
+    <div className="h-full min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="shrink-0 px-4 py-3 border-b border-border-default">
           <h2 className="font-heading text-base font-semibold text-text-primary uppercase tracking-wider">
             {title}
           </h2>
         </div>
-        <TensorTable tensors={tensors} assignments={assignments} onAssignQuant={onAssignQuant} />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <TensorTable tensors={tensors} assignments={assignments} onAssignQuant={onAssignQuant} />
+        </div>
       </div>
-      <div className="border-t border-border-default">
+      <div className="shrink-0 h-44 border-t border-border-default bg-bg-primary">
         <ProfilePanel tensors={tensors} assignments={assignments} profile={profile} />
       </div>
     </div>

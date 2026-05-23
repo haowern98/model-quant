@@ -36,7 +36,7 @@ export function LayerTree({ tensors, selectedLayerIndex, onSelectLayer, filterTe
   });
 
   return (
-    <div className="flex-1 overflow-y-auto px-2 py-1">
+    <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1">
       {filtered.map(([layerIndex, ts]) => (
         <div key={layerIndex} className="mb-0.5">
           <button
