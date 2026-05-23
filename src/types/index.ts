@@ -1,8 +1,9 @@
 // ---- Quantization Types ----
 
-export type QuantType = 'F16' | 'Q8_0' | 'Q6_K' | 'Q5_K_M' | 'Q4_K_M' | 'Q3_K_M' | 'Q2_K';
+export type QuantType = 'BF16' | 'F16' | 'Q8_0' | 'Q6_K' | 'Q5_K_M' | 'Q4_K_M' | 'Q3_K_M' | 'Q2_K';
 
 export const QUANT_TYPES: { value: QuantType; label: string; bitsPerWeight: number; quality: string }[] = [
+  { value: 'BF16',  label: 'BF16',   bitsPerWeight: 16.0, quality: 'Reference (brain float 16)' },
   { value: 'F16',   label: 'F16',    bitsPerWeight: 16.0, quality: 'Reference (no quant)' },
   { value: 'Q8_0',  label: 'Q8_0',   bitsPerWeight: 8.0,  quality: 'Near-lossless' },
   { value: 'Q6_K',  label: 'Q6_K',   bitsPerWeight: 6.6,  quality: 'Very high quality' },

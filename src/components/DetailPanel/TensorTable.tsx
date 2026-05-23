@@ -28,6 +28,10 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
         <tbody>
           {tensors.map(t => {
             const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
+            const currentQuantOption = QUANT_TYPES.find(q => q.value === t.currentQuant);
+            const quantOptions = currentQuantOption
+              ? QUANT_TYPES
+              : [{ value: t.currentQuant, label: t.currentQuant }, ...QUANT_TYPES];
             const currentSize = t.sizeBytes;
             const targetSize = estQuantSize(t.shape, QUANT_TYPES.find(q => q.value === assignedQuant)!.bitsPerWeight);
             return (
@@ -38,12 +42,12 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
                 <td className="px-4 py-2 font-mono text-text-muted text-xs">[{t.shape.join(', ')}]</td>
                 <td className="px-4 py-2">
                   <select
-                    value={assignedQuant}
+                    value={t.currentQuant}
                     onChange={e => onAssignQuant(t.name, e.target.value as QuantType)}
                     className="bg-bg-surface-alt border border-border-default rounded px-1 py-0.5 text-xs text-text-primary
                                focus:outline-none focus:border-accent-copper font-mono"
                   >
-                    {QUANT_TYPES.map(q => (
+                    {quantOptions.map(q => (
                       <option key={q.value} value={q.value}>{q.label}</option>
                     ))}
                   </select>
