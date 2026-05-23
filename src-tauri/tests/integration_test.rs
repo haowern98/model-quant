@@ -66,3 +66,50 @@ fn test_estimate_quantized_size() {
     assert!(q4_size < f16_size);
     assert!(q4_size < q8_size);
 }
+
+#[test]
+fn test_parse_real_gguf_gemma_4b() {
+    let path = std::path::Path::new(
+        r"C:\Users\Wu Family Computer\.lmstudio\models\lmstudio-community\gemma-3-4b-it-GGUF\gemma-3-4b-it-Q4_K_M.gguf"
+    );
+    if !path.exists() {
+        eprintln!("Skipping: file not found at {}", path.display());
+        return;
+    }
+
+    let result = parse_gguf(path);
+    match result {
+        Err(e) => {
+            panic!("Parse failed: {}", e);
+        }
+        Ok(model) => {
+            println!("=== METADATA ===");
+            println!("  name:         {}", model.metadata.name);
+            println!("  architecture: {}", model.metadata.architecture);
+            println!("  total params: {}", model.metadata.total_params);
+            println!("  FP16 size:    {} MB", model.metadata.total_size_fp16 / 1_048_576);
+
+            println!("\n=== TENSORS (first 20) ===");
+            for t in model.tensors.iter().take(20) {
+                println!("  {:60} layer={:4} group={:15} quant={:6} shape={:?} size={}",
+                    t.name, t.layer_index, t.layer_group, t.current_quant, t.shape, t.size_bytes);
+            }
+
+            println!("\n  ... {} total tensors", model.tensors.len());
+
+            println!("\n=== LAYER DISTRIBUTION ===");
+            let mut groups: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+            for t in &model.tensors {
+                *groups.entry(t.layer_index).or_default() += 1;
+            }
+            let mut sorted: Vec<_> = groups.into_iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            for (layer_idx, count) in sorted {
+                println!("  layer index {:4}: {} tensors", layer_idx, count);
+            }
+
+            assert!(model.tensors.len() > 0, "should have tensors");
+            assert!(!model.metadata.architecture.is_empty(), "should have architecture");
+        }
+    }
+}

@@ -48,12 +48,14 @@ fn read_u64(buf: &[u8], offset: &mut usize) -> u64 {
 }
 
 fn classify_tensor(name: &str, layer_index: i32) -> &'static str {
-    if name.contains("embedding") || name.contains("tok_embeddings") {
+    if name.contains("embed") || name.contains("tok_embd") || name.contains("token_embd") {
         "embedding"
-    } else if name.contains("output_norm") || name.contains("norm") {
-        "output_norm"
-    } else if name.contains("output") && layer_index == -1 {
+    } else if name.contains("output.weight") && layer_index == -1 {
         "output"
+    } else if name.contains("output_norm") || name.contains("final_norm") {
+        "output_norm"
+    } else if name.contains("norm") && layer_index >= 0 {
+        "norm"
     } else {
         "attention"
     }
@@ -70,6 +72,27 @@ fn extract_layer_index(name: &str) -> i32 {
         }
     }
     -1
+}
+
+// GGUF value types per spec
+// 0=u8 1=i8 2=u16 3=i16 4=u32 5=i32 6=f32 7=bool
+// 8=string 9=array 10=u64 11=i64 12=f64
+fn skip_value(buf: &[u8], offset: &mut usize, value_type: u32) {
+    match value_type {
+        0 | 1 | 7 => *offset += 1,
+        2 | 3 => *offset += 2,
+        4 | 5 | 6 => *offset += 4,
+        10 | 11 | 12 => *offset += 8,
+        8 => { let _ = read_string(buf, offset); }
+        9 => {
+            let elem_type = read_u32(buf, offset);
+            let count = read_u64(buf, offset) as usize;
+            for _ in 0..count {
+                skip_value(buf, offset, elem_type);
+            }
+        }
+        _ => {} // unknown type, skip nothing (best effort)
+    }
 }
 
 fn ggml_type_name(t: u32) -> &'static str {
@@ -125,14 +148,7 @@ pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
                 else { let _ = read_string(&buf, &mut offset); }
             }
             _ => {
-                match value_type {
-                    0..=7 => { offset += 1; }
-                    8 | 9 => { offset += 2; }
-                    10 | 11 => { offset += 4; }
-                    12 | 13 | 14 => { offset += 8; }
-                    15 | 16 => { let _ = read_string(&buf, &mut offset); }
-                    _ => {}
-                }
+                skip_value(&buf, &mut offset, value_type);
             }
         }
     }
@@ -153,7 +169,7 @@ pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
         }
 
         let ggml_type = read_u32(&buf, &mut offset);
-        offset += 4; // tensor data offset
+        offset += 8; // tensor data offset (u64)
 
         let quant_name = ggml_type_name(ggml_type);
         let bits = ggml_type_bits(ggml_type);
