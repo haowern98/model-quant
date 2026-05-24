@@ -3,7 +3,7 @@ use tauri::State;
 
 use crate::commands::model::ModelState;
 use crate::commands::quant::RecipeStore;
-use crate::profile::benchmark::{run_benchmark, BenchmarkResult};
+use crate::profile::benchmark::{run_native_baseline_benchmark, BenchmarkResult};
 use crate::progress::ProgressEmitter;
 use crate::quant::recipe::{RecipeState, RecipeStatus};
 
@@ -187,20 +187,17 @@ pub async fn test_recipe(
 ) -> Result<BenchmarkResult, String> {
     let progress = ProgressEmitter::new(app.clone());
 
-    progress.requantizing(0.0, "starting...");
     let source = PathBuf::from(&recipe.base_model);
-    let temp_path = std::env::temp_dir().join("model-surgery-temp.gguf");
+    if !source.exists() {
+        return Err(format!("Source model not found: {}", recipe.base_model));
+    }
 
-    crate::quant::engine::apply_recipe_stub(&source, &temp_path, &recipe)
-        .map_err(|e| e.to_string())?;
-    progress.requantizing(1.0, "done");
+    let analysis = analyze_recipe_targets(&source, &recipe)?;
+    validate_recipe_analysis(&analysis)?;
 
-    progress.writing(0.5, "temp.gguf");
-    progress.writing(1.0, "done");
-
-    let result = run_benchmark(&temp_path, prompt_tokens, &progress)?;
-
-    let _ = std::fs::remove_file(&temp_path);
+    progress.requantizing(1.0, "skipped");
+    progress.writing(1.0, "no temporary GGUF written");
+    let result = run_native_baseline_benchmark(&source, prompt_tokens, &progress)?;
 
     {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -214,4 +211,67 @@ pub async fn test_recipe(
     }
 
     Ok(result)
+}
+
+fn analyze_recipe_targets(
+    source: &PathBuf,
+    recipe: &RecipeState,
+) -> Result<crate::ffi::runtime_bindings::MsRecipeAnalysis, String> {
+    let targets = recipe
+        .assignments
+        .iter()
+        .map(|assignment| {
+            (
+                assignment.tensor_name.clone(),
+                quant_type_name(&assignment.quant_type).to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    crate::ffi::runtime_bindings::analyze_recipe(&source.to_string_lossy(), &targets)
+}
+
+fn validate_recipe_analysis(
+    analysis: &crate::ffi::runtime_bindings::MsRecipeAnalysis,
+) -> Result<(), String> {
+    if analysis.missing_count > 0 || analysis.unknown_quant_count > 0 {
+        return Err(format!(
+            "Recipe preflight failed: {} missing tensor(s), {} unknown quant target(s).",
+            analysis.missing_count, analysis.unknown_quant_count
+        ));
+    }
+
+    if analysis.changed_count > 0 {
+        return Err(format!(
+            "Recipe preflight found {} changed tensor target(s). Estimated target size is {:.2} GB versus current {:.2} GB, but in-memory quant override benchmarking is not implemented yet.",
+            analysis.changed_count,
+            analysis.estimated_target_size_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
+            analysis.current_size_bytes as f64 / 1024.0 / 1024.0 / 1024.0
+        ));
+    }
+
+    if analysis.unsupported_count > 0 {
+        return Err(format!(
+            "Recipe preflight found {} unsupported tensor conversion(s).",
+            analysis.unsupported_count
+        ));
+    }
+
+    Ok(())
+}
+
+fn quant_type_name(quant_type: &crate::quant::recipe::QuantType) -> &'static str {
+    match quant_type {
+        crate::quant::recipe::QuantType::F32 => "F32",
+        crate::quant::recipe::QuantType::BF16 => "BF16",
+        crate::quant::recipe::QuantType::F16 => "F16",
+        crate::quant::recipe::QuantType::Q8_0 => "Q8_0",
+        crate::quant::recipe::QuantType::Q6_K => "Q6_K",
+        crate::quant::recipe::QuantType::Q5_K => "Q5_K",
+        crate::quant::recipe::QuantType::Q5_K_M => "Q5_K_M",
+        crate::quant::recipe::QuantType::Q4_K => "Q4_K",
+        crate::quant::recipe::QuantType::Q4_K_M => "Q4_K_M",
+        crate::quant::recipe::QuantType::Q3_K => "Q3_K",
+        crate::quant::recipe::QuantType::Q3_K_M => "Q3_K_M",
+        crate::quant::recipe::QuantType::Q2_K => "Q2_K",
+    }
 }

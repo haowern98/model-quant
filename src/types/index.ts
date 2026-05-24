@@ -104,6 +104,12 @@ export interface BenchmarkResult {
   vramAllocatedMb: number;
   diskSizeMb: number;
   elapsedMs: number;
+  loadMs: number;
+  testMode: string;
+  statusMessage: string;
+  nativeRuntime: string | null;
+  modelTensorCount: number | null;
+  modelMetadataCount: number | null;
 }
 
 // ---- Bulk Assign ----

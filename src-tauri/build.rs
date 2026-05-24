@@ -22,26 +22,91 @@ fn main() {
             .compile("profiler");
     }
 
-    // Compile llama.cpp as static library (requires git submodule)
-    let llama_dir = std::path::Path::new("llama-cpp");
-    if llama_dir.exists() {
-        cc::Build::new()
-            .cpp(true)
-            .files(&[
-                llama_dir.join("ggml.c"),
-                llama_dir.join("ggml-alloc.c"),
-                llama_dir.join("ggml-backend.c"),
-                llama_dir.join("ggml-quants.c"),
-                llama_dir.join("llama.cpp"),
-            ])
-            .include(llama_dir)
-            .flag_if_supported("-std=c++11")
-            .flag_if_supported("-pthread")
-            .compile("llama");
-
-        println!("cargo:rerun-if-changed=llama-cpp/llama.h");
-        println!("cargo:rerun-if-changed=llama-cpp/llama.cpp");
-    }
+    link_native_runtime();
 
     tauri_build::build()
+}
+
+fn link_native_runtime() {
+    use std::path::{Path, PathBuf};
+
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let repo_dir = manifest_dir
+        .parent()
+        .expect("src-tauri should live under the repository root");
+    let native_build_dir = repo_dir.join("native").join("cpp").join("build");
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let native_profile = if profile == "release" { "Release" } else { "Debug" };
+
+    let mut runtime_dir = native_build_dir
+        .join("model_surgery_runtime")
+        .join(native_profile);
+    let mut llama_bin_dir = native_build_dir.join("bin").join(native_profile);
+
+    if !runtime_dir.join("model_surgery_runtime.lib").exists() {
+        runtime_dir = native_build_dir.join("model_surgery_runtime").join("Release");
+        llama_bin_dir = native_build_dir.join("bin").join("Release");
+    }
+
+    if !runtime_dir.join("model_surgery_runtime.lib").exists() {
+        panic!(
+            "native runtime import library not found; build native/cpp first with CMake"
+        );
+    }
+
+    println!("cargo:rustc-link-search=native={}", runtime_dir.display());
+    println!("cargo:rustc-link-lib=dylib=model_surgery_runtime");
+    println!("cargo:rerun-if-changed={}", repo_dir.join("native/cpp/model_surgery_runtime/include/model_surgery_runtime.h").display());
+
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let target_profile_dir = out_dir
+        .ancestors()
+        .nth(3)
+        .expect("OUT_DIR should be inside target/<profile>/build");
+
+    copy_dll(&runtime_dir.join("model_surgery_runtime.dll"), target_profile_dir);
+    copy_dll(&llama_bin_dir.join("llama.dll"), target_profile_dir);
+    copy_dll(&llama_bin_dir.join("ggml.dll"), target_profile_dir);
+    copy_all_matching_dlls(&llama_bin_dir, "ggml", target_profile_dir);
+
+    if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
+        let cuda_bin = PathBuf::from(cuda_path).join("bin");
+        for dll in ["cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"] {
+            let source = cuda_bin.join(dll);
+            if source.exists() {
+                copy_dll(&source, target_profile_dir);
+            }
+        }
+    }
+
+    fn copy_dll(source: &Path, target_dir: &Path) {
+        if !source.exists() {
+            panic!("required native DLL not found: {}", source.display());
+        }
+        let dest = target_dir.join(source.file_name().expect("DLL should have a file name"));
+        std::fs::copy(source, &dest).unwrap_or_else(|err| {
+            panic!(
+                "failed to copy native DLL {} to {}: {}",
+                source.display(),
+                dest.display(),
+                err
+            )
+        });
+    }
+
+    fn copy_all_matching_dlls(source_dir: &Path, prefix: &str, target_dir: &Path) {
+        let entries = std::fs::read_dir(source_dir).unwrap_or_else(|err| {
+            panic!("failed to read native DLL directory {}: {}", source_dir.display(), err)
+        });
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if file_name.starts_with(prefix) && file_name.ends_with(".dll") {
+                copy_dll(&path, target_dir);
+            }
+        }
+    }
 }

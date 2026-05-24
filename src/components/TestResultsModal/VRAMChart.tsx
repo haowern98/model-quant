@@ -5,7 +5,7 @@ interface VRAMChartProps {
 }
 
 export function VRAMChart({ result }: VRAMChartProps) {
-  const max = Math.max(result.vramPeakMb, result.vramAllocatedMb);
+  const max = Math.max(result.vramPeakMb, result.vramAllocatedMb, 1);
   const peakPct = `${Math.round((result.vramPeakMb / max) * 100)}%`;
   const allocPct = `${Math.round((result.vramAllocatedMb / max) * 100)}%`;
 

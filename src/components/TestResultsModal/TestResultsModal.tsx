@@ -13,7 +13,9 @@ interface TestResultsModalProps {
 export function TestResultsModal({ result, onSave, onExport, onDiscard }: TestResultsModalProps) {
   if (!result) return null;
 
-  const passed = result.tokenGenTps > 0;
+  const isNativeSmoke = result.testMode === 'native_runtime_smoke';
+  const isNativeBaseline = result.testMode === 'native_baseline';
+  const passed = isNativeSmoke || isNativeBaseline || result.tokenGenTps > 0;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
@@ -25,8 +27,15 @@ export function TestResultsModal({ result, onSave, onExport, onDiscard }: TestRe
           <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
             passed ? 'bg-accent-signal/20 text-accent-signal' : 'bg-accent-solder/20 text-accent-solder'
           }`}>
-            {passed ? 'PASS' : 'FAIL'} {result.elapsedMs / 1000}s
+            {isNativeSmoke || isNativeBaseline ? 'NATIVE OK' : passed ? 'PASS' : 'FAIL'} {result.elapsedMs / 1000}s
           </span>
+        </div>
+
+        <div className="px-4 pt-4 text-xs text-text-muted">
+          <p>{result.statusMessage}</p>
+          {result.nativeRuntime && (
+            <p className="mt-2 font-mono break-words">{result.nativeRuntime}</p>
+          )}
         </div>
 
         <div className="p-4 grid grid-cols-2 gap-6">

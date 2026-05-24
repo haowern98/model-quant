@@ -71,9 +71,10 @@ function App() {
       const result = await testRecipe(recipe, 512);
       setBenchmarkResult(result);
       setShowResults(true);
+      setAppError(null);
       setProfile({ vramEstimate: result.vramAllocatedMb, sizeSavedVsQ8: 0 });
     } catch (e) {
-      console.error('Benchmark failed:', e);
+      setAppError((e as Error).message);
     } finally {
       endOperation();
     }

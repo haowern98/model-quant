@@ -15,6 +15,14 @@ dist-ssr
 # Rust
 src-tauri/target/
 
+# Native C++ build outputs
+native/cpp/build/
+
+# Local UI captures and generated assets
+.playwright-mcp/
+src/assets/
+test-results/
+
 # Local model downloads and Hugging Face cache
 models/
 *.gguf

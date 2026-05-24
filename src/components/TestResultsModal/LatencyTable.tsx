@@ -22,9 +22,19 @@ export function LatencyTable({ result }: LatencyTableProps) {
           <span className="font-mono text-text-primary">{result.ttftMs.toFixed(0)} ms</span>
         </div>
         <div className="flex justify-between">
+          <span className="text-text-muted">Load</span>
+          <span className="font-mono text-text-primary">{(result.loadMs / 1000).toFixed(1)}s</span>
+        </div>
+        <div className="flex justify-between">
           <span className="text-text-muted">Total elapsed</span>
           <span className="font-mono text-text-primary">{(result.elapsedMs / 1000).toFixed(1)}s</span>
         </div>
+        {result.modelTensorCount !== null && (
+          <div className="flex justify-between">
+            <span className="text-text-muted">Tensors</span>
+            <span className="font-mono text-text-primary">{result.modelTensorCount}</span>
+          </div>
+        )}
       </div>
     </div>
   );
