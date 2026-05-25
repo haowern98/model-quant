@@ -5,6 +5,7 @@
 int main(int argc, char ** argv) {
     std::cout << ms_runtime_version() << "\n";
     std::cout << ms_runtime_llama_system_info() << "\n";
+    std::cout.flush();
 
     if (argc < 2) {
         return 0;
@@ -24,6 +25,7 @@ int main(int argc, char ** argv) {
         << " alignment=" << summary.alignment
         << " data_offset=" << summary.data_offset
         << "\n";
+    std::cout.flush();
 
     ms_recipe_analysis analysis = {};
     const int32_t analysis_result = ms_runtime_analyze_recipe(argv[1], nullptr, 0, &analysis);
@@ -36,6 +38,7 @@ int main(int argc, char ** argv) {
         << " changed=" << analysis.changed_count
         << " unsupported=" << analysis.unsupported_count
         << "\n";
+    std::cout.flush();
 
     ms_baseline_benchmark benchmark = {};
     const int32_t bench_result = ms_runtime_benchmark_baseline(
@@ -55,6 +58,27 @@ int main(int argc, char ** argv) {
         << " prompt_tokens=" << benchmark.prompt_tokens
         << " generated_tokens=" << benchmark.generated_tokens
         << "\n";
+    std::cout.flush();
+
+    ms_baseline_benchmark user_copy_benchmark = {};
+    const int32_t user_copy_result = ms_runtime_benchmark_user_copy(
+        argv[1],
+        "The capital of France is",
+        8,
+        &user_copy_benchmark);
+    if (user_copy_result != 0) {
+        std::cerr << ms_runtime_last_error() << "\n";
+        return 1;
+    }
+
+    std::cout
+        << "user_copy_load_ms=" << user_copy_benchmark.load_ms
+        << " user_copy_prompt_tps=" << user_copy_benchmark.prompt_eval_tps
+        << " user_copy_gen_tps=" << user_copy_benchmark.token_gen_tps
+        << " user_copy_prompt_tokens=" << user_copy_benchmark.prompt_tokens
+        << " user_copy_generated_tokens=" << user_copy_benchmark.generated_tokens
+        << "\n";
+    std::cout.flush();
 
     return 0;
 }

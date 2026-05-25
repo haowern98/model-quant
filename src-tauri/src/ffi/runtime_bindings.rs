@@ -62,6 +62,20 @@ extern "C" {
         max_tokens: u32,
         out_benchmark: *mut MsBaselineBenchmark,
     ) -> c_int;
+    fn ms_runtime_benchmark_user_copy(
+        path: *const c_char,
+        prompt: *const c_char,
+        max_tokens: u32,
+        out_benchmark: *mut MsBaselineBenchmark,
+    ) -> c_int;
+    fn ms_runtime_benchmark_recipe(
+        path: *const c_char,
+        targets: *const MsRecipeTensorTarget,
+        target_count: u64,
+        prompt: *const c_char,
+        max_tokens: u32,
+        out_benchmark: *mut MsBaselineBenchmark,
+    ) -> c_int;
 }
 
 pub fn runtime_version() -> String {
@@ -157,6 +171,93 @@ pub fn benchmark_baseline(
     let result = unsafe {
         ms_runtime_benchmark_baseline(
             c_path.as_ptr(),
+            c_prompt.as_ptr(),
+            max_tokens,
+            &mut benchmark,
+        )
+    };
+    if result == 0 {
+        Ok(benchmark)
+    } else {
+        Err(unsafe { c_string(ms_runtime_last_error()) })
+    }
+}
+
+pub fn benchmark_user_copy(
+    path: &str,
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<MsBaselineBenchmark, String> {
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_prompt = CString::new(prompt)
+        .map_err(|_| "benchmark prompt contains an interior NUL byte".to_string())?;
+    let mut benchmark = MsBaselineBenchmark {
+        load_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
+        prompt_eval_tps: 0.0,
+        token_gen_tps: 0.0,
+        ttft_ms: 0.0,
+        prompt_tokens: 0,
+        generated_tokens: 0,
+    };
+
+    let result = unsafe {
+        ms_runtime_benchmark_user_copy(
+            c_path.as_ptr(),
+            c_prompt.as_ptr(),
+            max_tokens,
+            &mut benchmark,
+        )
+    };
+    if result == 0 {
+        Ok(benchmark)
+    } else {
+        Err(unsafe { c_string(ms_runtime_last_error()) })
+    }
+}
+
+pub fn benchmark_recipe(
+    path: &str,
+    targets: &[(String, String)],
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<MsBaselineBenchmark, String> {
+    let c_path = CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_prompt = CString::new(prompt).map_err(|_| "benchmark prompt contains an interior NUL byte".to_string())?;
+    let c_names = targets
+        .iter()
+        .map(|(name, _)| CString::new(name.as_str()).map_err(|_| format!("tensor name contains an interior NUL byte: {}", name)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let c_quants = targets
+        .iter()
+        .map(|(_, quant)| CString::new(quant.as_str()).map_err(|_| format!("quant type contains an interior NUL byte: {}", quant)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let native_targets = c_names
+        .iter()
+        .zip(c_quants.iter())
+        .map(|(name, quant)| MsRecipeTensorTarget {
+            name: name.as_ptr(),
+            target_quant: quant.as_ptr(),
+        })
+        .collect::<Vec<_>>();
+    let mut benchmark = MsBaselineBenchmark {
+        load_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
+        prompt_eval_tps: 0.0,
+        token_gen_tps: 0.0,
+        ttft_ms: 0.0,
+        prompt_tokens: 0,
+        generated_tokens: 0,
+    };
+
+    let result = unsafe {
+        ms_runtime_benchmark_recipe(
+            c_path.as_ptr(),
+            native_targets.as_ptr(),
+            native_targets.len() as u64,
             c_prompt.as_ptr(),
             max_tokens,
             &mut benchmark,

@@ -64,6 +64,18 @@ MS_RUNTIME_API int32_t ms_runtime_benchmark_baseline(
     const char * prompt,
     uint32_t max_tokens,
     ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_benchmark_user_copy(
+    const char * path,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_benchmark_recipe(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark);
 
 #ifdef __cplusplus
 }

@@ -127,6 +127,91 @@ pub fn run_native_baseline_benchmark(
     max_tokens: u32,
     progress: &ProgressEmitter,
 ) -> Result<BenchmarkResult, String> {
+    run_native_inference_benchmark(
+        gguf_path,
+        max_tokens,
+        progress,
+        "Loading GGUF with native llama.cpp...",
+        "Native baseline inference complete",
+        "native_baseline",
+        |path, prompt, max_tokens| {
+            crate::ffi::runtime_bindings::benchmark_baseline(path, prompt, max_tokens)
+        },
+        |summary, benchmark| {
+            format!(
+                "Native llama.cpp baseline loaded GGUF v{} with {} tensors, evaluated {} prompt tokens, and generated {} tokens. Recipe quant overrides are not active for this run.",
+                summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
+            )
+        },
+    )
+}
+
+pub fn run_native_user_copy_benchmark(
+    gguf_path: &PathBuf,
+    max_tokens: u32,
+    progress: &ProgressEmitter,
+) -> Result<BenchmarkResult, String> {
+    run_native_inference_benchmark(
+        gguf_path,
+        max_tokens,
+        progress,
+        "Loading GGUF through native user-model path...",
+        "Native user-model inference complete",
+        "native_user_copy",
+        |path, prompt, max_tokens| {
+            crate::ffi::runtime_bindings::benchmark_user_copy(path, prompt, max_tokens)
+        },
+        |summary, benchmark| {
+            format!(
+                "Native llama.cpp user-model path copied GGUF v{} with {} tensors into backend buffers, evaluated {} prompt tokens, and generated {} tokens. Changed tensor conversion is not active for this run.",
+                summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
+            )
+        },
+    )
+}
+
+pub fn run_native_recipe_benchmark(
+    gguf_path: &PathBuf,
+    targets: &[(String, String)],
+    max_tokens: u32,
+    progress: &ProgressEmitter,
+) -> Result<BenchmarkResult, String> {
+    run_native_inference_benchmark(
+        gguf_path,
+        max_tokens,
+        progress,
+        "Loading GGUF through native recipe path...",
+        "Native recipe inference complete",
+        "native_recipe_phase1",
+        |path, prompt, max_tokens| {
+            crate::ffi::runtime_bindings::benchmark_recipe(path, targets, prompt, max_tokens)
+        },
+        |summary, benchmark| {
+            format!(
+                "Native llama.cpp recipe path validated {} tensor target(s), copied unchanged tensors from GGUF v{} into backend buffers, evaluated {} prompt tokens, and generated {} tokens. Changed tensor conversion is not active for this run.",
+                targets.len(), summary.version, benchmark.prompt_tokens, benchmark.generated_tokens
+            )
+        },
+    )
+}
+
+fn run_native_inference_benchmark(
+    gguf_path: &PathBuf,
+    max_tokens: u32,
+    progress: &ProgressEmitter,
+    loading_message: &str,
+    complete_message: &str,
+    test_mode: &str,
+    run_benchmark: impl FnOnce(
+        &str,
+        &str,
+        u32,
+    ) -> Result<crate::ffi::runtime_bindings::MsBaselineBenchmark, String>,
+    status_message: impl FnOnce(
+        &crate::ffi::runtime_bindings::MsGgufSummary,
+        &crate::ffi::runtime_bindings::MsBaselineBenchmark,
+    ) -> String,
+) -> Result<BenchmarkResult, String> {
     let start = Instant::now();
 
     let disk_size = std::fs::metadata(gguf_path)
@@ -136,14 +221,10 @@ pub fn run_native_baseline_benchmark(
     let max_tokens = max_tokens.clamp(1, 16);
     let prompt = "The capital of France is";
 
-    progress.emit(ProgressStage::Loading, 0.1, "Loading GGUF with native llama.cpp...");
+    progress.emit(ProgressStage::Loading, 0.1, loading_message);
     let summary = crate::ffi::runtime_bindings::inspect_gguf(&gguf_path.to_string_lossy())?;
-    let benchmark = crate::ffi::runtime_bindings::benchmark_baseline(
-        &gguf_path.to_string_lossy(),
-        prompt,
-        max_tokens,
-    )?;
-    progress.emit(ProgressStage::Benchmarking, 1.0, "Native baseline inference complete");
+    let benchmark = run_benchmark(&gguf_path.to_string_lossy(), prompt, max_tokens)?;
+    progress.emit(ProgressStage::Benchmarking, 1.0, complete_message);
 
     unsafe { crate::ffi::profiler_bindings::profiler_reset_peak(); }
     let mut vram_allocated_mb = 0.0f64;
@@ -168,11 +249,8 @@ pub fn run_native_baseline_benchmark(
         disk_size_mb: disk_size,
         elapsed_ms: elapsed.as_millis() as f64,
         load_ms: benchmark.load_ms,
-        test_mode: "native_baseline".to_string(),
-        status_message: format!(
-            "Native llama.cpp baseline loaded GGUF v{} with {} tensors, evaluated {} prompt tokens, and generated {} tokens. Recipe quant overrides are not active for this run.",
-            summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
-        ),
+        test_mode: test_mode.to_string(),
+        status_message: status_message(&summary, &benchmark),
         native_runtime: Some(format!("{} | {}", runtime, system_info.trim())),
         model_tensor_count: Some(summary.tensor_count),
         model_metadata_count: Some(summary.metadata_count),
