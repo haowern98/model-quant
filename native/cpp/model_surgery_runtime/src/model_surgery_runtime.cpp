@@ -5,6 +5,7 @@
 #include "llama.h"
 
 #include <chrono>
+#include <cstring>
 #include <cstdint>
 #include <exception>
 #include <fstream>
@@ -99,6 +100,16 @@ uint64_t estimate_type_size(size_t current_size, ggml_type current_type, ggml_ty
     return static_cast<uint64_t>((static_cast<double>(current_size) * target_bpw / current_bpw) + 0.5);
 }
 
+bool supports_recipe_conversion(ggml_type current_type, ggml_type target_type) {
+    if (target_type != GGML_TYPE_Q8_0) {
+        return false;
+    }
+
+    return current_type == GGML_TYPE_F32
+        || current_type == GGML_TYPE_F16
+        || current_type == GGML_TYPE_BF16;
+}
+
 std::string join_preview(const std::vector<std::string> & values, size_t limit) {
     std::string result;
     const size_t count = values.size() < limit ? values.size() : limit;
@@ -146,15 +157,15 @@ bool build_recipe_targets(
     return true;
 }
 
-bool validate_recipe_for_user_copy(
-    gguf_context * metadata,
+bool validate_recipe_for_user_model(
+    gguf_context * source_metadata,
     const std::unordered_map<std::string, ggml_type> & target_types) {
     std::vector<std::string> missing;
     std::vector<std::string> untargeted;
-    std::vector<std::string> changed;
+    std::vector<std::string> unsupported;
 
-    for (int64_t i = 0; i < gguf_get_n_tensors(metadata); ++i) {
-        const char * name = gguf_get_tensor_name(metadata, i);
+    for (int64_t i = 0; i < gguf_get_n_tensors(source_metadata); ++i) {
+        const char * name = gguf_get_tensor_name(source_metadata, i);
         if (target_types.find(name) == target_types.end()) {
             untargeted.push_back(name);
         }
@@ -163,15 +174,15 @@ bool validate_recipe_for_user_copy(
     for (const auto & entry : target_types) {
         const std::string & name = entry.first;
         const ggml_type target_type = entry.second;
-        const int64_t tensor_id = gguf_find_tensor(metadata, name.c_str());
+        const int64_t tensor_id = gguf_find_tensor(source_metadata, name.c_str());
         if (tensor_id < 0) {
             missing.push_back(name);
             continue;
         }
 
-        const ggml_type current_type = gguf_get_tensor_type(metadata, tensor_id);
-        if (current_type != target_type) {
-            changed.push_back(
+        const ggml_type current_type = gguf_get_tensor_type(source_metadata, tensor_id);
+        if (current_type != target_type && !supports_recipe_conversion(current_type, target_type)) {
+            unsupported.push_back(
                 name + " " + display_quant_type(current_type) + "->" + display_quant_type(target_type));
         }
     }
@@ -186,29 +197,151 @@ bool validate_recipe_for_user_copy(
         return false;
     }
 
-    if (!changed.empty()) {
+    if (!unsupported.empty()) {
         fail(
             "Recipe contains unsupported changed tensor target(s): "
-            + join_preview(changed, 5)
-            + ". Phase 1 only supports unchanged tensor copies; conversion is not implemented yet.");
+            + join_preview(unsupported, 5)
+            + ". Phase 2 supports only F32/F16/BF16->Q8_0 conversions.");
         return false;
     }
 
     return true;
 }
 
+void apply_recipe_tensor_types(
+    gguf_context * model_metadata,
+    const std::unordered_map<std::string, ggml_type> & target_types) {
+    for (const auto & entry : target_types) {
+        gguf_set_tensor_type(model_metadata, entry.first.c_str(), entry.second);
+    }
+}
+
 struct UserCopyTensorReader {
-    gguf_context * metadata = nullptr;
+    gguf_context * source_metadata = nullptr;
     std::ifstream file;
     std::vector<char> buffer;
+    std::vector<char> source_row_buffer;
+    std::vector<float> f32_row_buffer;
+    std::vector<char> quantized_row_buffer;
     std::unordered_map<std::string, ggml_type> target_types;
     size_t data_offset = 0;
     uint64_t copied_tensors = 0;
+    uint64_t converted_tensors = 0;
 };
+
+void read_exact_at(
+    UserCopyTensorReader * reader,
+    size_t offset,
+    void * data,
+    size_t size,
+    const char * tensor_name) {
+    reader->file.clear();
+    reader->file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!reader->file.good()) {
+        throw std::runtime_error(std::string("failed to seek tensor data for: ") + tensor_name);
+    }
+
+    reader->file.read(static_cast<char *>(data), static_cast<std::streamsize>(size));
+    if (reader->file.gcount() != static_cast<std::streamsize>(size)) {
+        throw std::runtime_error(std::string("failed to read tensor data for: ") + tensor_name);
+    }
+}
+
+void convert_source_tensor_to_q8_0(
+    ggml_tensor * tensor,
+    UserCopyTensorReader * reader,
+    const char * name,
+    int64_t tensor_id,
+    ggml_type current_type) {
+    const int64_t n_per_row = tensor->ne[0];
+    if (n_per_row <= 0) {
+        throw std::runtime_error(std::string("cannot quantize tensor with empty row: ") + name);
+    }
+
+    const int64_t q8_block = ggml_blck_size(GGML_TYPE_Q8_0);
+    if (n_per_row % q8_block != 0) {
+        throw std::runtime_error(
+            std::string("cannot quantize tensor to Q8_0 because row size is not divisible by ")
+            + std::to_string(q8_block) + ": " + name);
+    }
+
+    const int64_t element_count = ggml_nelements(tensor);
+    if (element_count % n_per_row != 0) {
+        throw std::runtime_error(std::string("cannot quantize tensor with irregular row layout: ") + name);
+    }
+
+    const int64_t nrows = element_count / n_per_row;
+    const size_t source_row_size = ggml_row_size(current_type, n_per_row);
+    const size_t target_row_size = ggml_row_size(GGML_TYPE_Q8_0, n_per_row);
+    const size_t source_size = gguf_get_tensor_size(reader->source_metadata, tensor_id);
+    const size_t target_size = ggml_nbytes(tensor);
+
+    if (source_size != source_row_size * static_cast<size_t>(nrows)) {
+        throw std::runtime_error(std::string("source tensor size does not match row layout for: ") + name);
+    }
+    if (target_size != target_row_size * static_cast<size_t>(nrows)) {
+        throw std::runtime_error(std::string("target tensor size does not match Q8_0 row layout for: ") + name);
+    }
+
+    reader->source_row_buffer.resize(source_row_size);
+    reader->f32_row_buffer.resize(static_cast<size_t>(n_per_row));
+    reader->quantized_row_buffer.resize(target_row_size);
+
+    const size_t source_offset = reader->data_offset + gguf_get_tensor_offset(reader->source_metadata, tensor_id);
+    for (int64_t row = 0; row < nrows; ++row) {
+        read_exact_at(
+            reader,
+            source_offset + static_cast<size_t>(row) * source_row_size,
+            reader->source_row_buffer.data(),
+            source_row_size,
+            name);
+
+        if (current_type == GGML_TYPE_F32) {
+            std::memcpy(
+                reader->f32_row_buffer.data(),
+                reader->source_row_buffer.data(),
+                source_row_size);
+        } else if (current_type == GGML_TYPE_F16) {
+            ggml_fp16_to_fp32_row(
+                reinterpret_cast<const ggml_fp16_t *>(reader->source_row_buffer.data()),
+                reader->f32_row_buffer.data(),
+                n_per_row);
+        } else if (current_type == GGML_TYPE_BF16) {
+            ggml_bf16_to_fp32_row(
+                reinterpret_cast<const ggml_bf16_t *>(reader->source_row_buffer.data()),
+                reader->f32_row_buffer.data(),
+                n_per_row);
+        } else {
+            throw std::runtime_error(
+                std::string("unsupported source quant for Q8_0 conversion: ")
+                + name + " " + display_quant_type(current_type));
+        }
+
+        const size_t written = ggml_quantize_chunk(
+            GGML_TYPE_Q8_0,
+            reader->f32_row_buffer.data(),
+            reader->quantized_row_buffer.data(),
+            0,
+            1,
+            n_per_row,
+            nullptr);
+        if (written != target_row_size) {
+            throw std::runtime_error(std::string("Q8_0 quantized row size mismatch for: ") + name);
+        }
+
+        ggml_backend_tensor_set(
+            tensor,
+            reader->quantized_row_buffer.data(),
+            static_cast<size_t>(row) * target_row_size,
+            target_row_size);
+    }
+
+    reader->converted_tensors += 1;
+}
 
 void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     auto * reader = static_cast<UserCopyTensorReader *>(userdata);
-    if (reader == nullptr || reader->metadata == nullptr) {
+    if (reader == nullptr || reader->source_metadata == nullptr) {
         throw std::runtime_error("user tensor copy reader is not initialized");
     }
     if (tensor == nullptr) {
@@ -216,22 +349,28 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     }
 
     const char * name = ggml_get_name(tensor);
-    const int64_t tensor_id = gguf_find_tensor(reader->metadata, name);
+    const int64_t tensor_id = gguf_find_tensor(reader->source_metadata, name);
     if (tensor_id < 0) {
         throw std::runtime_error(std::string("source GGUF is missing tensor: ") + name);
     }
 
-    const ggml_type current_type = gguf_get_tensor_type(reader->metadata, tensor_id);
+    const ggml_type current_type = gguf_get_tensor_type(reader->source_metadata, tensor_id);
     const auto target = reader->target_types.find(name);
-    if (target != reader->target_types.end() && target->second != current_type) {
+    const ggml_type target_type = target == reader->target_types.end() ? current_type : target->second;
+    if (target_type != current_type) {
+        if (supports_recipe_conversion(current_type, target_type) && target_type == GGML_TYPE_Q8_0) {
+            convert_source_tensor_to_q8_0(tensor, reader, name, tensor_id, current_type);
+            return;
+        }
+
         throw std::runtime_error(
             std::string("unsupported tensor conversion for ")
             + name + ": " + display_quant_type(current_type)
-            + "->" + display_quant_type(target->second));
+            + "->" + display_quant_type(target_type));
     }
 
     const size_t expected_size = ggml_nbytes(tensor);
-    const size_t source_size = gguf_get_tensor_size(reader->metadata, tensor_id);
+    const size_t source_size = gguf_get_tensor_size(reader->source_metadata, tensor_id);
     if (expected_size != source_size) {
         throw std::runtime_error(
             std::string("tensor size mismatch for ") + name
@@ -239,12 +378,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
             + " bytes, source has " + std::to_string(source_size));
     }
 
-    const size_t source_offset = reader->data_offset + gguf_get_tensor_offset(reader->metadata, tensor_id);
-    reader->file.clear();
-    reader->file.seekg(static_cast<std::streamoff>(source_offset), std::ios::beg);
-    if (!reader->file.good()) {
-        throw std::runtime_error(std::string("failed to seek tensor data for: ") + name);
-    }
+    const size_t source_offset = reader->data_offset + gguf_get_tensor_offset(reader->source_metadata, tensor_id);
 
     constexpr size_t max_chunk_size = 64ull * 1024ull * 1024ull;
     reader->buffer.resize(expected_size < max_chunk_size ? expected_size : max_chunk_size);
@@ -254,10 +388,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
         const size_t chunk_size = (expected_size - copied) < reader->buffer.size()
             ? (expected_size - copied)
             : reader->buffer.size();
-        reader->file.read(reader->buffer.data(), static_cast<std::streamsize>(chunk_size));
-        if (reader->file.gcount() != static_cast<std::streamsize>(chunk_size)) {
-            throw std::runtime_error(std::string("failed to read tensor data for: ") + name);
-        }
+        read_exact_at(reader, source_offset + copied, reader->buffer.data(), chunk_size, name);
         ggml_backend_tensor_set(tensor, reader->buffer.data(), copied, chunk_size);
         copied += chunk_size;
     }
@@ -476,8 +607,9 @@ int32_t ms_runtime_analyze_recipe(
             const size_t current_size = gguf_get_tensor_size(ctx, tensor_id);
             if (current_type != target_type) {
                 analysis.changed_count += 1;
-                // Changed-tensor conversion is intentionally not implemented yet.
-                analysis.unsupported_count += 1;
+                if (!supports_recipe_conversion(current_type, target_type)) {
+                    analysis.unsupported_count += 1;
+                }
             }
             analysis.estimated_target_size_bytes += estimate_type_size(current_size, current_type, target_type);
         }
@@ -569,7 +701,7 @@ int32_t ms_runtime_benchmark_user_copy(
         }
 
         UserCopyTensorReader reader = {};
-        reader.metadata = metadata.get();
+        reader.source_metadata = metadata.get();
         reader.data_offset = gguf_get_data_offset(metadata.get());
         reader.file.open(path, std::ios::binary);
         if (!reader.file.is_open()) {
@@ -638,21 +770,29 @@ int32_t ms_runtime_benchmark_recipe(
         gguf_params.no_alloc = true;
         gguf_params.ctx = nullptr;
 
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
             gguf_init_from_file(path, gguf_params),
             gguf_free);
-        if (metadata == nullptr) {
+        if (source_metadata == nullptr) {
             return fail(std::string("failed to open GGUF metadata: ") + path);
         }
 
-        if (!validate_recipe_for_user_copy(metadata.get(), target_types)) {
-            return -1;
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
+            gguf_init_from_file(path, gguf_params),
+            gguf_free);
+        if (model_metadata == nullptr) {
+            return fail(std::string("failed to open GGUF model metadata: ") + path);
         }
 
+        if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+            return -1;
+        }
+        apply_recipe_tensor_types(model_metadata.get(), target_types);
+
         UserCopyTensorReader reader = {};
-        reader.metadata = metadata.get();
+        reader.source_metadata = source_metadata.get();
         reader.target_types = std::move(target_types);
-        reader.data_offset = gguf_get_data_offset(metadata.get());
+        reader.data_offset = gguf_get_data_offset(source_metadata.get());
         reader.file.open(path, std::ios::binary);
         if (!reader.file.is_open()) {
             return fail(std::string("failed to open GGUF tensor data: ") + path);
@@ -664,7 +804,7 @@ int32_t ms_runtime_benchmark_recipe(
 
         const auto load_start = std::chrono::steady_clock::now();
         llama_model * model = llama_model_init_from_user(
-            metadata.get(),
+            model_metadata.get(),
             copy_user_tensor_data,
             &reader,
             model_params);

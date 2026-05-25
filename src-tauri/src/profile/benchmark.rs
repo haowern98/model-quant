@@ -188,7 +188,7 @@ pub fn run_native_recipe_benchmark(
         },
         |summary, benchmark| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), copied unchanged tensors from GGUF v{} into backend buffers, evaluated {} prompt tokens, and generated {} tokens. Changed tensor conversion is not active for this run.",
+                "Native llama.cpp recipe path validated {} tensor target(s), copied unchanged tensors and applied supported in-memory conversions from GGUF v{}, evaluated {} prompt tokens, and generated {} tokens.",
                 targets.len(), summary.version, benchmark.prompt_tokens, benchmark.generated_tokens
             )
         },

@@ -237,6 +237,13 @@ fn validate_recipe_analysis(
         ));
     }
 
+    if analysis.unsupported_count > 0 {
+        return Err(format!(
+            "Recipe preflight found {} unsupported tensor conversion(s). Phase 2 supports only F32/F16/BF16 to Q8_0.",
+            analysis.unsupported_count
+        ));
+    }
+
     Ok(())
 }
 
