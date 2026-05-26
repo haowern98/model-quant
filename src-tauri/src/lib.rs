@@ -1,17 +1,19 @@
-pub mod gguf;
-pub mod ffi;
-pub mod quant;
-pub mod progress;
-pub mod profile;
 pub mod commands;
+pub mod ffi;
+pub mod gguf;
+pub mod profile;
+pub mod progress;
+pub mod quant;
 
-use std::sync::Mutex;
 use commands::model::ModelState;
 use commands::quant::RecipeStore;
+use std::sync::Mutex;
 
 pub fn run() {
     // Init C++ profiler (CUDA or stub, depending on build)
-    unsafe { crate::ffi::profiler_bindings::profiler_init(); }
+    unsafe {
+        crate::ffi::profiler_bindings::profiler_init();
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -28,9 +30,13 @@ pub fn run() {
             commands::export::load_recipe,
             commands::export::list_recipes,
             commands::export::test_recipe,
+            commands::eval_backend::get_official_eval_backend_status,
+            commands::eval_backend::install_official_eval_backend,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
-    unsafe { crate::ffi::profiler_bindings::profiler_shutdown(); }
+    unsafe {
+        crate::ffi::profiler_bindings::profiler_shutdown();
+    }
 }

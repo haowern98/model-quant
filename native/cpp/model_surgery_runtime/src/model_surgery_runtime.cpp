@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <cstdint>
 #include <exception>
@@ -14,6 +15,7 @@
 #include <ios>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -487,9 +489,10 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
 std::vector<llama_token> tokenize_text(
     const llama_vocab * vocab,
     const char * text,
-    uint32_t max_eval_tokens) {
+    uint32_t max_eval_tokens,
+    bool add_special = true) {
     const int32_t text_len = static_cast<int32_t>(std::strlen(text));
-    int32_t token_count = llama_tokenize(vocab, text, text_len, nullptr, 0, true, true);
+    int32_t token_count = llama_tokenize(vocab, text, text_len, nullptr, 0, add_special, true);
     if (token_count == INT32_MIN) {
         throw std::runtime_error("eval text tokenization overflowed");
     }
@@ -507,7 +510,7 @@ std::vector<llama_token> tokenize_text(
         text_len,
         tokens.data(),
         token_count,
-        true,
+        add_special,
         true);
     if (actual_tokens <= 0) {
         return {};
@@ -628,6 +631,271 @@ PerplexityScore score_model_perplexity(
     return score;
 }
 
+void decode_token_sequence(llama_context * ctx, const std::vector<llama_token> & tokens) {
+    if (tokens.empty()) {
+        throw std::runtime_error("cannot decode an empty token sequence");
+    }
+
+    const int decode_result = llama_decode(
+        ctx,
+        llama_batch_get_one(
+            const_cast<llama_token *>(tokens.data()),
+            static_cast<int32_t>(tokens.size())));
+    if (decode_result != 0) {
+        throw std::runtime_error("failed to decode eval prompt");
+    }
+    llama_synchronize(ctx);
+}
+
+double score_continuation_loglikelihood(
+    llama_model * model,
+    const char * context,
+    const char * continuation) {
+    if (context == nullptr || continuation == nullptr || continuation[0] == '\0') {
+        throw std::runtime_error("loglikelihood sample has an empty context or continuation");
+    }
+
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    std::vector<llama_token> context_tokens = tokenize_text(vocab, context, 0, true);
+    std::vector<llama_token> continuation_tokens = tokenize_text(vocab, continuation, 0, false);
+    if (context_tokens.empty() || continuation_tokens.empty()) {
+        throw std::runtime_error("loglikelihood sample produced no scoreable tokens");
+    }
+
+    const uint32_t required_ctx = static_cast<uint32_t>(context_tokens.size() + continuation_tokens.size() + 8);
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = std::max<uint32_t>(128, required_ctx);
+    ctx_params.n_batch = std::max<uint32_t>(1, ctx_params.n_ctx);
+    ctx_params.n_ubatch = ctx_params.n_batch;
+    ctx_params.n_threads = 0;
+    ctx_params.n_threads_batch = 0;
+    ctx_params.no_perf = true;
+
+    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
+        llama_init_from_model(model, ctx_params),
+        llama_free);
+    if (ctx == nullptr) {
+        throw std::runtime_error("failed to create llama context for loglikelihood eval");
+    }
+
+    llama_memory_clear(llama_get_memory(ctx.get()), true);
+    decode_token_sequence(ctx.get(), context_tokens);
+
+    double total_nll = 0.0;
+    for (llama_token token : continuation_tokens) {
+        const float * logits = llama_get_logits_ith(ctx.get(), -1);
+        total_nll += token_nll_from_logits(logits, n_vocab, token);
+
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        const int decode_result = llama_decode(ctx.get(), batch);
+        if (decode_result != 0) {
+            throw std::runtime_error("failed to decode loglikelihood continuation");
+        }
+        llama_synchronize(ctx.get());
+    }
+
+    return -total_nll;
+}
+
+std::string detokenize_tokens(const llama_vocab * vocab, const std::vector<llama_token> & tokens) {
+    if (tokens.empty()) {
+        return {};
+    }
+
+    int32_t buffer_size = static_cast<int32_t>(tokens.size() * 16 + 64);
+    std::vector<char> buffer(static_cast<size_t>(buffer_size));
+    int32_t written = llama_detokenize(
+        vocab,
+        tokens.data(),
+        static_cast<int32_t>(tokens.size()),
+        buffer.data(),
+        buffer_size,
+        true,
+        false);
+    if (written < 0) {
+        buffer_size = -written + 1;
+        buffer.resize(static_cast<size_t>(buffer_size));
+        written = llama_detokenize(
+            vocab,
+            tokens.data(),
+            static_cast<int32_t>(tokens.size()),
+            buffer.data(),
+            buffer_size,
+            true,
+            false);
+    }
+    if (written <= 0) {
+        return {};
+    }
+
+    return std::string(buffer.data(), static_cast<size_t>(written));
+}
+
+std::string normalize_answer(std::string value) {
+    for (char & ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+
+    size_t start = 0;
+    while (start < value.size()
+        && (std::isspace(static_cast<unsigned char>(value[start]))
+            || std::ispunct(static_cast<unsigned char>(value[start])))) {
+        ++start;
+    }
+
+    size_t end = value.size();
+    while (end > start
+        && (std::isspace(static_cast<unsigned char>(value[end - 1]))
+            || std::ispunct(static_cast<unsigned char>(value[end - 1])))) {
+        --end;
+    }
+
+    std::string trimmed = value.substr(start, end - start);
+    std::string collapsed;
+    bool previous_space = false;
+    for (char ch : trimmed) {
+        const bool is_space = std::isspace(static_cast<unsigned char>(ch)) != 0;
+        if (is_space) {
+            if (!previous_space) {
+                collapsed.push_back(' ');
+            }
+        } else {
+            collapsed.push_back(ch);
+        }
+        previous_space = is_space;
+    }
+    return collapsed;
+}
+
+std::string generate_greedy_text(
+    llama_model * model,
+    const char * prompt,
+    uint32_t max_tokens) {
+    if (prompt == nullptr || prompt[0] == '\0') {
+        throw std::runtime_error("exact-match sample has an empty prompt");
+    }
+
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    std::vector<llama_token> prompt_tokens = tokenize_text(vocab, prompt, 0, true);
+    if (prompt_tokens.empty()) {
+        throw std::runtime_error("exact-match prompt produced no tokens");
+    }
+
+    const uint32_t generation_limit = std::max<uint32_t>(1, max_tokens == 0 ? 16 : max_tokens);
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = std::max<uint32_t>(
+        128,
+        static_cast<uint32_t>(prompt_tokens.size()) + generation_limit + 8);
+    ctx_params.n_batch = std::max<uint32_t>(1, ctx_params.n_ctx);
+    ctx_params.n_ubatch = ctx_params.n_batch;
+    ctx_params.n_threads = 0;
+    ctx_params.n_threads_batch = 0;
+    ctx_params.no_perf = true;
+
+    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
+        llama_init_from_model(model, ctx_params),
+        llama_free);
+    if (ctx == nullptr) {
+        throw std::runtime_error("failed to create llama context for exact-match eval");
+    }
+
+    llama_memory_clear(llama_get_memory(ctx.get()), true);
+    decode_token_sequence(ctx.get(), prompt_tokens);
+
+    std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
+        llama_sampler_chain_init(llama_sampler_chain_default_params()),
+        llama_sampler_free);
+    llama_sampler_chain_add(sampler.get(), llama_sampler_init_greedy());
+
+    std::vector<llama_token> generated_tokens;
+    for (uint32_t i = 0; i < generation_limit; ++i) {
+        llama_token token = llama_sampler_sample(sampler.get(), ctx.get(), -1);
+        if (llama_vocab_is_eog(vocab, token)) {
+            break;
+        }
+
+        generated_tokens.push_back(token);
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        const int decode_result = llama_decode(ctx.get(), batch);
+        if (decode_result != 0) {
+            throw std::runtime_error("failed to decode generated exact-match token");
+        }
+        llama_synchronize(ctx.get());
+    }
+
+    return detokenize_tokens(vocab, generated_tokens);
+}
+
+void score_eval_samples_for_model(
+    llama_model * model,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    ms_eval_sample_result * out_results) {
+    if (sample_count > 0 && (samples == nullptr || out_results == nullptr)) {
+        throw std::runtime_error("eval sample input or output pointer is null");
+    }
+
+    for (uint64_t sample_index = 0; sample_index < sample_count; ++sample_index) {
+        const ms_eval_sample & sample = samples[sample_index];
+        ms_eval_sample_result result = {};
+        result.predicted_index = UINT32_MAX;
+        const auto sample_start = std::chrono::steady_clock::now();
+
+        if (sample.prompt == nullptr || sample.prompt[0] == '\0') {
+            throw std::runtime_error("eval sample prompt is empty");
+        }
+
+        if (sample.sample_type == MS_EVAL_SAMPLE_MULTIPLE_CHOICE) {
+            if (sample.choices == nullptr || sample.choice_count == 0) {
+                throw std::runtime_error("multiple-choice eval sample has no choices");
+            }
+            if (sample.answer_index >= sample.choice_count) {
+                throw std::runtime_error("multiple-choice eval sample answer index is out of range");
+            }
+
+            double best_score = -std::numeric_limits<double>::infinity();
+            uint32_t best_index = 0;
+            for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
+                const char * choice = sample.choices[choice_index];
+                const double score = score_continuation_loglikelihood(model, sample.prompt, choice);
+                if (score > best_score) {
+                    best_score = score;
+                    best_index = static_cast<uint32_t>(choice_index);
+                }
+            }
+
+            result.predicted_index = best_index;
+            result.score = best_score;
+            result.correct = best_index == sample.answer_index ? 1u : 0u;
+        } else if (sample.sample_type == MS_EVAL_SAMPLE_EXACT_MATCH) {
+            if (sample.answers == nullptr || sample.answer_count == 0) {
+                throw std::runtime_error("exact-match eval sample has no accepted answers");
+            }
+
+            const std::string generated = normalize_answer(generate_greedy_text(
+                model,
+                sample.prompt,
+                sample.max_tokens));
+            for (uint64_t answer_index = 0; answer_index < sample.answer_count; ++answer_index) {
+                const char * answer = sample.answers[answer_index];
+                if (answer != nullptr && generated == normalize_answer(answer)) {
+                    result.correct = 1u;
+                    break;
+                }
+            }
+            result.predicted_index = result.correct;
+            result.score = result.correct ? 1.0 : 0.0;
+        } else {
+            throw std::runtime_error("unknown eval sample type");
+        }
+
+        const auto sample_end = std::chrono::steady_clock::now();
+        result.elapsed_ms = elapsed_ms(sample_start, sample_end);
+        out_results[sample_index] = result;
+    }
+}
+
 int32_t run_loaded_model_benchmark(
     llama_model * model,
     const char * prompt,
@@ -742,6 +1010,83 @@ int32_t run_loaded_model_benchmark(
     out_benchmark->converted_bytes_after = 0;
 
     return 0;
+}
+
+void score_baseline_task_samples(
+    const char * path,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    ms_eval_sample_result * out_results) {
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = -1;
+    model_params.use_mmap = true;
+
+    llama_model * model = llama_model_load_from_file(path, model_params);
+    if (model == nullptr) {
+        throw std::runtime_error(std::string("failed to load baseline task model: ") + path);
+    }
+    std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
+    score_eval_samples_for_model(model_guard.get(), samples, sample_count, out_results);
+}
+
+void score_recipe_task_samples(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    ms_eval_sample_result * out_results) {
+    std::unordered_map<std::string, ggml_type> target_types;
+    if (!build_recipe_targets(targets, target_count, target_types)) {
+        throw std::runtime_error(last_error.empty() ? "failed to build recipe targets" : last_error);
+    }
+
+    gguf_init_params gguf_params = {};
+    gguf_params.no_alloc = true;
+    gguf_params.ctx = nullptr;
+
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
+        gguf_init_from_file(path, gguf_params),
+        gguf_free);
+    if (source_metadata == nullptr) {
+        throw std::runtime_error(std::string("failed to open GGUF metadata: ") + path);
+    }
+
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
+        gguf_init_from_file(path, gguf_params),
+        gguf_free);
+    if (model_metadata == nullptr) {
+        throw std::runtime_error(std::string("failed to open GGUF model metadata: ") + path);
+    }
+
+    if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+        throw std::runtime_error(last_error.empty() ? "recipe validation failed" : last_error);
+    }
+    apply_recipe_tensor_types(model_metadata.get(), target_types);
+
+    UserCopyTensorReader reader = {};
+    reader.source_metadata = source_metadata.get();
+    reader.target_types = std::move(target_types);
+    reader.data_offset = gguf_get_data_offset(source_metadata.get());
+    reader.file.open(path, std::ios::binary);
+    if (!reader.file.is_open()) {
+        throw std::runtime_error(std::string("failed to open GGUF tensor data: ") + path);
+    }
+
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = -1;
+    model_params.use_mmap = false;
+
+    llama_model * model = llama_model_init_from_user(
+        model_metadata.get(),
+        copy_user_tensor_data,
+        &reader,
+        model_params);
+    if (model == nullptr) {
+        throw std::runtime_error(std::string("failed to load recipe task model: ") + path);
+    }
+    std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
+    score_eval_samples_for_model(model_guard.get(), samples, sample_count, out_results);
 }
 
 } // namespace
@@ -1428,6 +1773,117 @@ int32_t ms_runtime_eval_recipe_single(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native single recipe eval error");
+    }
+}
+
+int32_t ms_runtime_eval_task_suite(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_eval_sample_result * out_recipe_results) {
+    clear_error();
+
+    if (sample_count > 0 && (samples == nullptr || out_recipe_results == nullptr)) {
+        return fail("task eval sample input or output pointer is null");
+    }
+
+    const int32_t eval_result = ms_runtime_eval_recipe_single(
+        path,
+        targets,
+        target_count,
+        eval_texts,
+        eval_text_count,
+        max_eval_tokens,
+        prompt,
+        max_tokens,
+        out_benchmark,
+        out_eval);
+    if (eval_result != 0) {
+        return eval_result;
+    }
+
+    try {
+        ensure_backend_initialized();
+        score_recipe_task_samples(
+            path,
+            targets,
+            target_count,
+            samples,
+            sample_count,
+            out_recipe_results);
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native single task eval error");
+    }
+}
+
+int32_t ms_runtime_eval_task_suite_compare(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_eval_sample_result * out_baseline_results,
+    ms_eval_sample_result * out_recipe_results) {
+    clear_error();
+
+    if (sample_count > 0
+        && (samples == nullptr || out_baseline_results == nullptr || out_recipe_results == nullptr)) {
+        return fail("task eval sample input or output pointer is null");
+    }
+
+    const int32_t eval_result = ms_runtime_eval_recipe(
+        path,
+        targets,
+        target_count,
+        eval_texts,
+        eval_text_count,
+        max_eval_tokens,
+        prompt,
+        max_tokens,
+        out_benchmark,
+        out_eval);
+    if (eval_result != 0) {
+        return eval_result;
+    }
+
+    try {
+        ensure_backend_initialized();
+        score_baseline_task_samples(
+            path,
+            samples,
+            sample_count,
+            out_baseline_results);
+        score_recipe_task_samples(
+            path,
+            targets,
+            target_count,
+            samples,
+            sample_count,
+            out_recipe_results);
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native compare task eval error");
     }
 }
 

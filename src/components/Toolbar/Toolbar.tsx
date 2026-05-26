@@ -3,7 +3,12 @@ import { QuantPresetMenu } from "./QuantPresetMenu";
 import { RecipeControls } from "./RecipeControls";
 import { ProgressBar } from "./ProgressBar";
 import { TestButton } from "./TestButton";
-import type { QuantType, ProgressEvent, RecipeTestMode } from "../../types";
+import type {
+  EvalSuite,
+  QuantType,
+  ProgressEvent,
+  RecipeTestMode,
+} from "../../types";
 
 interface ToolbarProps {
   modelPath: string | null;
@@ -17,6 +22,8 @@ interface ToolbarProps {
   onExport: () => void;
   testMode: RecipeTestMode;
   onTestModeChange: (mode: RecipeTestMode) => void;
+  evalSuite: EvalSuite;
+  onEvalSuiteChange: (suite: EvalSuite) => void;
   onTest: () => void;
 }
 
@@ -32,6 +39,8 @@ export function Toolbar({
   onExport,
   testMode,
   onTestModeChange,
+  evalSuite,
+  onEvalSuiteChange,
   onTest,
 }: ToolbarProps) {
   return (
@@ -50,6 +59,17 @@ export function Toolbar({
         onExport={onExport}
         disabled={!hasModel || running}
       />
+      <select
+        value={evalSuite}
+        onChange={(event) => onEvalSuiteChange(event.target.value as EvalSuite)}
+        disabled={!hasModel || running}
+        className="h-8 bg-bg-surface border border-border-default rounded px-2 text-sm text-text-primary disabled:opacity-40"
+        aria-label="Eval suite"
+      >
+        <option value="official_core">Official Core Eval</option>
+        <option value="standard_subset">Standard Eval</option>
+        <option value="ppl_smoke">PPL Smoke</option>
+      </select>
       <select
         value={testMode}
         onChange={(event) =>

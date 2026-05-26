@@ -4,7 +4,7 @@ use tauri::State;
 use crate::commands::model::ModelState;
 use crate::commands::quant::RecipeStore;
 use crate::profile::benchmark::{
-    run_native_recipe_compare_benchmark, run_native_recipe_single_benchmark, BenchmarkResult,
+    run_native_recipe_compare_eval, run_native_recipe_single_eval, BenchmarkResult, EvalSuite,
 };
 use crate::progress::ProgressEmitter;
 use crate::quant::recipe::{RecipeState, RecipeStatus};
@@ -185,6 +185,7 @@ pub async fn test_recipe(
     recipe: RecipeState,
     prompt_tokens: u32,
     test_mode: Option<String>,
+    eval_suite: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, RecipeStore>,
 ) -> Result<BenchmarkResult, String> {
@@ -202,12 +203,23 @@ pub async fn test_recipe(
 
     progress.requantizing(1.0, "skipped");
     progress.writing(1.0, "no temporary GGUF written");
+    let eval_suite = parse_eval_suite(eval_suite.as_deref())?;
+    if eval_suite == EvalSuite::OfficialCore {
+        let status = crate::commands::eval_backend::check_official_eval_backend_status();
+        if !status.installed {
+            return Err("OFFICIAL_EVAL_BACKEND_NOT_INSTALLED".to_string());
+        }
+        return Err(
+            "Official lm-eval execution is not wired yet. Backend install is ready; next step is the runtime API adapter."
+                .to_string(),
+        );
+    }
     let result = match test_mode.as_deref().unwrap_or("compare_baseline") {
         "single" => {
-            run_native_recipe_single_benchmark(&source, &targets, prompt_tokens, &progress)?
+            run_native_recipe_single_eval(&source, &targets, prompt_tokens, &progress, eval_suite)?
         }
         "compare_baseline" => {
-            run_native_recipe_compare_benchmark(&source, &targets, prompt_tokens, &progress)?
+            run_native_recipe_compare_eval(&source, &targets, prompt_tokens, &progress, eval_suite)?
         }
         mode => return Err(format!("Unknown test recipe mode: {}", mode)),
     };
@@ -224,6 +236,15 @@ pub async fn test_recipe(
     }
 
     Ok(result)
+}
+
+fn parse_eval_suite(value: Option<&str>) -> Result<EvalSuite, String> {
+    match value.unwrap_or("ppl_smoke") {
+        "official_core" => Ok(EvalSuite::OfficialCore),
+        "ppl_smoke" => Ok(EvalSuite::PplSmoke),
+        "standard_subset" => Ok(EvalSuite::StandardSubset),
+        suite => Err(format!("Unknown eval suite: {}", suite)),
+    }
 }
 
 fn recipe_targets(recipe: &RecipeState) -> Vec<(String, String)> {

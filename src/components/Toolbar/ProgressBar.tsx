@@ -1,6 +1,7 @@
 import type { ProgressEvent } from '../../types';
 
 const STAGE_LABELS: Record<string, string> = {
+  installing: 'Installing eval backend...',
   requantizing: 'Requantizing tensors...',
   writing: 'Writing GGUF to disk...',
   loading: 'Loading model into VRAM...',

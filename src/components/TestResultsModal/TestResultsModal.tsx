@@ -141,6 +141,74 @@ function RuntimeComparison({ result }: { result: BenchmarkResult }) {
   );
 }
 
+function formatScore(value: number | null): string {
+  return value === null ? "-" : `${(value * 100).toFixed(1)}%`;
+}
+
+function TaskEvalSection({ result }: { result: BenchmarkResult }) {
+  const taskEval = result.taskEval;
+  if (!taskEval) return null;
+
+  const hasBaseline = taskEval.aggregate.baselineScore !== null;
+
+  return (
+    <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-text-muted uppercase tracking-wider">
+          Standard Eval
+        </h3>
+        <span className="font-mono text-text-primary">
+          {formatScore(taskEval.aggregate.recipeScore)}
+        </span>
+      </div>
+      <div className="grid grid-cols-[1fr_70px_82px_82px_70px] gap-x-3 gap-y-1">
+        <span className="text-text-muted uppercase tracking-wider">Task</span>
+        <span className="text-right text-text-muted uppercase tracking-wider">
+          N
+        </span>
+        {hasBaseline && (
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Base
+          </span>
+        )}
+        <span className="text-right text-text-muted uppercase tracking-wider">
+          Recipe
+        </span>
+        {hasBaseline && (
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Delta
+          </span>
+        )}
+        {!hasBaseline && <span />}
+        {taskEval.tasks.map((task) => (
+          <Fragment key={`${task.task}-${task.metric}`}>
+            <span className="text-text-muted">{task.task}</span>
+            <span className="text-right font-mono text-text-primary">
+              {task.sampleCount}
+            </span>
+            {hasBaseline && (
+              <span className="text-right font-mono text-text-primary">
+                {formatScore(task.baselineScore)}
+              </span>
+            )}
+            <span className="text-right font-mono text-text-primary">
+              {formatScore(task.recipeScore)}
+            </span>
+            {hasBaseline && (
+              <span className="text-right font-mono text-text-primary">
+                {task.delta === null
+                  ? "-"
+                  : `${(task.delta * 100).toFixed(1)}%`}
+              </span>
+            )}
+            {!hasBaseline && <span />}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TestResultsModal({
   result,
   onSave,
@@ -266,6 +334,8 @@ export function TestResultsModal({
             </div>
           </div>
         )}
+
+        <TaskEvalSection result={result} />
 
         {result.baselineBenchmark ? (
           <RuntimeComparison result={result} />

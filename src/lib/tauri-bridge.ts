@@ -4,6 +4,8 @@ import type {
   RecipeState,
   BenchmarkResult,
   AssignPattern,
+  EvalSuite,
+  OfficialEvalBackendStatus,
   QuantType,
   RecipeSummary,
   RecipeTestMode,
@@ -67,11 +69,13 @@ export async function testRecipe(
   recipe: RecipeState,
   promptTokens: number,
   testMode: RecipeTestMode,
+  evalSuite: EvalSuite,
 ): Promise<BenchmarkResult> {
   return invoke<BenchmarkResult>("test_recipe", {
     recipe,
     promptTokens,
     testMode,
+    evalSuite,
   });
 }
 
@@ -95,4 +99,12 @@ export async function loadRecipe(path: string): Promise<RecipeState> {
 
 export async function listRecipes(): Promise<RecipeSummary[]> {
   return invoke<RecipeSummary[]>("list_recipes");
+}
+
+export async function getOfficialEvalBackendStatus(): Promise<OfficialEvalBackendStatus> {
+  return invoke<OfficialEvalBackendStatus>("get_official_eval_backend_status");
+}
+
+export async function installOfficialEvalBackend(): Promise<OfficialEvalBackendStatus> {
+  return invoke<OfficialEvalBackendStatus>("install_official_eval_backend");
 }

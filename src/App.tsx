@@ -15,8 +15,15 @@ import {
   saveRecipe,
   loadRecipe,
   exportGguf,
+  getOfficialEvalBackendStatus,
+  installOfficialEvalBackend,
 } from "./lib/tauri-bridge";
-import type { BenchmarkResult, RecipeState, RecipeTestMode } from "./types";
+import type {
+  BenchmarkResult,
+  EvalSuite,
+  RecipeState,
+  RecipeTestMode,
+} from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 
 // Auto-inject the mock bridge only in plain browser runs.
@@ -55,6 +62,7 @@ function App() {
   const [appError, setAppError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
+  const [evalSuite, setEvalSuite] = useState<EvalSuite>("official_core");
 
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
@@ -97,7 +105,27 @@ function App() {
     if (!recipe) return;
     startOperation();
     try {
-      const result = await testRecipe(recipe, 512, recipeTestMode);
+      if (evalSuite === "official_core") {
+        const status = await getOfficialEvalBackendStatus();
+        if (!status.installed) {
+          const { ask } = await import("@tauri-apps/plugin-dialog");
+          const shouldInstall = await ask(
+            "Official eval backend is not installed. Install EleutherAI lm-evaluation-harness now?",
+            {
+              title: "Install Official Eval Backend",
+              kind: "info",
+              okLabel: "Install Backend",
+              cancelLabel: "Cancel",
+            },
+          );
+          if (!shouldInstall) {
+            setAppError(null);
+            return;
+          }
+          await installOfficialEvalBackend();
+        }
+      }
+      const result = await testRecipe(recipe, 512, recipeTestMode, evalSuite);
       setBenchmarkResult(result);
       setShowResults(true);
       setAppError(null);
@@ -107,7 +135,14 @@ function App() {
     } finally {
       endOperation();
     }
-  }, [recipe, recipeTestMode, startOperation, endOperation, setProfile]);
+  }, [
+    recipe,
+    recipeTestMode,
+    evalSuite,
+    startOperation,
+    endOperation,
+    setProfile,
+  ]);
 
   const handleSaveRecipe = useCallback(async () => {
     if (!recipe) return;
@@ -172,6 +207,8 @@ function App() {
               onExport={handleExport}
               testMode={recipeTestMode}
               onTestModeChange={setRecipeTestMode}
+              evalSuite={evalSuite}
+              onEvalSuiteChange={setEvalSuite}
               onTest={handleTest}
             />
           }

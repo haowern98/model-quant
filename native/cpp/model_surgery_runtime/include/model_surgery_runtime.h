@@ -81,6 +81,30 @@ typedef struct ms_recipe_eval_result {
     uint64_t skipped_sample_count;
 } ms_recipe_eval_result;
 
+typedef enum ms_eval_sample_type {
+    MS_EVAL_SAMPLE_MULTIPLE_CHOICE = 0,
+    MS_EVAL_SAMPLE_EXACT_MATCH = 1,
+} ms_eval_sample_type;
+
+typedef struct ms_eval_sample {
+    const char * task_name;
+    uint32_t sample_type;
+    const char * prompt;
+    const char * const * choices;
+    uint64_t choice_count;
+    uint32_t answer_index;
+    const char * const * answers;
+    uint64_t answer_count;
+    uint32_t max_tokens;
+} ms_eval_sample;
+
+typedef struct ms_eval_sample_result {
+    uint32_t correct;
+    uint32_t predicted_index;
+    double score;
+    double elapsed_ms;
+} ms_eval_sample_result;
+
 MS_RUNTIME_API const char * ms_runtime_version(void);
 MS_RUNTIME_API const char * ms_runtime_llama_system_info(void);
 MS_RUNTIME_API const char * ms_runtime_last_error(void);
@@ -129,6 +153,35 @@ MS_RUNTIME_API int32_t ms_runtime_eval_recipe_single(
     uint32_t max_tokens,
     ms_baseline_benchmark * out_benchmark,
     ms_recipe_eval_result * out_eval);
+MS_RUNTIME_API int32_t ms_runtime_eval_task_suite(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_eval_sample_result * out_recipe_results);
+MS_RUNTIME_API int32_t ms_runtime_eval_task_suite_compare(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    const ms_eval_sample * samples,
+    uint64_t sample_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_eval_sample_result * out_baseline_results,
+    ms_eval_sample_result * out_recipe_results);
 
 #ifdef __cplusplus
 }

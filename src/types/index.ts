@@ -139,10 +139,12 @@ export interface RecipeState {
 }
 
 export type RecipeTestMode = "single" | "compare_baseline";
+export type EvalSuite = "official_core" | "ppl_smoke" | "standard_subset";
 
 // ---- Progress ----
 
 export type ProgressStage =
+  | "installing"
   | "requantizing"
   | "writing"
   | "loading"
@@ -178,6 +180,7 @@ export interface BenchmarkResult {
   convertedBytesAfter: number;
   baselineBenchmark: RuntimeBenchmark | null;
   qualityEval: RecipeQualityEval | null;
+  taskEval: TaskEvalSummary | null;
 }
 
 export interface RecipeQualityEval {
@@ -209,6 +212,37 @@ export interface RuntimeBenchmark {
   loadMs: number;
   elapsedMs: number;
   modelTensorCount: number | null;
+}
+
+export interface TaskEvalSummary {
+  suite: string;
+  tasks: TaskEvalResult[];
+  aggregate: TaskEvalAggregate;
+}
+
+export interface TaskEvalResult {
+  task: string;
+  metric: string;
+  sampleCount: number;
+  baselineScore: number | null;
+  recipeScore: number;
+  delta: number | null;
+}
+
+export interface TaskEvalAggregate {
+  sampleCount: number;
+  baselineScore: number | null;
+  recipeScore: number;
+  delta: number | null;
+}
+
+export interface OfficialEvalBackendStatus {
+  installed: boolean;
+  backendDir: string;
+  pythonPath: string | null;
+  lmEvalAvailable: boolean;
+  adapterAvailable: boolean;
+  message: string;
 }
 
 // ---- Bulk Assign ----

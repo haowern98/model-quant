@@ -154,6 +154,7 @@ export function createMockBridge() {
       },
       test_recipe: (args) => {
         const isCompare = args?.testMode === "compare_baseline";
+        const isStandard = args?.evalSuite === "standard_subset";
         return {
           promptEvalTps: 1247,
           tokenGenTps: 88.3,
@@ -209,8 +210,53 @@ export function createMockBridge() {
             evalSampleCount: 12,
             skippedSampleCount: 0,
           },
+          taskEval: isStandard
+            ? {
+                suite: "standard_subset",
+                aggregate: {
+                  sampleCount: 12,
+                  baselineScore: isCompare ? 0.75 : null,
+                  recipeScore: 0.83,
+                  delta: isCompare ? 0.08 : null,
+                },
+                tasks: [
+                  {
+                    task: "arc_easy",
+                    metric: "accuracy",
+                    sampleCount: 2,
+                    baselineScore: isCompare ? 1 : null,
+                    recipeScore: 1,
+                    delta: isCompare ? 0 : null,
+                  },
+                  {
+                    task: "gsm8k_small",
+                    metric: "exact_match",
+                    sampleCount: 2,
+                    baselineScore: isCompare ? 0.5 : null,
+                    recipeScore: 1,
+                    delta: isCompare ? 0.5 : null,
+                  },
+                ],
+              }
+            : null,
         };
       },
+      get_official_eval_backend_status: () => ({
+        installed: true,
+        backendDir: "mock-official-eval-backend",
+        pythonPath: "mock-python",
+        lmEvalAvailable: true,
+        adapterAvailable: true,
+        message: "Mock official eval backend is installed",
+      }),
+      install_official_eval_backend: () => ({
+        installed: true,
+        backendDir: "mock-official-eval-backend",
+        pythonPath: "mock-python",
+        lmEvalAvailable: true,
+        adapterAvailable: true,
+        message: "Mock official eval backend is installed",
+      }),
       save_recipe: () => {
         recipe.status = "saved";
       },

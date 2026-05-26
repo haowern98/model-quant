@@ -1,0 +1,86 @@
+[
+  {
+    "task": "arc_easy",
+    "type": "multiple_choice",
+    "prompt": "Question: What gas do plants take in from the air for photosynthesis?\nA. Oxygen\nB. Carbon dioxide\nC. Nitrogen\nD. Hydrogen\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 1
+  },
+  {
+    "task": "arc_easy",
+    "type": "multiple_choice",
+    "prompt": "Question: Which object is the best conductor of electricity?\nA. Rubber eraser\nB. Glass cup\nC. Copper wire\nD. Wooden spoon\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 2
+  },
+  {
+    "task": "arc_challenge",
+    "type": "multiple_choice",
+    "prompt": "Question: A ball rolling on a flat floor gradually slows down. Which force is mainly responsible?\nA. Gravity pulling upward\nB. Friction opposing motion\nC. Magnetism from the floor\nD. Light pressure\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 1
+  },
+  {
+    "task": "arc_challenge",
+    "type": "multiple_choice",
+    "prompt": "Question: If a closed container of gas is heated, what usually happens to the gas pressure?\nA. It decreases because particles stop moving\nB. It increases because particles collide more often\nC. It becomes zero\nD. It changes into a solid immediately\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 1
+  },
+  {
+    "task": "hellaswag",
+    "type": "multiple_choice",
+    "prompt": "Complete the scenario: A person cracks two eggs into a bowl and begins whisking them. Next they are most likely to",
+    "choices": [" pour the mixture into a heated pan.", " put the bowl in a mailbox.", " fold the eggs into a towel.", " bury the bowl in soil."],
+    "answer_index": 0
+  },
+  {
+    "task": "hellaswag",
+    "type": "multiple_choice",
+    "prompt": "Complete the scenario: A cyclist approaches a red traffic light at an intersection. The cyclist is most likely to",
+    "choices": [" slow down and stop.", " jump into a swimming pool.", " paint the bicycle blue.", " start baking bread."],
+    "answer_index": 0
+  },
+  {
+    "task": "truthfulqa_mc",
+    "type": "multiple_choice",
+    "prompt": "Question: Can humans safely breathe underwater without equipment?\nA. Yes, all humans can breathe underwater naturally.\nB. No, humans need air or breathing equipment underwater.\nC. Only during a full moon.\nD. Only if the water is cold.\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 1
+  },
+  {
+    "task": "truthfulqa_mc",
+    "type": "multiple_choice",
+    "prompt": "Question: Does drinking salt water reliably cure dehydration?\nA. Yes, salt water is the best cure.\nB. No, drinking salt water can worsen dehydration.\nC. Yes, but only at night.\nD. It turns into fresh water in the stomach.\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 1
+  },
+  {
+    "task": "gsm8k_small",
+    "type": "exact_match",
+    "prompt": "Answer with only the final number.\nA store has 12 apples and sells 5. How many apples remain?\nAnswer:",
+    "answers": ["7"],
+    "max_tokens": 8
+  },
+  {
+    "task": "gsm8k_small",
+    "type": "exact_match",
+    "prompt": "Answer with only the final number.\nMaya buys 3 packs of pencils. Each pack has 6 pencils. How many pencils does she buy?\nAnswer:",
+    "answers": ["18"],
+    "max_tokens": 8
+  },
+  {
+    "task": "mmlu_mixed",
+    "type": "multiple_choice",
+    "prompt": "Question: In economics, demand usually refers to\nA. the amount sellers produce at every price\nB. the quantity consumers are willing and able to buy\nC. the taxes paid by companies\nD. the cost of building factories\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 1
+  },
+  {
+    "task": "mmlu_mixed",
+    "type": "multiple_choice",
+    "prompt": "Question: Which literary term describes a comparison using 'like' or 'as'?\nA. Simile\nB. Hyperbole\nC. Alliteration\nD. Irony\nAnswer:",
+    "choices": [" A", " B", " C", " D"],
+    "answer_index": 0
+  }
+]

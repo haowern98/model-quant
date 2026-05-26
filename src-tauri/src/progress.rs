@@ -11,6 +11,8 @@ pub struct ProgressEvent {
 
 #[derive(Debug, Clone, Serialize)]
 pub enum ProgressStage {
+    #[serde(rename = "installing")]
+    Installing,
     #[serde(rename = "requantizing")]
     Requantizing,
     #[serde(rename = "writing")]
@@ -40,18 +42,38 @@ impl ProgressEmitter {
     }
 
     pub fn requantizing(&self, percent: f32, info: &str) {
-        self.emit(ProgressStage::Requantizing, percent, &format!("Requantizing: {}", info));
+        self.emit(
+            ProgressStage::Requantizing,
+            percent,
+            &format!("Requantizing: {}", info),
+        );
+    }
+
+    pub fn installing(&self, percent: f32, info: &str) {
+        self.emit(ProgressStage::Installing, percent, info);
     }
 
     pub fn writing(&self, percent: f32, info: &str) {
-        self.emit(ProgressStage::Writing, percent, &format!("Writing: {}", info));
+        self.emit(
+            ProgressStage::Writing,
+            percent,
+            &format!("Writing: {}", info),
+        );
     }
 
     pub fn loading(&self, percent: f32) {
-        self.emit(ProgressStage::Loading, percent, "Loading model into VRAM...");
+        self.emit(
+            ProgressStage::Loading,
+            percent,
+            "Loading model into VRAM...",
+        );
     }
 
     pub fn benchmarking(&self, percent: f32) {
-        self.emit(ProgressStage::Benchmarking, percent, "Running inference benchmark...");
+        self.emit(
+            ProgressStage::Benchmarking,
+            percent,
+            "Running inference benchmark...",
+        );
     }
 }
