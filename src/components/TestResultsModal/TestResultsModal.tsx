@@ -10,12 +10,30 @@ interface TestResultsModalProps {
   onDiscard: () => void;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(0)} KB`;
+  }
+  return `${bytes} B`;
+}
+
 export function TestResultsModal({ result, onSave, onExport, onDiscard }: TestResultsModalProps) {
   if (!result) return null;
 
   const isNativeSmoke = result.testMode === 'native_runtime_smoke';
   const isNativeBaseline = result.testMode === 'native_baseline';
   const passed = isNativeSmoke || isNativeBaseline || result.tokenGenTps > 0;
+  const hasTensorStats =
+    result.copiedTensorCount > 0 ||
+    result.convertedTensorCount > 0 ||
+    result.convertedBytesBefore > 0 ||
+    result.convertedBytesAfter > 0;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
@@ -37,6 +55,21 @@ export function TestResultsModal({ result, onSave, onExport, onDiscard }: TestRe
             <p className="mt-2 font-mono break-words">{result.nativeRuntime}</p>
           )}
         </div>
+
+        {hasTensorStats && (
+          <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+              <span className="text-text-muted">Copied tensors</span>
+              <span className="text-right font-mono text-text-primary">{result.copiedTensorCount}</span>
+              <span className="text-text-muted">Converted tensors</span>
+              <span className="text-right font-mono text-text-primary">{result.convertedTensorCount}</span>
+              <span className="text-text-muted">Converted from</span>
+              <span className="text-right font-mono text-text-primary">{formatBytes(result.convertedBytesBefore)}</span>
+              <span className="text-text-muted">Converted to</span>
+              <span className="text-right font-mono text-text-primary">{formatBytes(result.convertedBytesAfter)}</span>
+            </div>
+          </div>
+        )}
 
         <div className="p-4 grid grid-cols-2 gap-6">
           <LatencyTable result={result} />

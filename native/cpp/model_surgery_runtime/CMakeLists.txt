@@ -10,6 +10,12 @@ target_include_directories(model_surgery_runtime
 target_link_libraries(model_surgery_runtime PRIVATE llama)
 target_compile_definitions(model_surgery_runtime PRIVATE MODEL_SURGERY_RUNTIME_BUILD)
 
+find_package(CUDAToolkit QUIET)
+if (CUDAToolkit_FOUND)
+    target_link_libraries(model_surgery_runtime PRIVATE CUDA::cudart)
+    target_compile_definitions(model_surgery_runtime PRIVATE MODEL_SURGERY_RUNTIME_CUDA_PROFILING=1)
+endif()
+
 if (MSVC)
     target_compile_options(model_surgery_runtime PRIVATE /W4 /permissive-)
 else()

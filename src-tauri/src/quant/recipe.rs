@@ -120,26 +120,102 @@ impl RecipeState {
 
     pub fn assign_all(&mut self, quant_type: QuantType) {
         for assign in &mut self.assignments {
-            assign.quant_type = quant_type.clone();
+            if should_bulk_assign(&assign.tensor_name, &quant_type) {
+                assign.quant_type = quant_type.clone();
+            }
         }
         self.status = RecipeStatus::Draft;
     }
 
     pub fn assign_by_pattern(&mut self, pattern: &str, quant_type: QuantType) {
         let is_match: Box<dyn Fn(&str) -> bool> = match pattern {
-            "all_attn" => Box::new(|n: &str| n.contains("attention")),
-            "all_ffn" => Box::new(|n: &str| n.contains("feed_forward") || n.contains("ffn")),
-            "all_embeddings" => Box::new(|n: &str| n.contains("embedding") || n.contains("output.weight")),
+            "all_attn" => Box::new(is_attention_tensor),
+            "all_ffn" => Box::new(is_ffn_tensor),
+            "all_embeddings" => Box::new(is_embedding_tensor),
             _ => Box::new(|_: &str| true),
         };
 
         for assign in &mut self.assignments {
-            if is_match(&assign.tensor_name) {
+            if is_match(&assign.tensor_name) && should_bulk_assign(&assign.tensor_name, &quant_type)
+            {
                 assign.quant_type = quant_type.clone();
             }
         }
         self.status = RecipeStatus::Draft;
     }
+}
+
+fn should_bulk_assign(name: &str, quant_type: &QuantType) -> bool {
+    !is_quantized_target(quant_type) || is_runtime_quantizable_tensor(name)
+}
+
+fn is_quantized_target(quant_type: &QuantType) -> bool {
+    matches!(
+        quant_type,
+        QuantType::Q8_0
+            | QuantType::Q6_K
+            | QuantType::Q5_K
+            | QuantType::Q5_K_M
+            | QuantType::Q4_K
+            | QuantType::Q4_K_M
+            | QuantType::Q3_K
+            | QuantType::Q3_K_M
+            | QuantType::Q2_K
+    )
+}
+
+fn is_runtime_quantizable_tensor(name: &str) -> bool {
+    !contains_any(name, &["bias", "norm", "rope", "scale"])
+}
+
+fn is_attention_tensor(name: &str) -> bool {
+    contains_any(
+        name,
+        &[
+            "attention",
+            "self_attn",
+            "attn_",
+            ".attn_",
+            "attn_q",
+            "attn_k",
+            "attn_v",
+            "attn_output",
+            "attn_norm",
+        ],
+    )
+}
+
+fn is_ffn_tensor(name: &str) -> bool {
+    contains_any(
+        name,
+        &[
+            "feed_forward",
+            "ffn_",
+            ".ffn_",
+            "mlp",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
+    )
+}
+
+fn is_embedding_tensor(name: &str) -> bool {
+    contains_any(
+        name,
+        &[
+            "token_embd",
+            "tok_embeddings",
+            "embed_tokens",
+            "embedding",
+            "output.weight",
+            "per_layer_token_embd",
+        ],
+    )
+}
+
+fn contains_any(name: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| name.contains(needle))
 }
 
 #[cfg(test)]
@@ -150,23 +226,35 @@ mod tests {
         vec![
             "tok_embeddings.weight".into(),
             "layers.0.attention.wq.weight".into(),
+            "blk.0.attn_q.weight".into(),
+            "blk.0.attn_norm.weight".into(),
             "layers.0.feed_forward.w1.weight".into(),
+            "blk.0.ffn_gate.weight".into(),
+            "blk.0.ffn_norm.weight".into(),
             "output.weight".into(),
+            "output_norm.weight".into(),
         ]
     }
 
     #[test]
     fn test_new_recipe_default_quant() {
         let recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
-        assert_eq!(recipe.assignments.len(), 4);
-        assert!(recipe.assignments.iter().all(|a| a.quant_type == QuantType::Q4_K_M));
+        assert_eq!(recipe.assignments.len(), 9);
+        assert!(recipe
+            .assignments
+            .iter()
+            .all(|a| a.quant_type == QuantType::Q4_K_M));
     }
 
     #[test]
     fn test_assign_single_tensor() {
         let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
         recipe.assign_tensors(&["layers.0.attention.wq.weight".into()], QuantType::Q6_K);
-        let attn = recipe.assignments.iter().find(|a| a.tensor_name == "layers.0.attention.wq.weight").unwrap();
+        let attn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "layers.0.attention.wq.weight")
+            .unwrap();
         assert_eq!(attn.quant_type, QuantType::Q6_K);
     }
 
@@ -174,10 +262,132 @@ mod tests {
     fn test_assign_by_pattern_attn() {
         let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
         recipe.assign_by_pattern("all_attn", QuantType::Q8_0);
-        let attn = recipe.assignments.iter().find(|a| a.tensor_name.contains("attention")).unwrap();
-        let ffn = recipe.assignments.iter().find(|a| a.tensor_name.contains("feed_forward")).unwrap();
+        let attn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name.contains("attention"))
+            .unwrap();
+        let gguf_attn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "blk.0.attn_q.weight")
+            .unwrap();
+        let ffn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name.contains("feed_forward"))
+            .unwrap();
+        let attn_norm = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "blk.0.attn_norm.weight")
+            .unwrap();
         assert_eq!(attn.quant_type, QuantType::Q8_0);
+        assert_eq!(gguf_attn.quant_type, QuantType::Q8_0);
+        assert_eq!(attn_norm.quant_type, QuantType::Q4_K_M);
         assert_eq!(ffn.quant_type, QuantType::Q4_K_M);
+    }
+
+    #[test]
+    fn test_assign_by_pattern_ffn() {
+        let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
+        recipe.assign_by_pattern("all_ffn", QuantType::Q8_0);
+        let feed_forward = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name.contains("feed_forward"))
+            .unwrap();
+        let gguf_ffn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "blk.0.ffn_gate.weight")
+            .unwrap();
+        let attn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "blk.0.attn_q.weight")
+            .unwrap();
+        let ffn_norm = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "blk.0.ffn_norm.weight")
+            .unwrap();
+        assert_eq!(feed_forward.quant_type, QuantType::Q8_0);
+        assert_eq!(gguf_ffn.quant_type, QuantType::Q8_0);
+        assert_eq!(ffn_norm.quant_type, QuantType::Q4_K_M);
+        assert_eq!(attn.quant_type, QuantType::Q4_K_M);
+    }
+
+    #[test]
+    fn test_assign_by_pattern_embeddings() {
+        let mut recipe = RecipeState::new(
+            "test.gguf".into(),
+            vec![
+                "token_embd.weight".into(),
+                "model.embed_tokens.weight".into(),
+                "per_layer_token_embd.weight".into(),
+                "output.weight".into(),
+                "blk.0.attn_q.weight".into(),
+            ],
+            QuantType::Q4_K_M,
+        );
+        recipe.assign_by_pattern("all_embeddings", QuantType::Q8_0);
+
+        for name in [
+            "token_embd.weight",
+            "model.embed_tokens.weight",
+            "per_layer_token_embd.weight",
+            "output.weight",
+        ] {
+            let assign = recipe
+                .assignments
+                .iter()
+                .find(|a| a.tensor_name == name)
+                .unwrap();
+            assert_eq!(assign.quant_type, QuantType::Q8_0);
+        }
+
+        let attn = recipe
+            .assignments
+            .iter()
+            .find(|a| a.tensor_name == "blk.0.attn_q.weight")
+            .unwrap();
+        assert_eq!(attn.quant_type, QuantType::Q4_K_M);
+    }
+
+    #[test]
+    fn test_assign_all_quantized_preserves_runtime_only_tensors() {
+        let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::BF16);
+        recipe.assign_all(QuantType::Q8_0);
+
+        for name in [
+            "tok_embeddings.weight",
+            "layers.0.attention.wq.weight",
+            "blk.0.attn_q.weight",
+            "layers.0.feed_forward.w1.weight",
+            "blk.0.ffn_gate.weight",
+            "output.weight",
+        ] {
+            let assign = recipe
+                .assignments
+                .iter()
+                .find(|a| a.tensor_name == name)
+                .unwrap();
+            assert_eq!(assign.quant_type, QuantType::Q8_0);
+        }
+
+        for name in [
+            "blk.0.attn_norm.weight",
+            "blk.0.ffn_norm.weight",
+            "output_norm.weight",
+        ] {
+            let assign = recipe
+                .assignments
+                .iter()
+                .find(|a| a.tensor_name == name)
+                .unwrap();
+            assert_eq!(assign.quant_type, QuantType::BF16);
+        }
     }
 
     #[test]

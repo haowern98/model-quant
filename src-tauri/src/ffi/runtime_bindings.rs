@@ -22,8 +22,14 @@ pub struct MsBaselineBenchmark {
     pub prompt_eval_tps: f64,
     pub token_gen_tps: f64,
     pub ttft_ms: f64,
+    pub vram_peak_mb: f64,
+    pub vram_allocated_mb: f64,
     pub prompt_tokens: u32,
     pub generated_tokens: u32,
+    pub copied_tensor_count: u64,
+    pub converted_tensor_count: u64,
+    pub converted_bytes_before: u64,
+    pub converted_bytes_after: u64,
 }
 
 #[repr(C)]
@@ -87,7 +93,8 @@ pub fn llama_system_info() -> String {
 }
 
 pub fn inspect_gguf(path: &str) -> Result<MsGgufSummary, String> {
-    let c_path = CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
     let mut summary = MsGgufSummary {
         version: 0,
         tensor_count: 0,
@@ -108,14 +115,21 @@ pub fn analyze_recipe(
     path: &str,
     targets: &[(String, String)],
 ) -> Result<MsRecipeAnalysis, String> {
-    let c_path = CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
     let c_names = targets
         .iter()
-        .map(|(name, _)| CString::new(name.as_str()).map_err(|_| format!("tensor name contains an interior NUL byte: {}", name)))
+        .map(|(name, _)| {
+            CString::new(name.as_str())
+                .map_err(|_| format!("tensor name contains an interior NUL byte: {}", name))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let c_quants = targets
         .iter()
-        .map(|(_, quant)| CString::new(quant.as_str()).map_err(|_| format!("quant type contains an interior NUL byte: {}", quant)))
+        .map(|(_, quant)| {
+            CString::new(quant.as_str())
+                .map_err(|_| format!("quant type contains an interior NUL byte: {}", quant))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let native_targets = c_names
         .iter()
@@ -155,8 +169,10 @@ pub fn benchmark_baseline(
     prompt: &str,
     max_tokens: u32,
 ) -> Result<MsBaselineBenchmark, String> {
-    let c_path = CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
-    let c_prompt = CString::new(prompt).map_err(|_| "benchmark prompt contains an interior NUL byte".to_string())?;
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_prompt = CString::new(prompt)
+        .map_err(|_| "benchmark prompt contains an interior NUL byte".to_string())?;
     let mut benchmark = MsBaselineBenchmark {
         load_ms: 0.0,
         prompt_eval_ms: 0.0,
@@ -164,8 +180,14 @@ pub fn benchmark_baseline(
         prompt_eval_tps: 0.0,
         token_gen_tps: 0.0,
         ttft_ms: 0.0,
+        vram_peak_mb: 0.0,
+        vram_allocated_mb: 0.0,
         prompt_tokens: 0,
         generated_tokens: 0,
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
     };
 
     let result = unsafe {
@@ -199,8 +221,14 @@ pub fn benchmark_user_copy(
         prompt_eval_tps: 0.0,
         token_gen_tps: 0.0,
         ttft_ms: 0.0,
+        vram_peak_mb: 0.0,
+        vram_allocated_mb: 0.0,
         prompt_tokens: 0,
         generated_tokens: 0,
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
     };
 
     let result = unsafe {
@@ -224,15 +252,23 @@ pub fn benchmark_recipe(
     prompt: &str,
     max_tokens: u32,
 ) -> Result<MsBaselineBenchmark, String> {
-    let c_path = CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
-    let c_prompt = CString::new(prompt).map_err(|_| "benchmark prompt contains an interior NUL byte".to_string())?;
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_prompt = CString::new(prompt)
+        .map_err(|_| "benchmark prompt contains an interior NUL byte".to_string())?;
     let c_names = targets
         .iter()
-        .map(|(name, _)| CString::new(name.as_str()).map_err(|_| format!("tensor name contains an interior NUL byte: {}", name)))
+        .map(|(name, _)| {
+            CString::new(name.as_str())
+                .map_err(|_| format!("tensor name contains an interior NUL byte: {}", name))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let c_quants = targets
         .iter()
-        .map(|(_, quant)| CString::new(quant.as_str()).map_err(|_| format!("quant type contains an interior NUL byte: {}", quant)))
+        .map(|(_, quant)| {
+            CString::new(quant.as_str())
+                .map_err(|_| format!("quant type contains an interior NUL byte: {}", quant))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let native_targets = c_names
         .iter()
@@ -249,8 +285,14 @@ pub fn benchmark_recipe(
         prompt_eval_tps: 0.0,
         token_gen_tps: 0.0,
         ttft_ms: 0.0,
+        vram_peak_mb: 0.0,
+        vram_allocated_mb: 0.0,
         prompt_tokens: 0,
         generated_tokens: 0,
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
     };
 
     let result = unsafe {

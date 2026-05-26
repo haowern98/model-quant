@@ -16,6 +16,10 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(MODEL_SURGERY_RUNTIME_CUDA_PROFILING)
+#include <cuda_runtime.h>
+#endif
+
 namespace {
 
 thread_local std::string last_error;
@@ -35,6 +39,57 @@ int32_t fail(const std::string & message) {
 double elapsed_ms(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end) {
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
+
+bool read_cuda_used_mb(double & out_used_mb) {
+#if defined(MODEL_SURGERY_RUNTIME_CUDA_PROFILING)
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    const cudaError_t result = cudaMemGetInfo(&free_bytes, &total_bytes);
+    if (result != cudaSuccess) {
+        return false;
+    }
+
+    out_used_mb = static_cast<double>(total_bytes - free_bytes) / (1024.0 * 1024.0);
+    return true;
+#else
+    out_used_mb = 0.0;
+    return false;
+#endif
+}
+
+struct VramTracker {
+    bool available = false;
+    double baseline_mb = 0.0;
+    double current_mb = 0.0;
+    double peak_mb = 0.0;
+
+    void reset() {
+        double used_mb = 0.0;
+        available = read_cuda_used_mb(used_mb);
+        baseline_mb = available ? used_mb : 0.0;
+        current_mb = 0.0;
+        peak_mb = 0.0;
+    }
+
+    void sample() {
+        if (!available) {
+            return;
+        }
+
+        double used_mb = 0.0;
+        if (!read_cuda_used_mb(used_mb)) {
+            available = false;
+            current_mb = 0.0;
+            peak_mb = 0.0;
+            return;
+        }
+
+        current_mb = used_mb > baseline_mb ? used_mb - baseline_mb : 0.0;
+        if (current_mb > peak_mb) {
+            peak_mb = current_mb;
+        }
+    }
+};
 
 bool ensure_backend_initialized() {
     static const bool initialized = [] {
@@ -100,8 +155,19 @@ uint64_t estimate_type_size(size_t current_size, ggml_type current_type, ggml_ty
     return static_cast<uint64_t>((static_cast<double>(current_size) * target_bpw / current_bpw) + 0.5);
 }
 
-bool supports_recipe_conversion(ggml_type current_type, ggml_type target_type) {
+bool is_runtime_quantizable_tensor(std::string_view name) {
+    return name.find("bias") == std::string_view::npos
+        && name.find("norm") == std::string_view::npos
+        && name.find("rope") == std::string_view::npos
+        && name.find("scale") == std::string_view::npos;
+}
+
+bool supports_recipe_conversion(std::string_view name, ggml_type current_type, ggml_type target_type) {
     if (target_type != GGML_TYPE_Q8_0) {
+        return false;
+    }
+
+    if (!is_runtime_quantizable_tensor(name)) {
         return false;
     }
 
@@ -181,7 +247,7 @@ bool validate_recipe_for_user_model(
         }
 
         const ggml_type current_type = gguf_get_tensor_type(source_metadata, tensor_id);
-        if (current_type != target_type && !supports_recipe_conversion(current_type, target_type)) {
+        if (current_type != target_type && !supports_recipe_conversion(name, current_type, target_type)) {
             unsupported.push_back(
                 name + " " + display_quant_type(current_type) + "->" + display_quant_type(target_type));
         }
@@ -227,6 +293,8 @@ struct UserCopyTensorReader {
     size_t data_offset = 0;
     uint64_t copied_tensors = 0;
     uint64_t converted_tensors = 0;
+    uint64_t converted_bytes_before = 0;
+    uint64_t converted_bytes_after = 0;
 };
 
 void read_exact_at(
@@ -337,6 +405,8 @@ void convert_source_tensor_to_q8_0(
     }
 
     reader->converted_tensors += 1;
+    reader->converted_bytes_before += source_size;
+    reader->converted_bytes_after += target_size;
 }
 
 void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
@@ -358,7 +428,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     const auto target = reader->target_types.find(name);
     const ggml_type target_type = target == reader->target_types.end() ? current_type : target->second;
     if (target_type != current_type) {
-        if (supports_recipe_conversion(current_type, target_type) && target_type == GGML_TYPE_Q8_0) {
+        if (supports_recipe_conversion(name, current_type, target_type) && target_type == GGML_TYPE_Q8_0) {
             convert_source_tensor_to_q8_0(tensor, reader, name, tensor_id, current_type);
             return;
         }
@@ -401,6 +471,7 @@ int32_t run_loaded_model_benchmark(
     const char * prompt,
     uint32_t max_tokens,
     double load_time_ms,
+    VramTracker * vram_tracker,
     ms_baseline_benchmark * out_benchmark) {
     const llama_vocab * vocab = llama_model_get_vocab(model);
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
@@ -443,6 +514,9 @@ int32_t run_loaded_model_benchmark(
     if (ctx == nullptr) {
         return fail("failed to create llama context");
     }
+    if (vram_tracker != nullptr) {
+        vram_tracker->sample();
+    }
 
     const auto prompt_start = std::chrono::steady_clock::now();
     const int prompt_res = llama_decode(
@@ -453,6 +527,9 @@ int32_t run_loaded_model_benchmark(
     }
     llama_synchronize(ctx.get());
     const auto prompt_end = std::chrono::steady_clock::now();
+    if (vram_tracker != nullptr) {
+        vram_tracker->sample();
+    }
 
     std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
         llama_sampler_chain_init(llama_sampler_chain_default_params()),
@@ -476,6 +553,9 @@ int32_t run_loaded_model_benchmark(
         ++generated;
     }
     const auto generation_end = std::chrono::steady_clock::now();
+    if (vram_tracker != nullptr) {
+        vram_tracker->sample();
+    }
 
     const double prompt_time_ms = elapsed_ms(prompt_start, prompt_end);
     const double generation_time_ms = elapsed_ms(generation_start, generation_end);
@@ -490,8 +570,14 @@ int32_t run_loaded_model_benchmark(
         ? (static_cast<double>(generated) * 1000.0 / generation_time_ms)
         : 0.0;
     out_benchmark->ttft_ms = prompt_time_ms;
+    out_benchmark->vram_peak_mb = vram_tracker != nullptr ? vram_tracker->peak_mb : 0.0;
+    out_benchmark->vram_allocated_mb = vram_tracker != nullptr ? vram_tracker->current_mb : 0.0;
     out_benchmark->prompt_tokens = static_cast<uint32_t>(prompt_tokens.size());
     out_benchmark->generated_tokens = generated;
+    out_benchmark->copied_tensor_count = 0;
+    out_benchmark->converted_tensor_count = 0;
+    out_benchmark->converted_bytes_before = 0;
+    out_benchmark->converted_bytes_after = 0;
 
     return 0;
 }
@@ -607,7 +693,7 @@ int32_t ms_runtime_analyze_recipe(
             const size_t current_size = gguf_get_tensor_size(ctx, tensor_id);
             if (current_type != target_type) {
                 analysis.changed_count += 1;
-                if (!supports_recipe_conversion(current_type, target_type)) {
+                if (!supports_recipe_conversion(target.name, current_type, target_type)) {
                     analysis.unsupported_count += 1;
                 }
             }
@@ -645,6 +731,8 @@ int32_t ms_runtime_benchmark_baseline(
 
     try {
         ensure_backend_initialized();
+        VramTracker vram_tracker = {};
+        vram_tracker.reset();
 
         llama_model_params model_params = llama_model_default_params();
         model_params.n_gpu_layers = -1;
@@ -656,10 +744,17 @@ int32_t ms_runtime_benchmark_baseline(
         if (model == nullptr) {
             return fail(std::string("failed to load model: ") + path);
         }
+        vram_tracker.sample();
 
         const double load_time_ms = elapsed_ms(load_start, load_end);
         std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        return run_loaded_model_benchmark(model_guard.get(), prompt, max_tokens, load_time_ms, out_benchmark);
+        return run_loaded_model_benchmark(
+            model_guard.get(),
+            prompt,
+            max_tokens,
+            load_time_ms,
+            &vram_tracker,
+            out_benchmark);
     } catch (const std::exception & err) {
         return fail(err.what());
     } catch (...) {
@@ -688,6 +783,8 @@ int32_t ms_runtime_benchmark_user_copy(
 
     try {
         ensure_backend_initialized();
+        VramTracker vram_tracker = {};
+        vram_tracker.reset();
 
         gguf_init_params gguf_params = {};
         gguf_params.no_alloc = true;
@@ -722,10 +819,24 @@ int32_t ms_runtime_benchmark_user_copy(
         if (model == nullptr) {
             return fail(std::string("failed to load user-copy model: ") + path);
         }
+        vram_tracker.sample();
 
         const double load_time_ms = elapsed_ms(load_start, load_end);
         std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        return run_loaded_model_benchmark(model_guard.get(), prompt, max_tokens, load_time_ms, out_benchmark);
+        const int32_t result = run_loaded_model_benchmark(
+            model_guard.get(),
+            prompt,
+            max_tokens,
+            load_time_ms,
+            &vram_tracker,
+            out_benchmark);
+        if (result == 0) {
+            out_benchmark->copied_tensor_count = reader.copied_tensors;
+            out_benchmark->converted_tensor_count = reader.converted_tensors;
+            out_benchmark->converted_bytes_before = reader.converted_bytes_before;
+            out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+        }
+        return result;
     } catch (const std::exception & err) {
         return fail(err.what());
     } catch (...) {
@@ -760,6 +871,8 @@ int32_t ms_runtime_benchmark_recipe(
 
     try {
         ensure_backend_initialized();
+        VramTracker vram_tracker = {};
+        vram_tracker.reset();
 
         std::unordered_map<std::string, ggml_type> target_types;
         if (!build_recipe_targets(targets, target_count, target_types)) {
@@ -812,10 +925,24 @@ int32_t ms_runtime_benchmark_recipe(
         if (model == nullptr) {
             return fail(std::string("failed to load recipe model: ") + path);
         }
+        vram_tracker.sample();
 
         const double load_time_ms = elapsed_ms(load_start, load_end);
         std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        return run_loaded_model_benchmark(model_guard.get(), prompt, max_tokens, load_time_ms, out_benchmark);
+        const int32_t result = run_loaded_model_benchmark(
+            model_guard.get(),
+            prompt,
+            max_tokens,
+            load_time_ms,
+            &vram_tracker,
+            out_benchmark);
+        if (result == 0) {
+            out_benchmark->copied_tensor_count = reader.copied_tensors;
+            out_benchmark->converted_tensor_count = reader.converted_tensors;
+            out_benchmark->converted_bytes_before = reader.converted_bytes_before;
+            out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+        }
+        return result;
     } catch (const std::exception & err) {
         return fail(err.what());
     } catch (...) {

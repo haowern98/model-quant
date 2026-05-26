@@ -19,6 +19,10 @@ pub struct BenchmarkResult {
     pub native_runtime: Option<String>,
     pub model_tensor_count: Option<u64>,
     pub model_metadata_count: Option<u64>,
+    pub copied_tensor_count: u64,
+    pub converted_tensor_count: u64,
+    pub converted_bytes_before: u64,
+    pub converted_bytes_after: u64,
 }
 
 pub fn run_benchmark(
@@ -41,14 +45,13 @@ pub fn run_benchmark(
     progress.loading(0.7);
 
     // Measure VRAM via C++ profiler
-    unsafe { crate::ffi::profiler_bindings::profiler_reset_peak(); }
+    unsafe {
+        crate::ffi::profiler_bindings::profiler_reset_peak();
+    }
     let mut vram_allocated_mb = 0.0f64;
     let mut vram_peak_mb = 0.0f64;
     unsafe {
-        crate::ffi::profiler_bindings::profiler_get_vram(
-            &mut vram_allocated_mb,
-            &mut vram_peak_mb,
-        );
+        crate::ffi::profiler_bindings::profiler_get_vram(&mut vram_allocated_mb, &mut vram_peak_mb);
     }
 
     progress.benchmarking(0.5);
@@ -69,6 +72,10 @@ pub fn run_benchmark(
         native_runtime: None,
         model_tensor_count: None,
         model_metadata_count: None,
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
     })
 }
 
@@ -82,21 +89,32 @@ pub fn run_native_runtime_smoke(
         .map(|m| m.len() as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0);
 
-    progress.emit(ProgressStage::Loading, 0.25, "Inspecting GGUF with native runtime...");
+    progress.emit(
+        ProgressStage::Loading,
+        0.25,
+        "Inspecting GGUF with native runtime...",
+    );
     let summary = crate::ffi::runtime_bindings::inspect_gguf(&gguf_path.to_string_lossy())?;
-    progress.emit(ProgressStage::Loading, 1.0, "Native runtime inspection complete");
+    progress.emit(
+        ProgressStage::Loading,
+        1.0,
+        "Native runtime inspection complete",
+    );
 
-    unsafe { crate::ffi::profiler_bindings::profiler_reset_peak(); }
+    unsafe {
+        crate::ffi::profiler_bindings::profiler_reset_peak();
+    }
     let mut vram_allocated_mb = 0.0f64;
     let mut vram_peak_mb = 0.0f64;
     unsafe {
-        crate::ffi::profiler_bindings::profiler_get_vram(
-            &mut vram_allocated_mb,
-            &mut vram_peak_mb,
-        );
+        crate::ffi::profiler_bindings::profiler_get_vram(&mut vram_allocated_mb, &mut vram_peak_mb);
     }
 
-    progress.emit(ProgressStage::Benchmarking, 1.0, "Native runtime smoke test complete");
+    progress.emit(
+        ProgressStage::Benchmarking,
+        1.0,
+        "Native runtime smoke test complete",
+    );
 
     let elapsed = start.elapsed();
     let runtime = crate::ffi::runtime_bindings::runtime_version();
@@ -119,6 +137,10 @@ pub fn run_native_runtime_smoke(
         native_runtime: Some(format!("{} | {}", runtime, system_info.trim())),
         model_tensor_count: Some(summary.tensor_count),
         model_metadata_count: Some(summary.metadata_count),
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
     })
 }
 
@@ -226,16 +248,6 @@ fn run_native_inference_benchmark(
     let benchmark = run_benchmark(&gguf_path.to_string_lossy(), prompt, max_tokens)?;
     progress.emit(ProgressStage::Benchmarking, 1.0, complete_message);
 
-    unsafe { crate::ffi::profiler_bindings::profiler_reset_peak(); }
-    let mut vram_allocated_mb = 0.0f64;
-    let mut vram_peak_mb = 0.0f64;
-    unsafe {
-        crate::ffi::profiler_bindings::profiler_get_vram(
-            &mut vram_allocated_mb,
-            &mut vram_peak_mb,
-        );
-    }
-
     let elapsed = start.elapsed();
     let runtime = crate::ffi::runtime_bindings::runtime_version();
     let system_info = crate::ffi::runtime_bindings::llama_system_info();
@@ -244,8 +256,8 @@ fn run_native_inference_benchmark(
         prompt_eval_tps: benchmark.prompt_eval_tps,
         token_gen_tps: benchmark.token_gen_tps,
         ttft_ms: benchmark.ttft_ms,
-        vram_peak_mb,
-        vram_allocated_mb,
+        vram_peak_mb: benchmark.vram_peak_mb,
+        vram_allocated_mb: benchmark.vram_allocated_mb,
         disk_size_mb: disk_size,
         elapsed_ms: elapsed.as_millis() as f64,
         load_ms: benchmark.load_ms,
@@ -254,5 +266,9 @@ fn run_native_inference_benchmark(
         native_runtime: Some(format!("{} | {}", runtime, system_info.trim())),
         model_tensor_count: Some(summary.tensor_count),
         model_metadata_count: Some(summary.metadata_count),
+        copied_tensor_count: benchmark.copied_tensor_count,
+        converted_tensor_count: benchmark.converted_tensor_count,
+        converted_bytes_before: benchmark.converted_bytes_before,
+        converted_bytes_after: benchmark.converted_bytes_after,
     })
 }

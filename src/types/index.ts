@@ -110,6 +110,10 @@ export interface BenchmarkResult {
   nativeRuntime: string | null;
   modelTensorCount: number | null;
   modelMetadataCount: number | null;
+  copiedTensorCount: number;
+  convertedTensorCount: number;
+  convertedBytesBefore: number;
+  convertedBytesAfter: number;
 }
 
 // ---- Bulk Assign ----

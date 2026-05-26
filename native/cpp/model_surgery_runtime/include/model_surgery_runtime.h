@@ -31,8 +31,14 @@ typedef struct ms_baseline_benchmark {
     double prompt_eval_tps;
     double token_gen_tps;
     double ttft_ms;
+    double vram_peak_mb;
+    double vram_allocated_mb;
     uint32_t prompt_tokens;
     uint32_t generated_tokens;
+    uint64_t copied_tensor_count;
+    uint64_t converted_tensor_count;
+    uint64_t converted_bytes_before;
+    uint64_t converted_bytes_after;
 } ms_baseline_benchmark;
 
 typedef struct ms_recipe_tensor_target {
