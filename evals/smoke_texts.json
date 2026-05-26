@@ -1,0 +1,50 @@
+[
+  {
+    "id": "factual_001",
+    "text": "Paris is the capital of France. The city is known for the Eiffel Tower, the Louvre, and the Seine river."
+  },
+  {
+    "id": "science_001",
+    "text": "Water freezes at zero degrees Celsius under standard atmospheric pressure and boils at one hundred degrees Celsius."
+  },
+  {
+    "id": "reasoning_001",
+    "text": "If every package in the warehouse has a label, and this box came from the warehouse, then the box should have a label."
+  },
+  {
+    "id": "code_001",
+    "text": "In Python, a function can return a value with the return keyword. The caller receives that value after the function finishes."
+  },
+  {
+    "id": "code_002",
+    "text": "A JavaScript array can be mapped into a new array by calling map with a callback function for each element."
+  },
+  {
+    "id": "dialogue_001",
+    "text": "User: Can you summarize this paragraph? Assistant: Yes. I will keep the summary short and preserve the main point."
+  },
+  {
+    "id": "instruction_001",
+    "text": "Write a concise checklist for packing a laptop bag: charger, notebook, headphones, identification, and any required cables."
+  },
+  {
+    "id": "math_001",
+    "text": "A rectangle with width four and height six has an area of twenty four square units."
+  },
+  {
+    "id": "planning_001",
+    "text": "Before changing a production database, create a backup, test the migration, and prepare a rollback plan."
+  },
+  {
+    "id": "technical_001",
+    "text": "Quantization reduces the number of bits used to represent model weights, which can lower memory use and improve inference speed."
+  },
+  {
+    "id": "writing_001",
+    "text": "The report should explain the tradeoff clearly, show the measured results, and avoid overstating what the experiment proves."
+  },
+  {
+    "id": "safety_001",
+    "text": "When measuring performance, use the same input data, the same runtime settings, and repeatable commands for both comparisons."
+  }
+]

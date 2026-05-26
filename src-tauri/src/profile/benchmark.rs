@@ -9,6 +9,8 @@ pub struct BenchmarkResult {
     pub prompt_eval_tps: f64,
     pub token_gen_tps: f64,
     pub ttft_ms: f64,
+    pub prompt_eval_ms: f64,
+    pub generation_ms: f64,
     pub vram_peak_mb: f64,
     pub vram_allocated_mb: f64,
     pub disk_size_mb: f64,
@@ -23,6 +25,48 @@ pub struct BenchmarkResult {
     pub converted_tensor_count: u64,
     pub converted_bytes_before: u64,
     pub converted_bytes_after: u64,
+    pub baseline_benchmark: Option<RuntimeBenchmark>,
+    pub quality_eval: Option<RecipeQualityEval>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipeQualityEval {
+    pub baseline_nll: Option<f64>,
+    pub baseline_ppl: Option<f64>,
+    pub baseline_eval_ms: Option<f64>,
+    pub baseline_vram_peak_mb: Option<f64>,
+    pub baseline_vram_allocated_mb: Option<f64>,
+    pub recipe_nll: f64,
+    pub recipe_ppl: f64,
+    pub recipe_eval_ms: f64,
+    pub recipe_vram_peak_mb: f64,
+    pub recipe_vram_allocated_mb: f64,
+    pub ppl_delta: f64,
+    pub ppl_delta_percent: f64,
+    pub eval_token_count: u64,
+    pub eval_sample_count: u64,
+    pub skipped_sample_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeBenchmark {
+    pub prompt_eval_tps: f64,
+    pub token_gen_tps: f64,
+    pub ttft_ms: f64,
+    pub prompt_eval_ms: f64,
+    pub generation_ms: f64,
+    pub vram_peak_mb: f64,
+    pub vram_allocated_mb: f64,
+    pub load_ms: f64,
+    pub elapsed_ms: f64,
+    pub model_tensor_count: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct EvalText {
+    text: String,
 }
 
 pub fn run_benchmark(
@@ -62,6 +106,8 @@ pub fn run_benchmark(
         prompt_eval_tps: 0.0,
         token_gen_tps: 0.0,
         ttft_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
         vram_peak_mb,
         vram_allocated_mb,
         disk_size_mb: disk_size,
@@ -76,6 +122,8 @@ pub fn run_benchmark(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        baseline_benchmark: None,
+        quality_eval: None,
     })
 }
 
@@ -124,6 +172,8 @@ pub fn run_native_runtime_smoke(
         prompt_eval_tps: 0.0,
         token_gen_tps: 0.0,
         ttft_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
         vram_peak_mb,
         vram_allocated_mb,
         disk_size_mb: disk_size,
@@ -141,6 +191,8 @@ pub fn run_native_runtime_smoke(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        baseline_benchmark: None,
+        quality_eval: None,
     })
 }
 
@@ -158,8 +210,9 @@ pub fn run_native_baseline_benchmark(
         "native_baseline",
         |path, prompt, max_tokens| {
             crate::ffi::runtime_bindings::benchmark_baseline(path, prompt, max_tokens)
+                .map(benchmark_only)
         },
-        |summary, benchmark| {
+        |summary, benchmark, _| {
             format!(
                 "Native llama.cpp baseline loaded GGUF v{} with {} tensors, evaluated {} prompt tokens, and generated {} tokens. Recipe quant overrides are not active for this run.",
                 summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
@@ -182,8 +235,9 @@ pub fn run_native_user_copy_benchmark(
         "native_user_copy",
         |path, prompt, max_tokens| {
             crate::ffi::runtime_bindings::benchmark_user_copy(path, prompt, max_tokens)
+                .map(benchmark_only)
         },
-        |summary, benchmark| {
+        |summary, benchmark, _| {
             format!(
                 "Native llama.cpp user-model path copied GGUF v{} with {} tensors into backend buffers, evaluated {} prompt tokens, and generated {} tokens. Changed tensor conversion is not active for this run.",
                 summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
@@ -198,20 +252,78 @@ pub fn run_native_recipe_benchmark(
     max_tokens: u32,
     progress: &ProgressEmitter,
 ) -> Result<BenchmarkResult, String> {
+    run_native_recipe_compare_benchmark(gguf_path, targets, max_tokens, progress)
+}
+
+pub fn run_native_recipe_single_benchmark(
+    gguf_path: &PathBuf,
+    targets: &[(String, String)],
+    max_tokens: u32,
+    progress: &ProgressEmitter,
+) -> Result<BenchmarkResult, String> {
+    let eval_texts = load_smoke_eval_texts()?;
     run_native_inference_benchmark(
         gguf_path,
         max_tokens,
         progress,
-        "Loading GGUF through native recipe path...",
-        "Native recipe inference complete",
-        "native_recipe_phase1",
+        "Running single recipe model test...",
+        "Native single recipe test complete",
+        "native_recipe_single_v1",
         |path, prompt, max_tokens| {
-            crate::ffi::runtime_bindings::benchmark_recipe(path, targets, prompt, max_tokens)
+            crate::ffi::runtime_bindings::eval_recipe_single(
+                path,
+                targets,
+                &eval_texts,
+                128,
+                prompt,
+                max_tokens,
+            )
+            .map(|(benchmark, eval)| (benchmark, Some(eval)))
         },
-        |summary, benchmark| {
+        |summary, benchmark, eval| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), copied unchanged tensors and applied supported in-memory conversions from GGUF v{}, evaluated {} prompt tokens, and generated {} tokens.",
-                targets.len(), summary.version, benchmark.prompt_tokens, benchmark.generated_tokens
+                "Native llama.cpp recipe path validated {} tensor target(s), evaluated standalone quality on {} tokens from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                targets.len(),
+                eval.map(|quality| quality.eval_token_count).unwrap_or(0),
+                summary.version,
+                benchmark.generated_tokens
+            )
+        },
+    )
+}
+
+pub fn run_native_recipe_compare_benchmark(
+    gguf_path: &PathBuf,
+    targets: &[(String, String)],
+    max_tokens: u32,
+    progress: &ProgressEmitter,
+) -> Result<BenchmarkResult, String> {
+    let eval_texts = load_smoke_eval_texts()?;
+    run_native_inference_benchmark(
+        gguf_path,
+        max_tokens,
+        progress,
+        "Running baseline and recipe drift eval...",
+        "Native recipe eval complete",
+        "native_recipe_eval_v1",
+        |path, prompt, max_tokens| {
+            crate::ffi::runtime_bindings::eval_recipe(
+                path,
+                targets,
+                &eval_texts,
+                128,
+                prompt,
+                max_tokens,
+            )
+            .map(|(benchmark, eval)| (benchmark, Some(eval)))
+        },
+        |summary, benchmark, eval| {
+            format!(
+                "Native llama.cpp recipe path validated {} tensor target(s), evaluated recipe drift on {} tokens from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                targets.len(),
+                eval.map(|quality| quality.eval_token_count).unwrap_or(0),
+                summary.version,
+                benchmark.generated_tokens
             )
         },
     )
@@ -228,10 +340,17 @@ fn run_native_inference_benchmark(
         &str,
         &str,
         u32,
-    ) -> Result<crate::ffi::runtime_bindings::MsBaselineBenchmark, String>,
+    ) -> Result<
+        (
+            crate::ffi::runtime_bindings::MsBaselineBenchmark,
+            Option<crate::ffi::runtime_bindings::MsRecipeEvalResult>,
+        ),
+        String,
+    >,
     status_message: impl FnOnce(
         &crate::ffi::runtime_bindings::MsGgufSummary,
         &crate::ffi::runtime_bindings::MsBaselineBenchmark,
+        Option<&RecipeQualityEval>,
     ) -> String,
 ) -> Result<BenchmarkResult, String> {
     let start = Instant::now();
@@ -245,7 +364,11 @@ fn run_native_inference_benchmark(
 
     progress.emit(ProgressStage::Loading, 0.1, loading_message);
     let summary = crate::ffi::runtime_bindings::inspect_gguf(&gguf_path.to_string_lossy())?;
-    let benchmark = run_benchmark(&gguf_path.to_string_lossy(), prompt, max_tokens)?;
+    let (benchmark, eval) = run_benchmark(&gguf_path.to_string_lossy(), prompt, max_tokens)?;
+    let baseline_benchmark = eval.as_ref().and_then(|native| {
+        baseline_runtime_benchmark_from_native(native, Some(summary.tensor_count))
+    });
+    let quality_eval = eval.map(recipe_quality_eval_from_native);
     progress.emit(ProgressStage::Benchmarking, 1.0, complete_message);
 
     let elapsed = start.elapsed();
@@ -256,13 +379,15 @@ fn run_native_inference_benchmark(
         prompt_eval_tps: benchmark.prompt_eval_tps,
         token_gen_tps: benchmark.token_gen_tps,
         ttft_ms: benchmark.ttft_ms,
+        prompt_eval_ms: benchmark.prompt_eval_ms,
+        generation_ms: benchmark.generation_ms,
         vram_peak_mb: benchmark.vram_peak_mb,
         vram_allocated_mb: benchmark.vram_allocated_mb,
         disk_size_mb: disk_size,
         elapsed_ms: elapsed.as_millis() as f64,
         load_ms: benchmark.load_ms,
         test_mode: test_mode.to_string(),
-        status_message: status_message(&summary, &benchmark),
+        status_message: status_message(&summary, &benchmark, quality_eval.as_ref()),
         native_runtime: Some(format!("{} | {}", runtime, system_info.trim())),
         model_tensor_count: Some(summary.tensor_count),
         model_metadata_count: Some(summary.metadata_count),
@@ -270,5 +395,76 @@ fn run_native_inference_benchmark(
         converted_tensor_count: benchmark.converted_tensor_count,
         converted_bytes_before: benchmark.converted_bytes_before,
         converted_bytes_after: benchmark.converted_bytes_after,
+        baseline_benchmark,
+        quality_eval,
     })
+}
+
+fn benchmark_only(
+    benchmark: crate::ffi::runtime_bindings::MsBaselineBenchmark,
+) -> (
+    crate::ffi::runtime_bindings::MsBaselineBenchmark,
+    Option<crate::ffi::runtime_bindings::MsRecipeEvalResult>,
+) {
+    (benchmark, None)
+}
+
+fn recipe_quality_eval_from_native(
+    eval: crate::ffi::runtime_bindings::MsRecipeEvalResult,
+) -> RecipeQualityEval {
+    let has_baseline = eval.baseline_ppl > 0.0;
+    RecipeQualityEval {
+        baseline_nll: has_baseline.then_some(eval.baseline_nll),
+        baseline_ppl: has_baseline.then_some(eval.baseline_ppl),
+        baseline_eval_ms: has_baseline.then_some(eval.baseline_eval_ms),
+        baseline_vram_peak_mb: has_baseline.then_some(eval.baseline_vram_peak_mb),
+        baseline_vram_allocated_mb: has_baseline.then_some(eval.baseline_vram_allocated_mb),
+        recipe_nll: eval.recipe_nll,
+        recipe_ppl: eval.recipe_ppl,
+        recipe_eval_ms: eval.recipe_eval_ms,
+        recipe_vram_peak_mb: eval.recipe_vram_peak_mb,
+        recipe_vram_allocated_mb: eval.recipe_vram_allocated_mb,
+        ppl_delta: eval.ppl_delta,
+        ppl_delta_percent: eval.ppl_delta_percent,
+        eval_token_count: eval.eval_token_count,
+        eval_sample_count: eval.eval_sample_count,
+        skipped_sample_count: eval.skipped_sample_count,
+    }
+}
+
+fn baseline_runtime_benchmark_from_native(
+    eval: &crate::ffi::runtime_bindings::MsRecipeEvalResult,
+    model_tensor_count: Option<u64>,
+) -> Option<RuntimeBenchmark> {
+    if eval.baseline_ppl <= 0.0 {
+        return None;
+    }
+
+    Some(RuntimeBenchmark {
+        prompt_eval_tps: eval.baseline_prompt_eval_tps,
+        token_gen_tps: eval.baseline_token_gen_tps,
+        ttft_ms: eval.baseline_ttft_ms,
+        prompt_eval_ms: eval.baseline_prompt_eval_ms,
+        generation_ms: eval.baseline_generation_ms,
+        vram_peak_mb: eval.baseline_vram_peak_mb,
+        vram_allocated_mb: eval.baseline_vram_allocated_mb,
+        load_ms: eval.baseline_load_ms,
+        elapsed_ms: eval.baseline_runtime_elapsed_ms,
+        model_tensor_count,
+    })
+}
+
+fn load_smoke_eval_texts() -> Result<Vec<String>, String> {
+    const SMOKE_TEXTS: &str = include_str!("../../../evals/smoke_texts.json");
+    let texts: Vec<EvalText> = serde_json::from_str(SMOKE_TEXTS)
+        .map_err(|err| format!("failed to parse bundled eval texts: {}", err))?;
+    let texts = texts
+        .into_iter()
+        .map(|entry| entry.text)
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>();
+    if texts.is_empty() {
+        return Err("bundled eval text set is empty".to_string());
+    }
+    Ok(texts)
 }

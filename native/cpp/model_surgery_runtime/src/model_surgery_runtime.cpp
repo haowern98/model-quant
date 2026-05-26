@@ -4,12 +4,15 @@
 #include "gguf.h"
 #include "llama.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <cstdint>
 #include <exception>
 #include <fstream>
 #include <ios>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -38,6 +41,10 @@ int32_t fail(const std::string & message) {
 
 double elapsed_ms(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end) {
     return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+double benchmark_runtime_elapsed_ms(const ms_baseline_benchmark & benchmark) {
+    return benchmark.load_ms + benchmark.prompt_eval_ms + benchmark.generation_ms;
 }
 
 bool read_cuda_used_mb(double & out_used_mb) {
@@ -297,6 +304,17 @@ struct UserCopyTensorReader {
     uint64_t converted_bytes_after = 0;
 };
 
+struct PerplexityScore {
+    double total_nll = 0.0;
+    double ppl = 0.0;
+    double eval_ms = 0.0;
+    double vram_peak_mb = 0.0;
+    double vram_allocated_mb = 0.0;
+    uint64_t token_count = 0;
+    uint64_t sample_count = 0;
+    uint64_t skipped_count = 0;
+};
+
 void read_exact_at(
     UserCopyTensorReader * reader,
     size_t offset,
@@ -464,6 +482,150 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     }
 
     reader->copied_tensors += 1;
+}
+
+std::vector<llama_token> tokenize_text(
+    const llama_vocab * vocab,
+    const char * text,
+    uint32_t max_eval_tokens) {
+    const int32_t text_len = static_cast<int32_t>(std::strlen(text));
+    int32_t token_count = llama_tokenize(vocab, text, text_len, nullptr, 0, true, true);
+    if (token_count == INT32_MIN) {
+        throw std::runtime_error("eval text tokenization overflowed");
+    }
+    if (token_count < 0) {
+        token_count = -token_count;
+    }
+    if (token_count <= 0) {
+        return {};
+    }
+
+    std::vector<llama_token> tokens(static_cast<size_t>(token_count));
+    const int32_t actual_tokens = llama_tokenize(
+        vocab,
+        text,
+        text_len,
+        tokens.data(),
+        token_count,
+        true,
+        true);
+    if (actual_tokens <= 0) {
+        return {};
+    }
+
+    tokens.resize(static_cast<size_t>(actual_tokens));
+    if (max_eval_tokens > 0 && tokens.size() > max_eval_tokens) {
+        tokens.resize(static_cast<size_t>(max_eval_tokens));
+    }
+    return tokens;
+}
+
+double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token target) {
+    if (logits == nullptr) {
+        throw std::runtime_error("llama.cpp returned null logits during eval");
+    }
+    if (target < 0 || target >= n_vocab) {
+        throw std::runtime_error("eval target token is outside model vocabulary");
+    }
+
+    float max_logit = -std::numeric_limits<float>::infinity();
+    for (int32_t i = 0; i < n_vocab; ++i) {
+        max_logit = std::max(max_logit, logits[i]);
+    }
+
+    double exp_sum = 0.0;
+    for (int32_t i = 0; i < n_vocab; ++i) {
+        exp_sum += std::exp(static_cast<double>(logits[i] - max_logit));
+    }
+
+    const double log_sum_exp = static_cast<double>(max_logit) + std::log(exp_sum);
+    return log_sum_exp - static_cast<double>(logits[target]);
+}
+
+PerplexityScore score_model_perplexity(
+    llama_model * model,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    VramTracker * vram_tracker) {
+    PerplexityScore score = {};
+    if (eval_texts == nullptr || eval_text_count == 0) {
+        throw std::runtime_error("eval text set is empty");
+    }
+
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    if (n_vocab <= 0) {
+        throw std::runtime_error("model vocabulary is empty");
+    }
+
+    const uint32_t eval_limit = std::max<uint32_t>(2, max_eval_tokens == 0 ? 128 : max_eval_tokens);
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = std::max<uint32_t>(64, eval_limit + 8);
+    ctx_params.n_batch = 1;
+    ctx_params.n_ubatch = 1;
+    ctx_params.n_threads = 0;
+    ctx_params.n_threads_batch = 0;
+    ctx_params.no_perf = true;
+
+    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
+        llama_init_from_model(model, ctx_params),
+        llama_free);
+    if (ctx == nullptr) {
+        throw std::runtime_error("failed to create llama context for eval");
+    }
+    if (vram_tracker != nullptr) {
+        vram_tracker->sample();
+    }
+
+    const auto eval_start = std::chrono::steady_clock::now();
+    for (uint64_t text_index = 0; text_index < eval_text_count; ++text_index) {
+        const char * text = eval_texts[text_index];
+        if (text == nullptr || text[0] == '\0') {
+            score.skipped_count += 1;
+            continue;
+        }
+
+        std::vector<llama_token> tokens = tokenize_text(vocab, text, eval_limit);
+        if (tokens.size() < 2) {
+            score.skipped_count += 1;
+            continue;
+        }
+
+        llama_memory_clear(llama_get_memory(ctx.get()), true);
+        for (size_t token_index = 0; token_index + 1 < tokens.size(); ++token_index) {
+            llama_token token = tokens[token_index];
+            llama_batch batch = llama_batch_get_one(&token, 1);
+            const int decode_result = llama_decode(ctx.get(), batch);
+            if (decode_result != 0) {
+                throw std::runtime_error("failed to decode eval token");
+            }
+            llama_synchronize(ctx.get());
+
+            const float * logits = llama_get_logits_ith(ctx.get(), -1);
+            score.total_nll += token_nll_from_logits(logits, n_vocab, tokens[token_index + 1]);
+            score.token_count += 1;
+        }
+
+        score.sample_count += 1;
+        if (vram_tracker != nullptr) {
+            vram_tracker->sample();
+        }
+    }
+    const auto eval_end = std::chrono::steady_clock::now();
+
+    if (score.token_count == 0) {
+        throw std::runtime_error("eval text set produced no scoreable tokens");
+    }
+
+    score.eval_ms = elapsed_ms(eval_start, eval_end);
+    const double avg_nll = score.total_nll / static_cast<double>(score.token_count);
+    score.ppl = std::exp(std::min(avg_nll, 700.0));
+    if (vram_tracker != nullptr) {
+        score.vram_peak_mb = vram_tracker->peak_mb;
+        score.vram_allocated_mb = vram_tracker->current_mb;
+    }
+    return score;
 }
 
 int32_t run_loaded_model_benchmark(
@@ -947,6 +1109,325 @@ int32_t ms_runtime_benchmark_recipe(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native recipe benchmark error");
+    }
+}
+
+int32_t ms_runtime_eval_recipe(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (eval_texts == nullptr || eval_text_count == 0) {
+        return fail("eval text set is empty");
+    }
+
+    if (prompt == nullptr || prompt[0] == '\0') {
+        return fail("benchmark prompt is empty");
+    }
+
+    if (out_benchmark == nullptr || out_eval == nullptr) {
+        return fail("eval output pointer is null");
+    }
+
+    try {
+        ensure_backend_initialized();
+
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        PerplexityScore baseline_score = {};
+        ms_baseline_benchmark baseline_benchmark = {};
+        {
+            VramTracker baseline_vram = {};
+            baseline_vram.reset();
+
+            llama_model_params model_params = llama_model_default_params();
+            model_params.n_gpu_layers = -1;
+            model_params.use_mmap = true;
+
+            const auto load_start = std::chrono::steady_clock::now();
+            llama_model * model = llama_model_load_from_file(path, model_params);
+            const auto load_end = std::chrono::steady_clock::now();
+            if (model == nullptr) {
+                return fail(std::string("failed to load baseline model: ") + path);
+            }
+            std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
+            baseline_vram.sample();
+            baseline_score = score_model_perplexity(
+                model_guard.get(),
+                eval_texts,
+                eval_text_count,
+                max_eval_tokens,
+                &baseline_vram);
+            const int32_t baseline_result = run_loaded_model_benchmark(
+                model_guard.get(),
+                prompt,
+                max_tokens,
+                elapsed_ms(load_start, load_end),
+                &baseline_vram,
+                &baseline_benchmark);
+            if (baseline_result != 0) {
+                return baseline_result;
+            }
+        }
+
+        gguf_init_params gguf_params = {};
+        gguf_params.no_alloc = true;
+        gguf_params.ctx = nullptr;
+
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
+            gguf_init_from_file(path, gguf_params),
+            gguf_free);
+        if (source_metadata == nullptr) {
+            return fail(std::string("failed to open GGUF metadata: ") + path);
+        }
+
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
+            gguf_init_from_file(path, gguf_params),
+            gguf_free);
+        if (model_metadata == nullptr) {
+            return fail(std::string("failed to open GGUF model metadata: ") + path);
+        }
+
+        if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+            return -1;
+        }
+        apply_recipe_tensor_types(model_metadata.get(), target_types);
+
+        UserCopyTensorReader reader = {};
+        reader.source_metadata = source_metadata.get();
+        reader.target_types = std::move(target_types);
+        reader.data_offset = gguf_get_data_offset(source_metadata.get());
+        reader.file.open(path, std::ios::binary);
+        if (!reader.file.is_open()) {
+            return fail(std::string("failed to open GGUF tensor data: ") + path);
+        }
+
+        VramTracker recipe_vram = {};
+        recipe_vram.reset();
+
+        llama_model_params model_params = llama_model_default_params();
+        model_params.n_gpu_layers = -1;
+        model_params.use_mmap = false;
+
+        const auto load_start = std::chrono::steady_clock::now();
+        llama_model * model = llama_model_init_from_user(
+            model_metadata.get(),
+            copy_user_tensor_data,
+            &reader,
+            model_params);
+        const auto load_end = std::chrono::steady_clock::now();
+        if (model == nullptr) {
+            return fail(std::string("failed to load recipe model: ") + path);
+        }
+        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
+        recipe_vram.sample();
+
+        PerplexityScore recipe_score = score_model_perplexity(
+            model_guard.get(),
+            eval_texts,
+            eval_text_count,
+            max_eval_tokens,
+            &recipe_vram);
+
+        const double load_time_ms = elapsed_ms(load_start, load_end);
+        const int32_t benchmark_result = run_loaded_model_benchmark(
+            model_guard.get(),
+            prompt,
+            max_tokens,
+            load_time_ms,
+            &recipe_vram,
+            out_benchmark);
+        if (benchmark_result != 0) {
+            return benchmark_result;
+        }
+
+        out_benchmark->copied_tensor_count = reader.copied_tensors;
+        out_benchmark->converted_tensor_count = reader.converted_tensors;
+        out_benchmark->converted_bytes_before = reader.converted_bytes_before;
+        out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+
+        out_eval->baseline_load_ms = baseline_benchmark.load_ms;
+        out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
+        out_eval->baseline_generation_ms = baseline_benchmark.generation_ms;
+        out_eval->baseline_prompt_eval_tps = baseline_benchmark.prompt_eval_tps;
+        out_eval->baseline_token_gen_tps = baseline_benchmark.token_gen_tps;
+        out_eval->baseline_ttft_ms = baseline_benchmark.ttft_ms;
+        out_eval->baseline_runtime_elapsed_ms = benchmark_runtime_elapsed_ms(baseline_benchmark);
+        out_eval->baseline_nll = baseline_score.total_nll / static_cast<double>(baseline_score.token_count);
+        out_eval->baseline_ppl = baseline_score.ppl;
+        out_eval->baseline_eval_ms = baseline_score.eval_ms;
+        out_eval->baseline_vram_peak_mb = baseline_benchmark.vram_peak_mb;
+        out_eval->baseline_vram_allocated_mb = baseline_benchmark.vram_allocated_mb;
+        out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
+        out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_eval_ms = recipe_score.eval_ms;
+        out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
+        out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
+        out_eval->ppl_delta = out_eval->recipe_ppl - out_eval->baseline_ppl;
+        out_eval->ppl_delta_percent = out_eval->baseline_ppl > 0.0
+            ? (out_eval->ppl_delta / out_eval->baseline_ppl) * 100.0
+            : 0.0;
+        out_eval->eval_token_count = recipe_score.token_count;
+        out_eval->eval_sample_count = recipe_score.sample_count;
+        out_eval->skipped_sample_count = baseline_score.skipped_count + recipe_score.skipped_count;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe eval error");
+    }
+}
+
+int32_t ms_runtime_eval_recipe_single(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    uint32_t max_eval_tokens,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (eval_texts == nullptr || eval_text_count == 0) {
+        return fail("eval text set is empty");
+    }
+
+    if (prompt == nullptr || prompt[0] == '\0') {
+        return fail("benchmark prompt is empty");
+    }
+
+    if (out_benchmark == nullptr || out_eval == nullptr) {
+        return fail("eval output pointer is null");
+    }
+
+    try {
+        ensure_backend_initialized();
+
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        gguf_init_params gguf_params = {};
+        gguf_params.no_alloc = true;
+        gguf_params.ctx = nullptr;
+
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
+            gguf_init_from_file(path, gguf_params),
+            gguf_free);
+        if (source_metadata == nullptr) {
+            return fail(std::string("failed to open GGUF metadata: ") + path);
+        }
+
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
+            gguf_init_from_file(path, gguf_params),
+            gguf_free);
+        if (model_metadata == nullptr) {
+            return fail(std::string("failed to open GGUF model metadata: ") + path);
+        }
+
+        if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+            return -1;
+        }
+        apply_recipe_tensor_types(model_metadata.get(), target_types);
+
+        UserCopyTensorReader reader = {};
+        reader.source_metadata = source_metadata.get();
+        reader.target_types = std::move(target_types);
+        reader.data_offset = gguf_get_data_offset(source_metadata.get());
+        reader.file.open(path, std::ios::binary);
+        if (!reader.file.is_open()) {
+            return fail(std::string("failed to open GGUF tensor data: ") + path);
+        }
+
+        VramTracker recipe_vram = {};
+        recipe_vram.reset();
+
+        llama_model_params model_params = llama_model_default_params();
+        model_params.n_gpu_layers = -1;
+        model_params.use_mmap = false;
+
+        const auto load_start = std::chrono::steady_clock::now();
+        llama_model * model = llama_model_init_from_user(
+            model_metadata.get(),
+            copy_user_tensor_data,
+            &reader,
+            model_params);
+        const auto load_end = std::chrono::steady_clock::now();
+        if (model == nullptr) {
+            return fail(std::string("failed to load recipe model: ") + path);
+        }
+        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
+        recipe_vram.sample();
+
+        PerplexityScore recipe_score = score_model_perplexity(
+            model_guard.get(),
+            eval_texts,
+            eval_text_count,
+            max_eval_tokens,
+            &recipe_vram);
+
+        const double load_time_ms = elapsed_ms(load_start, load_end);
+        const int32_t benchmark_result = run_loaded_model_benchmark(
+            model_guard.get(),
+            prompt,
+            max_tokens,
+            load_time_ms,
+            &recipe_vram,
+            out_benchmark);
+        if (benchmark_result != 0) {
+            return benchmark_result;
+        }
+
+        out_benchmark->copied_tensor_count = reader.copied_tensors;
+        out_benchmark->converted_tensor_count = reader.converted_tensors;
+        out_benchmark->converted_bytes_before = reader.converted_bytes_before;
+        out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+
+        *out_eval = {};
+        out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
+        out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_eval_ms = recipe_score.eval_ms;
+        out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
+        out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
+        out_eval->eval_token_count = recipe_score.token_count;
+        out_eval->eval_sample_count = recipe_score.sample_count;
+        out_eval->skipped_sample_count = recipe_score.skipped_count;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native single recipe eval error");
     }
 }
 

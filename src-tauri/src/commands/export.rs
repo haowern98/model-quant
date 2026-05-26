@@ -3,7 +3,9 @@ use tauri::State;
 
 use crate::commands::model::ModelState;
 use crate::commands::quant::RecipeStore;
-use crate::profile::benchmark::{run_native_recipe_benchmark, BenchmarkResult};
+use crate::profile::benchmark::{
+    run_native_recipe_compare_benchmark, run_native_recipe_single_benchmark, BenchmarkResult,
+};
 use crate::progress::ProgressEmitter;
 use crate::quant::recipe::{RecipeState, RecipeStatus};
 
@@ -182,6 +184,7 @@ pub async fn list_recipes() -> Result<Vec<RecipeState>, String> {
 pub async fn test_recipe(
     recipe: RecipeState,
     prompt_tokens: u32,
+    test_mode: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, RecipeStore>,
 ) -> Result<BenchmarkResult, String> {
@@ -193,12 +196,21 @@ pub async fn test_recipe(
     }
 
     let targets = recipe_targets(&recipe);
-    let analysis = crate::ffi::runtime_bindings::analyze_recipe(&source.to_string_lossy(), &targets)?;
+    let analysis =
+        crate::ffi::runtime_bindings::analyze_recipe(&source.to_string_lossy(), &targets)?;
     validate_recipe_analysis(&analysis)?;
 
     progress.requantizing(1.0, "skipped");
     progress.writing(1.0, "no temporary GGUF written");
-    let result = run_native_recipe_benchmark(&source, &targets, prompt_tokens, &progress)?;
+    let result = match test_mode.as_deref().unwrap_or("compare_baseline") {
+        "single" => {
+            run_native_recipe_single_benchmark(&source, &targets, prompt_tokens, &progress)?
+        }
+        "compare_baseline" => {
+            run_native_recipe_compare_benchmark(&source, &targets, prompt_tokens, &progress)?
+        }
+        mode => return Err(format!("Unknown test recipe mode: {}", mode)),
+    };
 
     {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
