@@ -315,6 +315,187 @@ struct PerplexityScore {
     uint64_t skipped_count = 0;
 };
 
+void copy_user_tensor_data(ggml_tensor * tensor, void * userdata);
+
+struct ModelSession {
+    std::unique_ptr<llama_model, decltype(&llama_model_free)> model;
+    std::unique_ptr<llama_context, decltype(&llama_free)> ctx;
+    VramTracker vram;
+    double load_ms = 0.0;
+    uint64_t copied_tensors = 0;
+    uint64_t converted_tensors = 0;
+    uint64_t converted_bytes_before = 0;
+    uint64_t converted_bytes_after = 0;
+
+    ModelSession(llama_model * loaded_model, double load_time_ms, const VramTracker & vram_tracker)
+        : model(loaded_model, llama_model_free),
+          ctx(nullptr, llama_free),
+          vram(vram_tracker),
+          load_ms(load_time_ms) {
+    }
+};
+
+uint32_t session_context_tokens(uint32_t max_eval_tokens) {
+    const uint32_t eval_limit = std::max<uint32_t>(2, max_eval_tokens == 0 ? 128 : max_eval_tokens);
+    return std::max<uint32_t>(512, eval_limit + 8);
+}
+
+void open_session_context(ModelSession & session, uint32_t context_tokens) {
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = context_tokens;
+    ctx_params.n_batch = std::min<uint32_t>(512, context_tokens);
+    ctx_params.n_ubatch = std::min<uint32_t>(512, context_tokens);
+    ctx_params.n_threads = 0;
+    ctx_params.n_threads_batch = 0;
+    ctx_params.no_perf = true;
+
+    session.ctx.reset(llama_init_from_model(session.model.get(), ctx_params));
+    if (session.ctx == nullptr) {
+        throw std::runtime_error("failed to create llama context for model session");
+    }
+    session.vram.sample();
+}
+
+void reset_session_context(ModelSession & session) {
+    if (session.ctx == nullptr) {
+        throw std::runtime_error("model session context is not initialized");
+    }
+    llama_memory_clear(llama_get_memory(session.ctx.get()), true);
+}
+
+std::unique_ptr<ModelSession> open_baseline_session(const char * path, uint32_t context_tokens) {
+    VramTracker vram_tracker = {};
+    vram_tracker.reset();
+
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = -1;
+    model_params.use_mmap = true;
+
+    const auto load_start = std::chrono::steady_clock::now();
+    llama_model * model = llama_model_load_from_file(path, model_params);
+    const auto load_end = std::chrono::steady_clock::now();
+    if (model == nullptr) {
+        throw std::runtime_error(std::string("failed to load model: ") + path);
+    }
+    vram_tracker.sample();
+
+    auto session = std::make_unique<ModelSession>(model, elapsed_ms(load_start, load_end), vram_tracker);
+    open_session_context(*session, context_tokens);
+    return session;
+}
+
+std::unique_ptr<ModelSession> open_user_copy_session(const char * path, uint32_t context_tokens) {
+    VramTracker vram_tracker = {};
+    vram_tracker.reset();
+
+    gguf_init_params gguf_params = {};
+    gguf_params.no_alloc = true;
+    gguf_params.ctx = nullptr;
+
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+        gguf_init_from_file(path, gguf_params),
+        gguf_free);
+    if (metadata == nullptr) {
+        throw std::runtime_error(std::string("failed to open GGUF metadata: ") + path);
+    }
+
+    UserCopyTensorReader reader = {};
+    reader.source_metadata = metadata.get();
+    reader.data_offset = gguf_get_data_offset(metadata.get());
+    reader.file.open(path, std::ios::binary);
+    if (!reader.file.is_open()) {
+        throw std::runtime_error(std::string("failed to open GGUF tensor data: ") + path);
+    }
+
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = -1;
+    model_params.use_mmap = false;
+
+    const auto load_start = std::chrono::steady_clock::now();
+    llama_model * model = llama_model_init_from_user(
+        metadata.get(),
+        copy_user_tensor_data,
+        &reader,
+        model_params);
+    const auto load_end = std::chrono::steady_clock::now();
+    if (model == nullptr) {
+        throw std::runtime_error(std::string("failed to load user-copy model: ") + path);
+    }
+    vram_tracker.sample();
+
+    auto session = std::make_unique<ModelSession>(model, elapsed_ms(load_start, load_end), vram_tracker);
+    session->copied_tensors = reader.copied_tensors;
+    session->converted_tensors = reader.converted_tensors;
+    session->converted_bytes_before = reader.converted_bytes_before;
+    session->converted_bytes_after = reader.converted_bytes_after;
+    open_session_context(*session, context_tokens);
+    return session;
+}
+
+std::unique_ptr<ModelSession> open_recipe_session(
+    const char * path,
+    std::unordered_map<std::string, ggml_type> target_types,
+    uint32_t context_tokens) {
+    gguf_init_params gguf_params = {};
+    gguf_params.no_alloc = true;
+    gguf_params.ctx = nullptr;
+
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
+        gguf_init_from_file(path, gguf_params),
+        gguf_free);
+    if (source_metadata == nullptr) {
+        throw std::runtime_error(std::string("failed to open GGUF metadata: ") + path);
+    }
+
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
+        gguf_init_from_file(path, gguf_params),
+        gguf_free);
+    if (model_metadata == nullptr) {
+        throw std::runtime_error(std::string("failed to open GGUF model metadata: ") + path);
+    }
+
+    if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+        return nullptr;
+    }
+    apply_recipe_tensor_types(model_metadata.get(), target_types);
+
+    UserCopyTensorReader reader = {};
+    reader.source_metadata = source_metadata.get();
+    reader.target_types = std::move(target_types);
+    reader.data_offset = gguf_get_data_offset(source_metadata.get());
+    reader.file.open(path, std::ios::binary);
+    if (!reader.file.is_open()) {
+        throw std::runtime_error(std::string("failed to open GGUF tensor data: ") + path);
+    }
+
+    VramTracker vram_tracker = {};
+    vram_tracker.reset();
+
+    llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = -1;
+    model_params.use_mmap = false;
+
+    const auto load_start = std::chrono::steady_clock::now();
+    llama_model * model = llama_model_init_from_user(
+        model_metadata.get(),
+        copy_user_tensor_data,
+        &reader,
+        model_params);
+    const auto load_end = std::chrono::steady_clock::now();
+    if (model == nullptr) {
+        throw std::runtime_error(std::string("failed to load recipe model: ") + path);
+    }
+    vram_tracker.sample();
+
+    auto session = std::make_unique<ModelSession>(model, elapsed_ms(load_start, load_end), vram_tracker);
+    session->copied_tensors = reader.copied_tensors;
+    session->converted_tensors = reader.converted_tensors;
+    session->converted_bytes_before = reader.converted_bytes_before;
+    session->converted_bytes_after = reader.converted_bytes_after;
+    open_session_context(*session, context_tokens);
+    return session;
+}
+
 void read_exact_at(
     UserCopyTensorReader * reader,
     size_t offset,
@@ -542,41 +723,23 @@ double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token 
     return log_sum_exp - static_cast<double>(logits[target]);
 }
 
-PerplexityScore score_model_perplexity(
-    llama_model * model,
+PerplexityScore score_session_perplexity(
+    ModelSession & session,
     const char * const * eval_texts,
     uint64_t eval_text_count,
-    uint32_t max_eval_tokens,
-    VramTracker * vram_tracker) {
+    uint32_t max_eval_tokens) {
     PerplexityScore score = {};
     if (eval_texts == nullptr || eval_text_count == 0) {
         throw std::runtime_error("eval text set is empty");
     }
 
-    const llama_vocab * vocab = llama_model_get_vocab(model);
+    const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t n_vocab = llama_vocab_n_tokens(vocab);
     if (n_vocab <= 0) {
         throw std::runtime_error("model vocabulary is empty");
     }
 
     const uint32_t eval_limit = std::max<uint32_t>(2, max_eval_tokens == 0 ? 128 : max_eval_tokens);
-    llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = std::max<uint32_t>(64, eval_limit + 8);
-    ctx_params.n_batch = 1;
-    ctx_params.n_ubatch = 1;
-    ctx_params.n_threads = 0;
-    ctx_params.n_threads_batch = 0;
-    ctx_params.no_perf = true;
-
-    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
-        llama_init_from_model(model, ctx_params),
-        llama_free);
-    if (ctx == nullptr) {
-        throw std::runtime_error("failed to create llama context for eval");
-    }
-    if (vram_tracker != nullptr) {
-        vram_tracker->sample();
-    }
 
     const auto eval_start = std::chrono::steady_clock::now();
     for (uint64_t text_index = 0; text_index < eval_text_count; ++text_index) {
@@ -592,25 +755,23 @@ PerplexityScore score_model_perplexity(
             continue;
         }
 
-        llama_memory_clear(llama_get_memory(ctx.get()), true);
+        reset_session_context(session);
         for (size_t token_index = 0; token_index + 1 < tokens.size(); ++token_index) {
             llama_token token = tokens[token_index];
             llama_batch batch = llama_batch_get_one(&token, 1);
-            const int decode_result = llama_decode(ctx.get(), batch);
+            const int decode_result = llama_decode(session.ctx.get(), batch);
             if (decode_result != 0) {
                 throw std::runtime_error("failed to decode eval token");
             }
-            llama_synchronize(ctx.get());
+            llama_synchronize(session.ctx.get());
 
-            const float * logits = llama_get_logits_ith(ctx.get(), -1);
+            const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
             score.total_nll += token_nll_from_logits(logits, n_vocab, tokens[token_index + 1]);
             score.token_count += 1;
         }
 
         score.sample_count += 1;
-        if (vram_tracker != nullptr) {
-            vram_tracker->sample();
-        }
+        session.vram.sample();
     }
     const auto eval_end = std::chrono::steady_clock::now();
 
@@ -621,21 +782,17 @@ PerplexityScore score_model_perplexity(
     score.eval_ms = elapsed_ms(eval_start, eval_end);
     const double avg_nll = score.total_nll / static_cast<double>(score.token_count);
     score.ppl = std::exp(std::min(avg_nll, 700.0));
-    if (vram_tracker != nullptr) {
-        score.vram_peak_mb = vram_tracker->peak_mb;
-        score.vram_allocated_mb = vram_tracker->current_mb;
-    }
+    score.vram_peak_mb = session.vram.peak_mb;
+    score.vram_allocated_mb = session.vram.current_mb;
     return score;
 }
 
-int32_t run_loaded_model_benchmark(
-    llama_model * model,
+int32_t run_session_benchmark(
+    ModelSession & session,
     const char * prompt,
     uint32_t max_tokens,
-    double load_time_ms,
-    VramTracker * vram_tracker,
     ms_baseline_benchmark * out_benchmark) {
-    const llama_vocab * vocab = llama_model_get_vocab(model);
+    const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
     int32_t token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
     if (token_count == INT32_MIN) {
@@ -662,36 +819,18 @@ int32_t run_loaded_model_benchmark(
     }
     prompt_tokens.resize(static_cast<size_t>(actual_tokens));
 
-    llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 512;
-    ctx_params.n_batch = 512;
-    ctx_params.n_ubatch = 512;
-    ctx_params.n_threads = 0;
-    ctx_params.n_threads_batch = 0;
-    ctx_params.no_perf = true;
-
-    std::unique_ptr<llama_context, decltype(&llama_free)> ctx(
-        llama_init_from_model(model, ctx_params),
-        llama_free);
-    if (ctx == nullptr) {
-        return fail("failed to create llama context");
-    }
-    if (vram_tracker != nullptr) {
-        vram_tracker->sample();
-    }
+    reset_session_context(session);
 
     const auto prompt_start = std::chrono::steady_clock::now();
     const int prompt_res = llama_decode(
-        ctx.get(),
+        session.ctx.get(),
         llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size())));
     if (prompt_res != 0) {
         return fail("failed to decode prompt");
     }
-    llama_synchronize(ctx.get());
+    llama_synchronize(session.ctx.get());
     const auto prompt_end = std::chrono::steady_clock::now();
-    if (vram_tracker != nullptr) {
-        vram_tracker->sample();
-    }
+    session.vram.sample();
 
     std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
         llama_sampler_chain_init(llama_sampler_chain_default_params()),
@@ -701,28 +840,26 @@ int32_t run_loaded_model_benchmark(
     uint32_t generated = 0;
     const auto generation_start = std::chrono::steady_clock::now();
     for (uint32_t i = 0; i < max_tokens; ++i) {
-        llama_token token = llama_sampler_sample(sampler.get(), ctx.get(), -1);
+        llama_token token = llama_sampler_sample(sampler.get(), session.ctx.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) {
             break;
         }
 
         llama_batch batch = llama_batch_get_one(&token, 1);
-        const int gen_res = llama_decode(ctx.get(), batch);
+        const int gen_res = llama_decode(session.ctx.get(), batch);
         if (gen_res != 0) {
             return fail("failed to decode generated token");
         }
-        llama_synchronize(ctx.get());
+        llama_synchronize(session.ctx.get());
         ++generated;
     }
     const auto generation_end = std::chrono::steady_clock::now();
-    if (vram_tracker != nullptr) {
-        vram_tracker->sample();
-    }
+    session.vram.sample();
 
     const double prompt_time_ms = elapsed_ms(prompt_start, prompt_end);
     const double generation_time_ms = elapsed_ms(generation_start, generation_end);
 
-    out_benchmark->load_ms = load_time_ms;
+    out_benchmark->load_ms = session.load_ms;
     out_benchmark->prompt_eval_ms = prompt_time_ms;
     out_benchmark->generation_ms = generation_time_ms;
     out_benchmark->prompt_eval_tps = prompt_time_ms > 0.0
@@ -732,8 +869,8 @@ int32_t run_loaded_model_benchmark(
         ? (static_cast<double>(generated) * 1000.0 / generation_time_ms)
         : 0.0;
     out_benchmark->ttft_ms = prompt_time_ms;
-    out_benchmark->vram_peak_mb = vram_tracker != nullptr ? vram_tracker->peak_mb : 0.0;
-    out_benchmark->vram_allocated_mb = vram_tracker != nullptr ? vram_tracker->current_mb : 0.0;
+    out_benchmark->vram_peak_mb = session.vram.peak_mb;
+    out_benchmark->vram_allocated_mb = session.vram.current_mb;
     out_benchmark->prompt_tokens = static_cast<uint32_t>(prompt_tokens.size());
     out_benchmark->generated_tokens = generated;
     out_benchmark->copied_tensor_count = 0;
@@ -893,30 +1030,8 @@ int32_t ms_runtime_benchmark_baseline(
 
     try {
         ensure_backend_initialized();
-        VramTracker vram_tracker = {};
-        vram_tracker.reset();
-
-        llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = -1;
-        model_params.use_mmap = true;
-
-        const auto load_start = std::chrono::steady_clock::now();
-        llama_model * model = llama_model_load_from_file(path, model_params);
-        const auto load_end = std::chrono::steady_clock::now();
-        if (model == nullptr) {
-            return fail(std::string("failed to load model: ") + path);
-        }
-        vram_tracker.sample();
-
-        const double load_time_ms = elapsed_ms(load_start, load_end);
-        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        return run_loaded_model_benchmark(
-            model_guard.get(),
-            prompt,
-            max_tokens,
-            load_time_ms,
-            &vram_tracker,
-            out_benchmark);
+        std::unique_ptr<ModelSession> session = open_baseline_session(path, session_context_tokens(0));
+        return run_session_benchmark(*session, prompt, max_tokens, out_benchmark);
     } catch (const std::exception & err) {
         return fail(err.what());
     } catch (...) {
@@ -945,58 +1060,13 @@ int32_t ms_runtime_benchmark_user_copy(
 
     try {
         ensure_backend_initialized();
-        VramTracker vram_tracker = {};
-        vram_tracker.reset();
-
-        gguf_init_params gguf_params = {};
-        gguf_params.no_alloc = true;
-        gguf_params.ctx = nullptr;
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (metadata == nullptr) {
-            return fail(std::string("failed to open GGUF metadata: ") + path);
-        }
-
-        UserCopyTensorReader reader = {};
-        reader.source_metadata = metadata.get();
-        reader.data_offset = gguf_get_data_offset(metadata.get());
-        reader.file.open(path, std::ios::binary);
-        if (!reader.file.is_open()) {
-            return fail(std::string("failed to open GGUF tensor data: ") + path);
-        }
-
-        llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = -1;
-        model_params.use_mmap = false;
-
-        const auto load_start = std::chrono::steady_clock::now();
-        llama_model * model = llama_model_init_from_user(
-            metadata.get(),
-            copy_user_tensor_data,
-            &reader,
-            model_params);
-        const auto load_end = std::chrono::steady_clock::now();
-        if (model == nullptr) {
-            return fail(std::string("failed to load user-copy model: ") + path);
-        }
-        vram_tracker.sample();
-
-        const double load_time_ms = elapsed_ms(load_start, load_end);
-        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        const int32_t result = run_loaded_model_benchmark(
-            model_guard.get(),
-            prompt,
-            max_tokens,
-            load_time_ms,
-            &vram_tracker,
-            out_benchmark);
+        std::unique_ptr<ModelSession> session = open_user_copy_session(path, session_context_tokens(0));
+        const int32_t result = run_session_benchmark(*session, prompt, max_tokens, out_benchmark);
         if (result == 0) {
-            out_benchmark->copied_tensor_count = reader.copied_tensors;
-            out_benchmark->converted_tensor_count = reader.converted_tensors;
-            out_benchmark->converted_bytes_before = reader.converted_bytes_before;
-            out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+            out_benchmark->copied_tensor_count = session->copied_tensors;
+            out_benchmark->converted_tensor_count = session->converted_tensors;
+            out_benchmark->converted_bytes_before = session->converted_bytes_before;
+            out_benchmark->converted_bytes_after = session->converted_bytes_after;
         }
         return result;
     } catch (const std::exception & err) {
@@ -1033,76 +1103,24 @@ int32_t ms_runtime_benchmark_recipe(
 
     try {
         ensure_backend_initialized();
-        VramTracker vram_tracker = {};
-        vram_tracker.reset();
-
         std::unordered_map<std::string, ggml_type> target_types;
         if (!build_recipe_targets(targets, target_count, target_types)) {
             return -1;
         }
 
-        gguf_init_params gguf_params = {};
-        gguf_params.no_alloc = true;
-        gguf_params.ctx = nullptr;
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (source_metadata == nullptr) {
-            return fail(std::string("failed to open GGUF metadata: ") + path);
-        }
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (model_metadata == nullptr) {
-            return fail(std::string("failed to open GGUF model metadata: ") + path);
-        }
-
-        if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+        std::unique_ptr<ModelSession> session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens(0));
+        if (session == nullptr) {
             return -1;
         }
-        apply_recipe_tensor_types(model_metadata.get(), target_types);
-
-        UserCopyTensorReader reader = {};
-        reader.source_metadata = source_metadata.get();
-        reader.target_types = std::move(target_types);
-        reader.data_offset = gguf_get_data_offset(source_metadata.get());
-        reader.file.open(path, std::ios::binary);
-        if (!reader.file.is_open()) {
-            return fail(std::string("failed to open GGUF tensor data: ") + path);
-        }
-
-        llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = -1;
-        model_params.use_mmap = false;
-
-        const auto load_start = std::chrono::steady_clock::now();
-        llama_model * model = llama_model_init_from_user(
-            model_metadata.get(),
-            copy_user_tensor_data,
-            &reader,
-            model_params);
-        const auto load_end = std::chrono::steady_clock::now();
-        if (model == nullptr) {
-            return fail(std::string("failed to load recipe model: ") + path);
-        }
-        vram_tracker.sample();
-
-        const double load_time_ms = elapsed_ms(load_start, load_end);
-        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        const int32_t result = run_loaded_model_benchmark(
-            model_guard.get(),
-            prompt,
-            max_tokens,
-            load_time_ms,
-            &vram_tracker,
-            out_benchmark);
+        const int32_t result = run_session_benchmark(*session, prompt, max_tokens, out_benchmark);
         if (result == 0) {
-            out_benchmark->copied_tensor_count = reader.copied_tensors;
-            out_benchmark->converted_tensor_count = reader.converted_tensors;
-            out_benchmark->converted_bytes_before = reader.converted_bytes_before;
-            out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+            out_benchmark->copied_tensor_count = session->copied_tensors;
+            out_benchmark->converted_tensor_count = session->converted_tensors;
+            out_benchmark->converted_bytes_before = session->converted_bytes_before;
+            out_benchmark->converted_bytes_after = session->converted_bytes_after;
         }
         return result;
     } catch (const std::exception & err) {
@@ -1156,114 +1174,51 @@ int32_t ms_runtime_eval_recipe(
         PerplexityScore baseline_score = {};
         ms_baseline_benchmark baseline_benchmark = {};
         {
-            VramTracker baseline_vram = {};
-            baseline_vram.reset();
-
-            llama_model_params model_params = llama_model_default_params();
-            model_params.n_gpu_layers = -1;
-            model_params.use_mmap = true;
-
-            const auto load_start = std::chrono::steady_clock::now();
-            llama_model * model = llama_model_load_from_file(path, model_params);
-            const auto load_end = std::chrono::steady_clock::now();
-            if (model == nullptr) {
-                return fail(std::string("failed to load baseline model: ") + path);
-            }
-            std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-            baseline_vram.sample();
-            baseline_score = score_model_perplexity(
-                model_guard.get(),
+            std::unique_ptr<ModelSession> baseline_session = open_baseline_session(
+                path,
+                session_context_tokens(max_eval_tokens));
+            baseline_score = score_session_perplexity(
+                *baseline_session,
                 eval_texts,
                 eval_text_count,
-                max_eval_tokens,
-                &baseline_vram);
-            const int32_t baseline_result = run_loaded_model_benchmark(
-                model_guard.get(),
+                max_eval_tokens);
+            const int32_t baseline_result = run_session_benchmark(
+                *baseline_session,
                 prompt,
                 max_tokens,
-                elapsed_ms(load_start, load_end),
-                &baseline_vram,
                 &baseline_benchmark);
             if (baseline_result != 0) {
                 return baseline_result;
             }
         }
 
-        gguf_init_params gguf_params = {};
-        gguf_params.no_alloc = true;
-        gguf_params.ctx = nullptr;
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (source_metadata == nullptr) {
-            return fail(std::string("failed to open GGUF metadata: ") + path);
-        }
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (model_metadata == nullptr) {
-            return fail(std::string("failed to open GGUF model metadata: ") + path);
-        }
-
-        if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+        std::unique_ptr<ModelSession> recipe_session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens(max_eval_tokens));
+        if (recipe_session == nullptr) {
             return -1;
         }
-        apply_recipe_tensor_types(model_metadata.get(), target_types);
 
-        UserCopyTensorReader reader = {};
-        reader.source_metadata = source_metadata.get();
-        reader.target_types = std::move(target_types);
-        reader.data_offset = gguf_get_data_offset(source_metadata.get());
-        reader.file.open(path, std::ios::binary);
-        if (!reader.file.is_open()) {
-            return fail(std::string("failed to open GGUF tensor data: ") + path);
-        }
-
-        VramTracker recipe_vram = {};
-        recipe_vram.reset();
-
-        llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = -1;
-        model_params.use_mmap = false;
-
-        const auto load_start = std::chrono::steady_clock::now();
-        llama_model * model = llama_model_init_from_user(
-            model_metadata.get(),
-            copy_user_tensor_data,
-            &reader,
-            model_params);
-        const auto load_end = std::chrono::steady_clock::now();
-        if (model == nullptr) {
-            return fail(std::string("failed to load recipe model: ") + path);
-        }
-        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        recipe_vram.sample();
-
-        PerplexityScore recipe_score = score_model_perplexity(
-            model_guard.get(),
+        PerplexityScore recipe_score = score_session_perplexity(
+            *recipe_session,
             eval_texts,
             eval_text_count,
-            max_eval_tokens,
-            &recipe_vram);
+            max_eval_tokens);
 
-        const double load_time_ms = elapsed_ms(load_start, load_end);
-        const int32_t benchmark_result = run_loaded_model_benchmark(
-            model_guard.get(),
+        const int32_t benchmark_result = run_session_benchmark(
+            *recipe_session,
             prompt,
             max_tokens,
-            load_time_ms,
-            &recipe_vram,
             out_benchmark);
         if (benchmark_result != 0) {
             return benchmark_result;
         }
 
-        out_benchmark->copied_tensor_count = reader.copied_tensors;
-        out_benchmark->converted_tensor_count = reader.converted_tensors;
-        out_benchmark->converted_bytes_before = reader.converted_bytes_before;
-        out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+        out_benchmark->copied_tensor_count = recipe_session->copied_tensors;
+        out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
+        out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
+        out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
 
         out_eval->baseline_load_ms = baseline_benchmark.load_ms;
         out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
@@ -1338,81 +1293,33 @@ int32_t ms_runtime_eval_recipe_single(
             return -1;
         }
 
-        gguf_init_params gguf_params = {};
-        gguf_params.no_alloc = true;
-        gguf_params.ctx = nullptr;
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (source_metadata == nullptr) {
-            return fail(std::string("failed to open GGUF metadata: ") + path);
-        }
-
-        std::unique_ptr<gguf_context, decltype(&gguf_free)> model_metadata(
-            gguf_init_from_file(path, gguf_params),
-            gguf_free);
-        if (model_metadata == nullptr) {
-            return fail(std::string("failed to open GGUF model metadata: ") + path);
-        }
-
-        if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
+        std::unique_ptr<ModelSession> recipe_session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens(max_eval_tokens));
+        if (recipe_session == nullptr) {
             return -1;
         }
-        apply_recipe_tensor_types(model_metadata.get(), target_types);
 
-        UserCopyTensorReader reader = {};
-        reader.source_metadata = source_metadata.get();
-        reader.target_types = std::move(target_types);
-        reader.data_offset = gguf_get_data_offset(source_metadata.get());
-        reader.file.open(path, std::ios::binary);
-        if (!reader.file.is_open()) {
-            return fail(std::string("failed to open GGUF tensor data: ") + path);
-        }
-
-        VramTracker recipe_vram = {};
-        recipe_vram.reset();
-
-        llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = -1;
-        model_params.use_mmap = false;
-
-        const auto load_start = std::chrono::steady_clock::now();
-        llama_model * model = llama_model_init_from_user(
-            model_metadata.get(),
-            copy_user_tensor_data,
-            &reader,
-            model_params);
-        const auto load_end = std::chrono::steady_clock::now();
-        if (model == nullptr) {
-            return fail(std::string("failed to load recipe model: ") + path);
-        }
-        std::unique_ptr<llama_model, decltype(&llama_model_free)> model_guard(model, llama_model_free);
-        recipe_vram.sample();
-
-        PerplexityScore recipe_score = score_model_perplexity(
-            model_guard.get(),
+        PerplexityScore recipe_score = score_session_perplexity(
+            *recipe_session,
             eval_texts,
             eval_text_count,
-            max_eval_tokens,
-            &recipe_vram);
+            max_eval_tokens);
 
-        const double load_time_ms = elapsed_ms(load_start, load_end);
-        const int32_t benchmark_result = run_loaded_model_benchmark(
-            model_guard.get(),
+        const int32_t benchmark_result = run_session_benchmark(
+            *recipe_session,
             prompt,
             max_tokens,
-            load_time_ms,
-            &recipe_vram,
             out_benchmark);
         if (benchmark_result != 0) {
             return benchmark_result;
         }
 
-        out_benchmark->copied_tensor_count = reader.copied_tensors;
-        out_benchmark->converted_tensor_count = reader.converted_tensors;
-        out_benchmark->converted_bytes_before = reader.converted_bytes_before;
-        out_benchmark->converted_bytes_after = reader.converted_bytes_after;
+        out_benchmark->copied_tensor_count = recipe_session->copied_tensors;
+        out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
+        out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
+        out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
 
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
