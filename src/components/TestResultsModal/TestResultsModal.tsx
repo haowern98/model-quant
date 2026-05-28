@@ -39,6 +39,21 @@ function formatTps(value: number, digits = 1): string {
   return `${value.toFixed(digits)} t/s`;
 }
 
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatSignedPercent(value: number): string {
+  const percent = value * 100;
+  const sign = percent > 0 ? "+" : "";
+  return `${sign}${percent.toFixed(1)}%`;
+}
+
+function formatSignedNumber(value: number, digits = 3): string {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(digits)}`;
+}
+
 function runtimeElapsed(result: BenchmarkResult): number {
   return result.loadMs + result.promptEvalMs + result.generationMs;
 }
@@ -136,6 +151,128 @@ function RuntimeComparison({ result }: { result: BenchmarkResult }) {
             </span>
           </Fragment>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function StandardEvalTable({ result }: { result: BenchmarkResult }) {
+  const standard = result.standardEval;
+  if (!standard) return null;
+
+  const hasBaseline = standard.baselineAccuracy !== null;
+
+  return (
+    <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-text-muted uppercase tracking-wider">
+          Standard Eval
+        </h3>
+        <span className="font-mono text-text-primary">
+          {hasBaseline && standard.accuracyDelta !== null
+            ? `${formatPercent(standard.recipeAccuracy)} (${formatSignedPercent(
+                standard.accuracyDelta,
+              )})`
+            : formatPercent(standard.recipeAccuracy)}
+        </span>
+      </div>
+
+      <div
+        className={`grid gap-x-4 gap-y-1 ${
+          hasBaseline
+            ? "grid-cols-[minmax(160px,1fr)_48px_72px_72px_72px_88px_88px]"
+            : "grid-cols-[minmax(160px,1fr)_48px_72px_88px]"
+        }`}
+      >
+        <span className="text-text-muted uppercase tracking-wider">Task</span>
+        <span className="text-right text-text-muted uppercase tracking-wider">
+          N
+        </span>
+        {hasBaseline && (
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Base
+          </span>
+        )}
+        <span className="text-right text-text-muted uppercase tracking-wider">
+          Recipe
+        </span>
+        {hasBaseline && (
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Delta
+          </span>
+        )}
+        {hasBaseline && (
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Flips
+          </span>
+        )}
+        <span className="text-right text-text-muted uppercase tracking-wider">
+          Margin
+        </span>
+
+        {standard.tasks.map((task) => (
+          <Fragment key={task.task}>
+            <span className="text-text-muted truncate" title={task.task}>
+              {task.task}
+            </span>
+            <span className="text-right font-mono text-text-primary">
+              {task.sampleCount}
+            </span>
+            {hasBaseline && (
+              <span className="text-right font-mono text-text-primary">
+                {task.baselineAccuracy === null
+                  ? "-"
+                  : formatPercent(task.baselineAccuracy)}
+              </span>
+            )}
+            <span className="text-right font-mono text-text-primary">
+              {formatPercent(task.recipeAccuracy)}
+            </span>
+            {hasBaseline && (
+              <span className="text-right font-mono text-text-primary">
+                {task.accuracyDelta === null
+                  ? "-"
+                  : formatSignedPercent(task.accuracyDelta)}
+              </span>
+            )}
+            {hasBaseline && (
+              <span
+                className="text-right font-mono text-text-primary"
+                title="correct-to-wrong / wrong-to-correct"
+              >
+                {task.correctToWrongCount}/{task.wrongToCorrectCount}
+              </span>
+            )}
+            <span className="text-right font-mono text-text-primary">
+              {hasBaseline && task.marginDelta !== null
+                ? formatSignedNumber(task.marginDelta)
+                : task.recipeAvgMargin.toFixed(3)}
+            </span>
+          </Fragment>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 mt-3 pt-2 border-t border-border-default">
+        <span className="text-text-muted">Eval samples</span>
+        <span className="text-right font-mono text-text-primary">
+          {standard.sampleCount}
+        </span>
+        <span className="text-text-muted">Tasks</span>
+        <span className="text-right font-mono text-text-primary">
+          {standard.taskCount}
+        </span>
+        {hasBaseline && (
+          <>
+            <span className="text-text-muted">Correct to wrong</span>
+            <span className="text-right font-mono text-text-primary">
+              {standard.correctToWrongCount}
+            </span>
+            <span className="text-text-muted">Wrong to correct</span>
+            <span className="text-right font-mono text-text-primary">
+              {standard.wrongToCorrectCount}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -266,6 +403,8 @@ export function TestResultsModal({
             </div>
           </div>
         )}
+
+        <StandardEvalTable result={result} />
 
         {result.baselineBenchmark ? (
           <RuntimeComparison result={result} />

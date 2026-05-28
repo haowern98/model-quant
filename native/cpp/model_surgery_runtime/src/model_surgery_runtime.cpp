@@ -14,6 +14,7 @@
 #include <ios>
 #include <limits>
 #include <memory>
+#include <map>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -313,6 +314,29 @@ struct PerplexityScore {
     uint64_t token_count = 0;
     uint64_t sample_count = 0;
     uint64_t skipped_count = 0;
+};
+
+struct StandardEvalSampleScore {
+    std::string task;
+    uint32_t gold_index = 0;
+    uint32_t prediction_index = 0;
+    bool correct = false;
+    double margin = 0.0;
+    double correct_nll = 0.0;
+};
+
+struct StandardEvalAccumulator {
+    std::string task;
+    uint64_t sample_count = 0;
+    uint64_t baseline_correct_count = 0;
+    uint64_t recipe_correct_count = 0;
+    uint64_t correct_to_wrong_count = 0;
+    uint64_t wrong_to_correct_count = 0;
+    uint64_t same_prediction_count = 0;
+    double baseline_margin_sum = 0.0;
+    double recipe_margin_sum = 0.0;
+    double baseline_correct_nll_sum = 0.0;
+    double recipe_correct_nll_sum = 0.0;
 };
 
 void copy_user_tensor_data(ggml_tensor * tensor, void * userdata);
@@ -721,6 +745,285 @@ double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token 
 
     const double log_sum_exp = static_cast<double>(max_logit) + std::log(exp_sum);
     return log_sum_exp - static_cast<double>(logits[target]);
+}
+
+double score_continuation_nll(
+    ModelSession & session,
+    const char * prompt,
+    const char * continuation,
+    uint64_t * out_token_count) {
+    if (prompt == nullptr || prompt[0] == '\0') {
+        throw std::runtime_error("standard eval sample prompt is empty");
+    }
+    if (continuation == nullptr || continuation[0] == '\0') {
+        throw std::runtime_error("standard eval sample choice is empty");
+    }
+
+    const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    if (n_vocab <= 0) {
+        throw std::runtime_error("model vocabulary is empty");
+    }
+
+    const int32_t prompt_len = static_cast<int32_t>(std::strlen(prompt));
+    int32_t prompt_token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
+    if (prompt_token_count == INT32_MIN) {
+        throw std::runtime_error("standard eval prompt tokenization overflowed");
+    }
+    if (prompt_token_count < 0) {
+        prompt_token_count = -prompt_token_count;
+    }
+    if (prompt_token_count <= 0) {
+        throw std::runtime_error("standard eval prompt produced no tokens");
+    }
+
+    std::vector<llama_token> prompt_tokens(static_cast<size_t>(prompt_token_count));
+    const int32_t actual_prompt_tokens = llama_tokenize(
+        vocab,
+        prompt,
+        prompt_len,
+        prompt_tokens.data(),
+        prompt_token_count,
+        true,
+        true);
+    if (actual_prompt_tokens <= 0) {
+        throw std::runtime_error("failed to tokenize standard eval prompt");
+    }
+    prompt_tokens.resize(static_cast<size_t>(actual_prompt_tokens));
+
+    const int32_t continuation_len = static_cast<int32_t>(std::strlen(continuation));
+    int32_t continuation_token_count = llama_tokenize(
+        vocab,
+        continuation,
+        continuation_len,
+        nullptr,
+        0,
+        false,
+        true);
+    if (continuation_token_count == INT32_MIN) {
+        throw std::runtime_error("standard eval choice tokenization overflowed");
+    }
+    if (continuation_token_count < 0) {
+        continuation_token_count = -continuation_token_count;
+    }
+    if (continuation_token_count <= 0) {
+        throw std::runtime_error("standard eval choice produced no tokens");
+    }
+
+    std::vector<llama_token> continuation_tokens(static_cast<size_t>(continuation_token_count));
+    const int32_t actual_continuation_tokens = llama_tokenize(
+        vocab,
+        continuation,
+        continuation_len,
+        continuation_tokens.data(),
+        continuation_token_count,
+        false,
+        true);
+    if (actual_continuation_tokens <= 0) {
+        throw std::runtime_error("failed to tokenize standard eval choice");
+    }
+    continuation_tokens.resize(static_cast<size_t>(actual_continuation_tokens));
+
+    reset_session_context(session);
+    const int prompt_res = llama_decode(
+        session.ctx.get(),
+        llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size())));
+    if (prompt_res != 0) {
+        throw std::runtime_error("failed to decode standard eval prompt");
+    }
+    llama_synchronize(session.ctx.get());
+
+    double nll = 0.0;
+    for (llama_token token : continuation_tokens) {
+        const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
+        nll += token_nll_from_logits(logits, n_vocab, token);
+
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        const int decode_result = llama_decode(session.ctx.get(), batch);
+        if (decode_result != 0) {
+            throw std::runtime_error("failed to decode standard eval choice token");
+        }
+        llama_synchronize(session.ctx.get());
+    }
+
+    if (out_token_count != nullptr) {
+        *out_token_count = static_cast<uint64_t>(continuation_tokens.size());
+    }
+    session.vram.sample();
+    return nll;
+}
+
+std::vector<StandardEvalSampleScore> score_standard_eval_samples(
+    ModelSession & session,
+    const ms_standard_eval_sample * samples,
+    uint64_t sample_count) {
+    std::vector<StandardEvalSampleScore> scores;
+    if (samples == nullptr || sample_count == 0) {
+        return scores;
+    }
+    scores.reserve(static_cast<size_t>(sample_count));
+
+    for (uint64_t sample_index = 0; sample_index < sample_count; ++sample_index) {
+        const ms_standard_eval_sample & sample = samples[sample_index];
+        if (sample.task == nullptr || sample.task[0] == '\0') {
+            throw std::runtime_error("standard eval sample task is empty");
+        }
+        if (sample.prompt == nullptr || sample.prompt[0] == '\0') {
+            throw std::runtime_error(std::string("standard eval sample prompt is empty for task: ") + sample.task);
+        }
+        if (sample.choices == nullptr || sample.choice_count < 2) {
+            throw std::runtime_error(std::string("standard eval sample needs at least two choices for task: ") + sample.task);
+        }
+        if (sample.gold_index >= sample.choice_count) {
+            throw std::runtime_error(std::string("standard eval gold index is outside choices for task: ") + sample.task);
+        }
+
+        std::vector<double> choice_scores(static_cast<size_t>(sample.choice_count));
+        std::vector<double> choice_nlls(static_cast<size_t>(sample.choice_count));
+        for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
+            uint64_t token_count = 0;
+            const double nll = score_continuation_nll(
+                session,
+                sample.prompt,
+                sample.choices[choice_index],
+                &token_count);
+            const double denominator = sample.normalize_by_choice_length != 0 && token_count > 0
+                ? static_cast<double>(token_count)
+                : 1.0;
+            choice_nlls[static_cast<size_t>(choice_index)] = nll;
+            choice_scores[static_cast<size_t>(choice_index)] = -nll / denominator;
+        }
+
+        uint32_t best_index = 0;
+        uint32_t second_index = 1;
+        if (choice_scores[1] > choice_scores[0]) {
+            best_index = 1;
+            second_index = 0;
+        }
+        for (uint64_t choice_index = 2; choice_index < sample.choice_count; ++choice_index) {
+            const double score = choice_scores[static_cast<size_t>(choice_index)];
+            if (score > choice_scores[best_index]) {
+                second_index = best_index;
+                best_index = static_cast<uint32_t>(choice_index);
+            } else if (score > choice_scores[second_index]) {
+                second_index = static_cast<uint32_t>(choice_index);
+            }
+        }
+
+        StandardEvalSampleScore score = {};
+        score.task = sample.task;
+        score.gold_index = sample.gold_index;
+        score.prediction_index = best_index;
+        score.correct = best_index == sample.gold_index;
+        score.margin = choice_scores[best_index] - choice_scores[second_index];
+        score.correct_nll = choice_nlls[static_cast<size_t>(sample.gold_index)];
+        scores.push_back(std::move(score));
+    }
+
+    return scores;
+}
+
+void copy_task_name(char (& out_task)[64], const std::string & task) {
+    std::memset(out_task, 0, 64);
+    const size_t copy_len = std::min<size_t>(task.size(), 63);
+    std::memcpy(out_task, task.data(), copy_len);
+}
+
+bool write_standard_eval_results(
+    const std::vector<StandardEvalSampleScore> * baseline_scores,
+    const std::vector<StandardEvalSampleScore> & recipe_scores,
+    ms_standard_eval_task_result * out_task_results,
+    uint64_t task_result_capacity,
+    uint64_t * out_task_result_count) {
+    if (out_task_result_count == nullptr) {
+        fail("standard eval task count output pointer is null");
+        return false;
+    }
+
+    *out_task_result_count = 0;
+    if (recipe_scores.empty()) {
+        return true;
+    }
+    if (out_task_results == nullptr && task_result_capacity > 0) {
+        fail("standard eval task result pointer is null");
+        return false;
+    }
+    if (baseline_scores != nullptr && baseline_scores->size() != recipe_scores.size()) {
+        fail("baseline and recipe standard eval sample counts do not match");
+        return false;
+    }
+
+    std::map<std::string, StandardEvalAccumulator> accumulators;
+    for (size_t i = 0; i < recipe_scores.size(); ++i) {
+        const StandardEvalSampleScore * baseline = baseline_scores == nullptr ? nullptr : &(*baseline_scores)[i];
+        const StandardEvalSampleScore & recipe = recipe_scores[i];
+        if (baseline != nullptr && baseline->task != recipe.task) {
+            fail("baseline and recipe standard eval sample order does not match");
+            return false;
+        }
+
+        StandardEvalAccumulator & acc = accumulators[recipe.task];
+        acc.task = recipe.task;
+        acc.sample_count += 1;
+        acc.recipe_correct_count += recipe.correct ? 1 : 0;
+        acc.recipe_margin_sum += recipe.margin;
+        acc.recipe_correct_nll_sum += recipe.correct_nll;
+
+        if (baseline != nullptr) {
+            acc.baseline_correct_count += baseline->correct ? 1 : 0;
+            acc.baseline_margin_sum += baseline->margin;
+            acc.baseline_correct_nll_sum += baseline->correct_nll;
+            acc.correct_to_wrong_count += baseline->correct && !recipe.correct ? 1 : 0;
+            acc.wrong_to_correct_count += !baseline->correct && recipe.correct ? 1 : 0;
+            acc.same_prediction_count += baseline->prediction_index == recipe.prediction_index ? 1 : 0;
+        }
+    }
+
+    *out_task_result_count = static_cast<uint64_t>(accumulators.size());
+    if (task_result_capacity < accumulators.size()) {
+        fail(
+            "standard eval task result capacity is too small: need "
+            + std::to_string(accumulators.size())
+            + ", got "
+            + std::to_string(task_result_capacity));
+        return false;
+    }
+
+    size_t out_index = 0;
+    for (const auto & entry : accumulators) {
+        const StandardEvalAccumulator & acc = entry.second;
+        ms_standard_eval_task_result result = {};
+        copy_task_name(result.task, acc.task);
+        result.sample_count = acc.sample_count;
+        result.baseline_correct_count = acc.baseline_correct_count;
+        result.recipe_correct_count = acc.recipe_correct_count;
+        result.correct_to_wrong_count = acc.correct_to_wrong_count;
+        result.wrong_to_correct_count = acc.wrong_to_correct_count;
+        result.same_prediction_count = acc.same_prediction_count;
+        result.baseline_accuracy = acc.sample_count > 0
+            ? static_cast<double>(acc.baseline_correct_count) / static_cast<double>(acc.sample_count)
+            : 0.0;
+        result.recipe_accuracy = acc.sample_count > 0
+            ? static_cast<double>(acc.recipe_correct_count) / static_cast<double>(acc.sample_count)
+            : 0.0;
+        result.accuracy_delta = result.recipe_accuracy - result.baseline_accuracy;
+        result.baseline_avg_margin = acc.sample_count > 0
+            ? acc.baseline_margin_sum / static_cast<double>(acc.sample_count)
+            : 0.0;
+        result.recipe_avg_margin = acc.sample_count > 0
+            ? acc.recipe_margin_sum / static_cast<double>(acc.sample_count)
+            : 0.0;
+        result.margin_delta = result.recipe_avg_margin - result.baseline_avg_margin;
+        result.baseline_avg_correct_nll = acc.sample_count > 0
+            ? acc.baseline_correct_nll_sum / static_cast<double>(acc.sample_count)
+            : 0.0;
+        result.recipe_avg_correct_nll = acc.sample_count > 0
+            ? acc.recipe_correct_nll_sum / static_cast<double>(acc.sample_count)
+            : 0.0;
+        out_task_results[out_index++] = result;
+    }
+
+    return true;
 }
 
 PerplexityScore score_session_perplexity(
@@ -1335,6 +1638,263 @@ int32_t ms_runtime_eval_recipe_single(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native single recipe eval error");
+    }
+}
+
+int32_t ms_runtime_eval_recipe_standard(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    const ms_standard_eval_sample * standard_samples,
+    uint64_t standard_sample_count,
+    uint32_t max_eval_tokens,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_standard_eval_task_result * out_task_results,
+    uint64_t task_result_capacity,
+    uint64_t * out_task_result_count) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (eval_texts == nullptr || eval_text_count == 0) {
+        return fail("eval text set is empty");
+    }
+
+    if (standard_samples == nullptr && standard_sample_count > 0) {
+        return fail("standard eval sample pointer is null");
+    }
+
+    if (prompt == nullptr || prompt[0] == '\0') {
+        return fail("benchmark prompt is empty");
+    }
+
+    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr) {
+        return fail("standard eval output pointer is null");
+    }
+
+    try {
+        ensure_backend_initialized();
+
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        PerplexityScore baseline_score = {};
+        ms_baseline_benchmark baseline_benchmark = {};
+        std::vector<StandardEvalSampleScore> baseline_standard_scores;
+        {
+            std::unique_ptr<ModelSession> baseline_session = open_baseline_session(
+                path,
+                session_context_tokens(max_eval_tokens));
+            baseline_score = score_session_perplexity(
+                *baseline_session,
+                eval_texts,
+                eval_text_count,
+                max_eval_tokens);
+            baseline_standard_scores = score_standard_eval_samples(
+                *baseline_session,
+                standard_samples,
+                standard_sample_count);
+            const int32_t baseline_result = run_session_benchmark(
+                *baseline_session,
+                prompt,
+                max_tokens,
+                &baseline_benchmark);
+            if (baseline_result != 0) {
+                return baseline_result;
+            }
+        }
+
+        std::unique_ptr<ModelSession> recipe_session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens(max_eval_tokens));
+        if (recipe_session == nullptr) {
+            return -1;
+        }
+
+        PerplexityScore recipe_score = score_session_perplexity(
+            *recipe_session,
+            eval_texts,
+            eval_text_count,
+            max_eval_tokens);
+        std::vector<StandardEvalSampleScore> recipe_standard_scores = score_standard_eval_samples(
+            *recipe_session,
+            standard_samples,
+            standard_sample_count);
+
+        const int32_t benchmark_result = run_session_benchmark(
+            *recipe_session,
+            prompt,
+            max_tokens,
+            out_benchmark);
+        if (benchmark_result != 0) {
+            return benchmark_result;
+        }
+
+        out_benchmark->copied_tensor_count = recipe_session->copied_tensors;
+        out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
+        out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
+        out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+
+        out_eval->baseline_load_ms = baseline_benchmark.load_ms;
+        out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
+        out_eval->baseline_generation_ms = baseline_benchmark.generation_ms;
+        out_eval->baseline_prompt_eval_tps = baseline_benchmark.prompt_eval_tps;
+        out_eval->baseline_token_gen_tps = baseline_benchmark.token_gen_tps;
+        out_eval->baseline_ttft_ms = baseline_benchmark.ttft_ms;
+        out_eval->baseline_runtime_elapsed_ms = benchmark_runtime_elapsed_ms(baseline_benchmark);
+        out_eval->baseline_nll = baseline_score.total_nll / static_cast<double>(baseline_score.token_count);
+        out_eval->baseline_ppl = baseline_score.ppl;
+        out_eval->baseline_eval_ms = baseline_score.eval_ms;
+        out_eval->baseline_vram_peak_mb = baseline_benchmark.vram_peak_mb;
+        out_eval->baseline_vram_allocated_mb = baseline_benchmark.vram_allocated_mb;
+        out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
+        out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_eval_ms = recipe_score.eval_ms;
+        out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
+        out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
+        out_eval->ppl_delta = out_eval->recipe_ppl - out_eval->baseline_ppl;
+        out_eval->ppl_delta_percent = out_eval->baseline_ppl > 0.0
+            ? (out_eval->ppl_delta / out_eval->baseline_ppl) * 100.0
+            : 0.0;
+        out_eval->eval_token_count = recipe_score.token_count;
+        out_eval->eval_sample_count = recipe_score.sample_count;
+        out_eval->skipped_sample_count = baseline_score.skipped_count + recipe_score.skipped_count;
+
+        if (!write_standard_eval_results(
+                &baseline_standard_scores,
+                recipe_standard_scores,
+                out_task_results,
+                task_result_capacity,
+                out_task_result_count)) {
+            return -1;
+        }
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native standard recipe eval error");
+    }
+}
+
+int32_t ms_runtime_eval_recipe_standard_single(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    const ms_standard_eval_sample * standard_samples,
+    uint64_t standard_sample_count,
+    uint32_t max_eval_tokens,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_standard_eval_task_result * out_task_results,
+    uint64_t task_result_capacity,
+    uint64_t * out_task_result_count) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (eval_texts == nullptr || eval_text_count == 0) {
+        return fail("eval text set is empty");
+    }
+
+    if (standard_samples == nullptr && standard_sample_count > 0) {
+        return fail("standard eval sample pointer is null");
+    }
+
+    if (prompt == nullptr || prompt[0] == '\0') {
+        return fail("benchmark prompt is empty");
+    }
+
+    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr) {
+        return fail("standard eval output pointer is null");
+    }
+
+    try {
+        ensure_backend_initialized();
+
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        std::unique_ptr<ModelSession> recipe_session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens(max_eval_tokens));
+        if (recipe_session == nullptr) {
+            return -1;
+        }
+
+        PerplexityScore recipe_score = score_session_perplexity(
+            *recipe_session,
+            eval_texts,
+            eval_text_count,
+            max_eval_tokens);
+        std::vector<StandardEvalSampleScore> recipe_standard_scores = score_standard_eval_samples(
+            *recipe_session,
+            standard_samples,
+            standard_sample_count);
+
+        const int32_t benchmark_result = run_session_benchmark(
+            *recipe_session,
+            prompt,
+            max_tokens,
+            out_benchmark);
+        if (benchmark_result != 0) {
+            return benchmark_result;
+        }
+
+        out_benchmark->copied_tensor_count = recipe_session->copied_tensors;
+        out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
+        out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
+        out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+
+        *out_eval = {};
+        out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
+        out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_eval_ms = recipe_score.eval_ms;
+        out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
+        out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
+        out_eval->eval_token_count = recipe_score.token_count;
+        out_eval->eval_sample_count = recipe_score.sample_count;
+        out_eval->skipped_sample_count = recipe_score.skipped_count;
+
+        if (!write_standard_eval_results(
+                nullptr,
+                recipe_standard_scores,
+                out_task_results,
+                task_result_capacity,
+                out_task_result_count)) {
+            return -1;
+        }
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native single standard recipe eval error");
     }
 }
 

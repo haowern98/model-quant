@@ -27,6 +27,7 @@ pub struct BenchmarkResult {
     pub converted_bytes_after: u64,
     pub baseline_benchmark: Option<RuntimeBenchmark>,
     pub quality_eval: Option<RecipeQualityEval>,
+    pub standard_eval: Option<StandardEvalReport>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -64,9 +65,69 @@ pub struct RuntimeBenchmark {
     pub model_tensor_count: Option<u64>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandardEvalReport {
+    pub sample_count: u64,
+    pub task_count: u64,
+    pub baseline_accuracy: Option<f64>,
+    pub recipe_accuracy: f64,
+    pub accuracy_delta: Option<f64>,
+    pub correct_to_wrong_count: u64,
+    pub wrong_to_correct_count: u64,
+    pub baseline_avg_margin: Option<f64>,
+    pub recipe_avg_margin: f64,
+    pub margin_delta: Option<f64>,
+    pub tasks: Vec<StandardEvalTaskReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandardEvalTaskReport {
+    pub task: String,
+    pub sample_count: u64,
+    pub baseline_correct_count: Option<u64>,
+    pub recipe_correct_count: u64,
+    pub correct_to_wrong_count: u64,
+    pub wrong_to_correct_count: u64,
+    pub same_prediction_count: u64,
+    pub baseline_accuracy: Option<f64>,
+    pub recipe_accuracy: f64,
+    pub accuracy_delta: Option<f64>,
+    pub baseline_avg_margin: Option<f64>,
+    pub recipe_avg_margin: f64,
+    pub margin_delta: Option<f64>,
+    pub baseline_avg_correct_nll: Option<f64>,
+    pub recipe_avg_correct_nll: f64,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct EvalText {
     text: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StandardSubset {
+    ppl: Vec<EvalText>,
+    tasks: Vec<StandardTask>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StandardTask {
+    name: String,
+    output_type: String,
+    samples: Vec<StandardSample>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StandardSample {
+    prompt: String,
+    choices: Vec<String>,
+    gold: u32,
+    normalize_by_choice_length: bool,
 }
 
 pub fn run_benchmark(
@@ -124,6 +185,7 @@ pub fn run_benchmark(
         converted_bytes_after: 0,
         baseline_benchmark: None,
         quality_eval: None,
+        standard_eval: None,
     })
 }
 
@@ -193,6 +255,7 @@ pub fn run_native_runtime_smoke(
         converted_bytes_after: 0,
         baseline_benchmark: None,
         quality_eval: None,
+        standard_eval: None,
     })
 }
 
@@ -212,7 +275,7 @@ pub fn run_native_baseline_benchmark(
             crate::ffi::runtime_bindings::benchmark_baseline(path, prompt, max_tokens)
                 .map(benchmark_only)
         },
-        |summary, benchmark, _| {
+        |summary, benchmark, _, _| {
             format!(
                 "Native llama.cpp baseline loaded GGUF v{} with {} tensors, evaluated {} prompt tokens, and generated {} tokens. Recipe quant overrides are not active for this run.",
                 summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
@@ -237,7 +300,7 @@ pub fn run_native_user_copy_benchmark(
             crate::ffi::runtime_bindings::benchmark_user_copy(path, prompt, max_tokens)
                 .map(benchmark_only)
         },
-        |summary, benchmark, _| {
+        |summary, benchmark, _, _| {
             format!(
                 "Native llama.cpp user-model path copied GGUF v{} with {} tensors into backend buffers, evaluated {} prompt tokens, and generated {} tokens. Changed tensor conversion is not active for this run.",
                 summary.version, summary.tensor_count, benchmark.prompt_tokens, benchmark.generated_tokens
@@ -261,7 +324,9 @@ pub fn run_native_recipe_single_benchmark(
     max_tokens: u32,
     progress: &ProgressEmitter,
 ) -> Result<BenchmarkResult, String> {
-    let eval_texts = load_smoke_eval_texts()?;
+    let standard_subset = load_standard_eval_subset()?;
+    let eval_texts = standard_subset.ppl_texts;
+    let standard_samples = standard_subset.samples;
     run_native_inference_benchmark(
         gguf_path,
         max_tokens,
@@ -270,21 +335,23 @@ pub fn run_native_recipe_single_benchmark(
         "Native single recipe test complete",
         "native_recipe_single_v1",
         |path, prompt, max_tokens| {
-            crate::ffi::runtime_bindings::eval_recipe_single(
+            crate::ffi::runtime_bindings::eval_recipe_standard_single(
                 path,
                 targets,
                 &eval_texts,
+                &standard_samples,
                 128,
                 prompt,
                 max_tokens,
             )
-            .map(|(benchmark, eval)| (benchmark, Some(eval)))
+            .map(|(benchmark, eval, standard)| (benchmark, Some(eval), Some(standard)))
         },
-        |summary, benchmark, eval| {
+        |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), evaluated standalone quality on {} tokens from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), evaluated standalone quality on {} PPL tokens and {} standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
+                standard.map(|report| report.sample_count).unwrap_or(0),
                 summary.version,
                 benchmark.generated_tokens
             )
@@ -298,7 +365,9 @@ pub fn run_native_recipe_compare_benchmark(
     max_tokens: u32,
     progress: &ProgressEmitter,
 ) -> Result<BenchmarkResult, String> {
-    let eval_texts = load_smoke_eval_texts()?;
+    let standard_subset = load_standard_eval_subset()?;
+    let eval_texts = standard_subset.ppl_texts;
+    let standard_samples = standard_subset.samples;
     run_native_inference_benchmark(
         gguf_path,
         max_tokens,
@@ -307,21 +376,23 @@ pub fn run_native_recipe_compare_benchmark(
         "Native recipe eval complete",
         "native_recipe_eval_v1",
         |path, prompt, max_tokens| {
-            crate::ffi::runtime_bindings::eval_recipe(
+            crate::ffi::runtime_bindings::eval_recipe_standard(
                 path,
                 targets,
                 &eval_texts,
+                &standard_samples,
                 128,
                 prompt,
                 max_tokens,
             )
-            .map(|(benchmark, eval)| (benchmark, Some(eval)))
+            .map(|(benchmark, eval, standard)| (benchmark, Some(eval), Some(standard)))
         },
-        |summary, benchmark, eval| {
+        |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), evaluated recipe drift on {} tokens from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), evaluated recipe drift on {} PPL tokens and {} standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
+                standard.map(|report| report.sample_count).unwrap_or(0),
                 summary.version,
                 benchmark.generated_tokens
             )
@@ -344,6 +415,7 @@ fn run_native_inference_benchmark(
         (
             crate::ffi::runtime_bindings::MsBaselineBenchmark,
             Option<crate::ffi::runtime_bindings::MsRecipeEvalResult>,
+            Option<Vec<crate::ffi::runtime_bindings::MsStandardEvalTaskResult>>,
         ),
         String,
     >,
@@ -351,6 +423,7 @@ fn run_native_inference_benchmark(
         &crate::ffi::runtime_bindings::MsGgufSummary,
         &crate::ffi::runtime_bindings::MsBaselineBenchmark,
         Option<&RecipeQualityEval>,
+        Option<&StandardEvalReport>,
     ) -> String,
 ) -> Result<BenchmarkResult, String> {
     let start = Instant::now();
@@ -364,11 +437,15 @@ fn run_native_inference_benchmark(
 
     progress.emit(ProgressStage::Loading, 0.1, loading_message);
     let summary = crate::ffi::runtime_bindings::inspect_gguf(&gguf_path.to_string_lossy())?;
-    let (benchmark, eval) = run_benchmark(&gguf_path.to_string_lossy(), prompt, max_tokens)?;
+    let (benchmark, eval, standard_tasks) =
+        run_benchmark(&gguf_path.to_string_lossy(), prompt, max_tokens)?;
     let baseline_benchmark = eval.as_ref().and_then(|native| {
         baseline_runtime_benchmark_from_native(native, Some(summary.tensor_count))
     });
     let quality_eval = eval.map(recipe_quality_eval_from_native);
+    let standard_eval = standard_tasks
+        .as_deref()
+        .map(|tasks| standard_eval_report_from_native(tasks, quality_eval.as_ref()));
     progress.emit(ProgressStage::Benchmarking, 1.0, complete_message);
 
     let elapsed = start.elapsed();
@@ -387,7 +464,12 @@ fn run_native_inference_benchmark(
         elapsed_ms: elapsed.as_millis() as f64,
         load_ms: benchmark.load_ms,
         test_mode: test_mode.to_string(),
-        status_message: status_message(&summary, &benchmark, quality_eval.as_ref()),
+        status_message: status_message(
+            &summary,
+            &benchmark,
+            quality_eval.as_ref(),
+            standard_eval.as_ref(),
+        ),
         native_runtime: Some(format!("{} | {}", runtime, system_info.trim())),
         model_tensor_count: Some(summary.tensor_count),
         model_metadata_count: Some(summary.metadata_count),
@@ -397,6 +479,7 @@ fn run_native_inference_benchmark(
         converted_bytes_after: benchmark.converted_bytes_after,
         baseline_benchmark,
         quality_eval,
+        standard_eval,
     })
 }
 
@@ -405,8 +488,9 @@ fn benchmark_only(
 ) -> (
     crate::ffi::runtime_bindings::MsBaselineBenchmark,
     Option<crate::ffi::runtime_bindings::MsRecipeEvalResult>,
+    Option<Vec<crate::ffi::runtime_bindings::MsStandardEvalTaskResult>>,
 ) {
-    (benchmark, None)
+    (benchmark, None, None)
 }
 
 fn recipe_quality_eval_from_native(
@@ -432,6 +516,94 @@ fn recipe_quality_eval_from_native(
     }
 }
 
+fn standard_eval_report_from_native(
+    tasks: &[crate::ffi::runtime_bindings::MsStandardEvalTaskResult],
+    quality_eval: Option<&RecipeQualityEval>,
+) -> StandardEvalReport {
+    let has_baseline = quality_eval
+        .map(|quality| quality.baseline_ppl.is_some())
+        .unwrap_or(false);
+
+    let sample_count = tasks.iter().map(|task| task.sample_count).sum::<u64>();
+    let baseline_correct = tasks
+        .iter()
+        .map(|task| task.baseline_correct_count)
+        .sum::<u64>();
+    let recipe_correct = tasks
+        .iter()
+        .map(|task| task.recipe_correct_count)
+        .sum::<u64>();
+    let correct_to_wrong_count = tasks
+        .iter()
+        .map(|task| task.correct_to_wrong_count)
+        .sum::<u64>();
+    let wrong_to_correct_count = tasks
+        .iter()
+        .map(|task| task.wrong_to_correct_count)
+        .sum::<u64>();
+    let baseline_margin_sum = tasks
+        .iter()
+        .map(|task| task.baseline_avg_margin * task.sample_count as f64)
+        .sum::<f64>();
+    let recipe_margin_sum = tasks
+        .iter()
+        .map(|task| task.recipe_avg_margin * task.sample_count as f64)
+        .sum::<f64>();
+    let baseline_accuracy = if has_baseline && sample_count > 0 {
+        Some(baseline_correct as f64 / sample_count as f64)
+    } else {
+        None
+    };
+    let recipe_accuracy = if sample_count > 0 {
+        recipe_correct as f64 / sample_count as f64
+    } else {
+        0.0
+    };
+    let baseline_avg_margin = if has_baseline && sample_count > 0 {
+        Some(baseline_margin_sum / sample_count as f64)
+    } else {
+        None
+    };
+    let recipe_avg_margin = if sample_count > 0 {
+        recipe_margin_sum / sample_count as f64
+    } else {
+        0.0
+    };
+
+    StandardEvalReport {
+        sample_count,
+        task_count: tasks.len() as u64,
+        baseline_accuracy,
+        recipe_accuracy,
+        accuracy_delta: baseline_accuracy.map(|baseline| recipe_accuracy - baseline),
+        correct_to_wrong_count,
+        wrong_to_correct_count,
+        baseline_avg_margin,
+        recipe_avg_margin,
+        margin_delta: baseline_avg_margin.map(|baseline| recipe_avg_margin - baseline),
+        tasks: tasks
+            .iter()
+            .map(|task| StandardEvalTaskReport {
+                task: crate::ffi::runtime_bindings::standard_task_name(task),
+                sample_count: task.sample_count,
+                baseline_correct_count: has_baseline.then_some(task.baseline_correct_count),
+                recipe_correct_count: task.recipe_correct_count,
+                correct_to_wrong_count: task.correct_to_wrong_count,
+                wrong_to_correct_count: task.wrong_to_correct_count,
+                same_prediction_count: task.same_prediction_count,
+                baseline_accuracy: has_baseline.then_some(task.baseline_accuracy),
+                recipe_accuracy: task.recipe_accuracy,
+                accuracy_delta: has_baseline.then_some(task.accuracy_delta),
+                baseline_avg_margin: has_baseline.then_some(task.baseline_avg_margin),
+                recipe_avg_margin: task.recipe_avg_margin,
+                margin_delta: has_baseline.then_some(task.margin_delta),
+                baseline_avg_correct_nll: has_baseline.then_some(task.baseline_avg_correct_nll),
+                recipe_avg_correct_nll: task.recipe_avg_correct_nll,
+            })
+            .collect(),
+    }
+}
+
 fn baseline_runtime_benchmark_from_native(
     eval: &crate::ffi::runtime_bindings::MsRecipeEvalResult,
     model_tensor_count: Option<u64>,
@@ -454,17 +626,58 @@ fn baseline_runtime_benchmark_from_native(
     })
 }
 
-fn load_smoke_eval_texts() -> Result<Vec<String>, String> {
-    const SMOKE_TEXTS: &str = include_str!("../../../evals/smoke_texts.json");
-    let texts: Vec<EvalText> = serde_json::from_str(SMOKE_TEXTS)
-        .map_err(|err| format!("failed to parse bundled eval texts: {}", err))?;
-    let texts = texts
+struct LoadedStandardSubset {
+    ppl_texts: Vec<String>,
+    samples: Vec<crate::ffi::runtime_bindings::StandardEvalSampleInput>,
+}
+
+fn load_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
+    const STANDARD_SUBSET: &str = include_str!("../../../evals/standard_subset.json");
+    let subset: StandardSubset = serde_json::from_str(STANDARD_SUBSET)
+        .map_err(|err| format!("failed to parse bundled standard eval subset: {}", err))?;
+    let ppl_texts = subset
+        .ppl
         .into_iter()
         .map(|entry| entry.text)
         .filter(|text| !text.trim().is_empty())
         .collect::<Vec<_>>();
-    if texts.is_empty() {
-        return Err("bundled eval text set is empty".to_string());
+    if ppl_texts.is_empty() {
+        return Err("bundled standard eval PPL corpus is empty".to_string());
     }
-    Ok(texts)
+
+    let mut samples = Vec::new();
+    for task in subset.tasks {
+        if task.output_type != "multiple_choice" {
+            return Err(format!(
+                "unsupported bundled standard eval output type for {}: {}",
+                task.name, task.output_type
+            ));
+        }
+        for sample in task.samples {
+            if sample.choices.len() < 2 {
+                return Err(format!(
+                    "bundled standard eval sample for {} has fewer than two choices",
+                    task.name
+                ));
+            }
+            if sample.gold as usize >= sample.choices.len() {
+                return Err(format!(
+                    "bundled standard eval sample for {} has invalid gold index",
+                    task.name
+                ));
+            }
+            samples.push(crate::ffi::runtime_bindings::StandardEvalSampleInput {
+                task: task.name.clone(),
+                prompt: sample.prompt,
+                choices: sample.choices,
+                gold_index: sample.gold,
+                normalize_by_choice_length: sample.normalize_by_choice_length,
+            });
+        }
+    }
+    if samples.is_empty() {
+        return Err("bundled standard eval sample set is empty".to_string());
+    }
+
+    Ok(LoadedStandardSubset { ppl_texts, samples })
 }

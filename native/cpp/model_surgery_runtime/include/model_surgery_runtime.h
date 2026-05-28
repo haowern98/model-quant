@@ -81,6 +81,33 @@ typedef struct ms_recipe_eval_result {
     uint64_t skipped_sample_count;
 } ms_recipe_eval_result;
 
+typedef struct ms_standard_eval_sample {
+    const char * task;
+    const char * prompt;
+    const char * const * choices;
+    uint64_t choice_count;
+    uint32_t gold_index;
+    uint32_t normalize_by_choice_length;
+} ms_standard_eval_sample;
+
+typedef struct ms_standard_eval_task_result {
+    char task[64];
+    uint64_t sample_count;
+    uint64_t baseline_correct_count;
+    uint64_t recipe_correct_count;
+    uint64_t correct_to_wrong_count;
+    uint64_t wrong_to_correct_count;
+    uint64_t same_prediction_count;
+    double baseline_accuracy;
+    double recipe_accuracy;
+    double accuracy_delta;
+    double baseline_avg_margin;
+    double recipe_avg_margin;
+    double margin_delta;
+    double baseline_avg_correct_nll;
+    double recipe_avg_correct_nll;
+} ms_standard_eval_task_result;
+
 MS_RUNTIME_API const char * ms_runtime_version(void);
 MS_RUNTIME_API const char * ms_runtime_llama_system_info(void);
 MS_RUNTIME_API const char * ms_runtime_last_error(void);
@@ -129,6 +156,38 @@ MS_RUNTIME_API int32_t ms_runtime_eval_recipe_single(
     uint32_t max_tokens,
     ms_baseline_benchmark * out_benchmark,
     ms_recipe_eval_result * out_eval);
+MS_RUNTIME_API int32_t ms_runtime_eval_recipe_standard(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    const ms_standard_eval_sample * standard_samples,
+    uint64_t standard_sample_count,
+    uint32_t max_eval_tokens,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_standard_eval_task_result * out_task_results,
+    uint64_t task_result_capacity,
+    uint64_t * out_task_result_count);
+MS_RUNTIME_API int32_t ms_runtime_eval_recipe_standard_single(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * const * eval_texts,
+    uint64_t eval_text_count,
+    const ms_standard_eval_sample * standard_samples,
+    uint64_t standard_sample_count,
+    uint32_t max_eval_tokens,
+    const char * prompt,
+    uint32_t max_tokens,
+    ms_baseline_benchmark * out_benchmark,
+    ms_recipe_eval_result * out_eval,
+    ms_standard_eval_task_result * out_task_results,
+    uint64_t task_result_capacity,
+    uint64_t * out_task_result_count);
 
 #ifdef __cplusplus
 }

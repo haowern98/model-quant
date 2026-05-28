@@ -603,3 +603,103 @@ Updated release executable:
 ```text
 C:\Users\Wu Family Computer\Downloads\Project 2\src-tauri\target\release\model-surgery.exe
 ```
+
+### 2026-05-28: Built-in Standard Eval V1 Work Started
+
+Files edited or added:
+
+- `native/cpp/model_surgery_runtime/include/model_surgery_runtime.h`
+- `native/cpp/model_surgery_runtime/src/model_surgery_runtime.cpp`
+- `src-tauri/src/ffi/runtime_bindings.rs`
+- `src-tauri/src/profile/benchmark.rs`
+- `src/types/index.ts`
+- `src/components/TestResultsModal/TestResultsModal.tsx`
+- `evals/standard_subset.json`
+- `handoff.md`
+
+Native exports added:
+
+- `ms_runtime_eval_recipe_standard`
+- `ms_runtime_eval_recipe_standard_single`
+
+Native behavior added:
+
+- Built-in standard eval samples are scored inside the native llama.cpp runtime.
+- Each eval sample is independent: context/KV is reset for every multiple-choice continuation score.
+- Baseline and recipe compare remains sequential:
+  - load baseline once, score all PPL + standard eval samples, run runtime benchmark, unload
+  - load recipe once, apply in-memory tensor conversions once, score all PPL + standard eval samples, run runtime benchmark, unload
+- Baseline and recipe are not kept in VRAM at the same time.
+- No temporary GGUF is written for testing.
+
+Standard Eval V1 task shape:
+
+- Multiple-choice loglikelihood scoring.
+- Optional choice-length normalization per sample.
+- Reports per-task:
+  - sample count
+  - baseline accuracy when compare mode is used
+  - recipe accuracy
+  - accuracy delta
+  - correct-to-wrong flips
+  - wrong-to-correct flips
+  - same prediction count
+  - average margin
+  - average correct-choice NLL
+- Reports overall:
+  - total samples
+  - task count
+  - baseline accuracy when compare mode is used
+  - recipe accuracy
+  - accuracy delta
+  - aggregate flips
+  - average margin delta
+
+Bundled eval file added:
+
+- `evals/standard_subset.json`
+
+Bundled tasks:
+
+- `arc_challenge`
+- `arc_easy`
+- `hellaswag`
+- `mmlu_mixed`
+- `gsm8k`
+- `truthfulqa_mc`
+
+Current bundled size:
+
+- 6 hand-written samples per task, 36 total standard eval samples.
+- 4 PPL passages.
+
+Important limitation:
+
+- These samples are lm-eval-shaped and task-compatible, but they are not the official EleutherAI dataset rows. This avoids depending on Python/dataset downloads in the built-in path. A future official eval path can still use real EleutherAI tasks after session reuse and cancellation are hardened.
+
+Frontend behavior added:
+
+- `BenchmarkResult` now includes `standardEval`.
+- Test results modal now renders a Standard Eval table without removing existing quality, runtime, VRAM, and tensor conversion metrics.
+- Removed the now-unused Rust `load_smoke_eval_texts` helper from `src-tauri/src/profile/benchmark.rs`; the older `evals/smoke_texts.json` file remains from the branch base but is not used by the new Standard Eval path.
+
+Validation status:
+
+- `npm run build` passed from project root.
+- `cargo check` passed from `src-tauri`.
+- Native C++ release DLL build passed using:
+
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' --build native\cpp\build --config Release --target model_surgery_runtime
+```
+
+- `cargo test` passed from `src-tauri`.
+- `npm run lint` passed from project root.
+- First `cargo build --release` failed because a running `model-surgery.exe` locked `src-tauri\target\release\model_surgery_runtime.dll`.
+- After the app process closed, `cargo build --release` passed.
+
+Updated release executable:
+
+```text
+C:\Users\Wu Family Computer\Downloads\Project 2\src-tauri\target\release\model-surgery.exe
+```

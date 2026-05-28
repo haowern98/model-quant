@@ -178,6 +178,7 @@ export interface BenchmarkResult {
   convertedBytesAfter: number;
   baselineBenchmark: RuntimeBenchmark | null;
   qualityEval: RecipeQualityEval | null;
+  standardEval: StandardEvalReport | null;
 }
 
 export interface RecipeQualityEval {
@@ -209,6 +210,38 @@ export interface RuntimeBenchmark {
   loadMs: number;
   elapsedMs: number;
   modelTensorCount: number | null;
+}
+
+export interface StandardEvalReport {
+  sampleCount: number;
+  taskCount: number;
+  baselineAccuracy: number | null;
+  recipeAccuracy: number;
+  accuracyDelta: number | null;
+  correctToWrongCount: number;
+  wrongToCorrectCount: number;
+  baselineAvgMargin: number | null;
+  recipeAvgMargin: number;
+  marginDelta: number | null;
+  tasks: StandardEvalTaskReport[];
+}
+
+export interface StandardEvalTaskReport {
+  task: string;
+  sampleCount: number;
+  baselineCorrectCount: number | null;
+  recipeCorrectCount: number;
+  correctToWrongCount: number;
+  wrongToCorrectCount: number;
+  samePredictionCount: number;
+  baselineAccuracy: number | null;
+  recipeAccuracy: number;
+  accuracyDelta: number | null;
+  baselineAvgMargin: number | null;
+  recipeAvgMargin: number;
+  marginDelta: number | null;
+  baselineAvgCorrectNll: number | null;
+  recipeAvgCorrectNll: number;
 }
 
 // ---- Bulk Assign ----
