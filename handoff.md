@@ -604,6 +604,61 @@ Updated release executable:
 C:\Users\Wu Family Computer\Downloads\Project 2\src-tauri\target\release\model-surgery.exe
 ```
 
+### 2026-05-28: Eval Preset Dropdown And 300-Sample Default Started
+
+Files edited:
+
+- `src/types/index.ts`
+- `src/lib/tauri-bridge.ts`
+- `src/App.tsx`
+- `src/components/Toolbar/Toolbar.tsx`
+- `tests/mocks/tauri-bridge.ts`
+- `src-tauri/src/commands/export.rs`
+- `src-tauri/src/profile/benchmark.rs`
+- `handoff.md`
+
+Behavior added:
+
+- Added `RecipeEvalPreset` with:
+  - `default`
+  - `quick`
+- Toolbar now has an eval preset dropdown.
+- App defaults to `default`.
+- `Quick` keeps using `evals/standard_subset.json`:
+  - 6 tasks
+  - 6 samples per task
+  - 36 total standard samples
+- `Default` now builds a native app-owned eval set in Rust:
+  - 6 tasks
+  - 50 samples per task
+  - 300 total standard samples
+- Default task families:
+  - `arc_challenge`
+  - `arc_easy`
+  - `hellaswag`
+  - `mmlu_mixed`
+  - `gsm8k`
+  - `truthfulqa_mc`
+- Default path still uses native llama.cpp loglikelihood scoring and does not use Python, internet, external eval harnesses, or temporary GGUF writes.
+- Tauri `test_recipe` now accepts optional `evalPreset`.
+- Status messages now say whether the run used the `quick` or `default` built-in eval.
+
+Important limitation:
+
+- The new default set is app-owned and generated from curated built-in prompts/templates, not official EleutherAI dataset rows. It is larger and more useful than the quick smoke set, but still not a replacement for a full official eval harness.
+
+Validation status so far:
+
+- `npm run build` passed from project root.
+- `cargo check` passed from `src-tauri`.
+- `npm run lint` passed from project root.
+- `cargo test` passed from `src-tauri`.
+- A direct `rustfmt src-tauri\src\profile\benchmark.rs src-tauri\src\commands\export.rs` failed because standalone rustfmt defaulted to Rust 2015.
+- `rustfmt --edition 2021 src-tauri\src\profile\benchmark.rs src-tauri\src\commands\export.rs` passed.
+- After formatting, `cargo check` passed again.
+- After formatting, `npm run build` passed again.
+- Release build has not been refreshed yet because `src-tauri\target\release\model-surgery.exe` is currently running and will lock `model_surgery_runtime.dll` during copy.
+
 ### 2026-05-28: Built-in Standard Eval V1 Work Started
 
 Files edited or added:

@@ -16,7 +16,12 @@ import {
   loadRecipe,
   exportGguf,
 } from "./lib/tauri-bridge";
-import type { BenchmarkResult, RecipeState, RecipeTestMode } from "./types";
+import type {
+  BenchmarkResult,
+  RecipeEvalPreset,
+  RecipeState,
+  RecipeTestMode,
+} from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 
 // Auto-inject the mock bridge only in plain browser runs.
@@ -55,6 +60,8 @@ function App() {
   const [appError, setAppError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
+  const [recipeEvalPreset, setRecipeEvalPreset] =
+    useState<RecipeEvalPreset>("default");
 
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
@@ -97,7 +104,12 @@ function App() {
     if (!recipe) return;
     startOperation();
     try {
-      const result = await testRecipe(recipe, 512, recipeTestMode);
+      const result = await testRecipe(
+        recipe,
+        512,
+        recipeTestMode,
+        recipeEvalPreset,
+      );
       setBenchmarkResult(result);
       setShowResults(true);
       setAppError(null);
@@ -107,7 +119,14 @@ function App() {
     } finally {
       endOperation();
     }
-  }, [recipe, recipeTestMode, startOperation, endOperation, setProfile]);
+  }, [
+    recipe,
+    recipeTestMode,
+    recipeEvalPreset,
+    startOperation,
+    endOperation,
+    setProfile,
+  ]);
 
   const handleSaveRecipe = useCallback(async () => {
     if (!recipe) return;
@@ -172,6 +191,8 @@ function App() {
               onExport={handleExport}
               testMode={recipeTestMode}
               onTestModeChange={setRecipeTestMode}
+              evalPreset={recipeEvalPreset}
+              onEvalPresetChange={setRecipeEvalPreset}
               onTest={handleTest}
             />
           }

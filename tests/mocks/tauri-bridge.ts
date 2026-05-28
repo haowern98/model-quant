@@ -154,6 +154,8 @@ export function createMockBridge() {
       },
       test_recipe: (args) => {
         const isCompare = args?.testMode === "compare_baseline";
+        const isDefault = args?.evalPreset !== "quick";
+        const standardSampleCount = isDefault ? 300 : 36;
         return {
           promptEvalTps: 1247,
           tokenGenTps: 88.3,
@@ -206,8 +208,44 @@ export function createMockBridge() {
             pplDelta: isCompare ? 0.28 : 0,
             pplDeltaPercent: isCompare ? 4.11 : 0,
             evalTokenCount: 384,
-            evalSampleCount: 12,
+            evalSampleCount: isDefault ? 10 : 4,
             skippedSampleCount: 0,
+          },
+          standardEval: {
+            sampleCount: standardSampleCount,
+            taskCount: 6,
+            baselineAccuracy: isCompare ? 0.76 : null,
+            recipeAccuracy: 0.74,
+            accuracyDelta: isCompare ? -0.02 : null,
+            correctToWrongCount: isCompare ? 8 : 0,
+            wrongToCorrectCount: isCompare ? 2 : 0,
+            baselineAvgMargin: isCompare ? 0.42 : null,
+            recipeAvgMargin: 0.38,
+            marginDelta: isCompare ? -0.04 : null,
+            tasks: [
+              "arc_challenge",
+              "arc_easy",
+              "gsm8k",
+              "hellaswag",
+              "mmlu_mixed",
+              "truthfulqa_mc",
+            ].map((task) => ({
+              task,
+              sampleCount: standardSampleCount / 6,
+              baselineCorrectCount: isCompare ? 38 : null,
+              recipeCorrectCount: 37,
+              correctToWrongCount: isCompare ? 2 : 0,
+              wrongToCorrectCount: isCompare ? 1 : 0,
+              samePredictionCount: isCompare ? 47 : 0,
+              baselineAccuracy: isCompare ? 0.76 : null,
+              recipeAccuracy: 0.74,
+              accuracyDelta: isCompare ? -0.02 : null,
+              baselineAvgMargin: isCompare ? 0.42 : null,
+              recipeAvgMargin: 0.38,
+              marginDelta: isCompare ? -0.04 : null,
+              baselineAvgCorrectNll: isCompare ? 1.4 : null,
+              recipeAvgCorrectNll: 1.45,
+            })),
           },
         };
       },

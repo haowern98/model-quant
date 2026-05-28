@@ -7,6 +7,7 @@ import type {
   QuantType,
   RecipeSummary,
   RecipeTestMode,
+  RecipeEvalPreset,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -67,11 +68,13 @@ export async function testRecipe(
   recipe: RecipeState,
   promptTokens: number,
   testMode: RecipeTestMode,
+  evalPreset: RecipeEvalPreset,
 ): Promise<BenchmarkResult> {
   return invoke<BenchmarkResult>("test_recipe", {
     recipe,
     promptTokens,
     testMode,
+    evalPreset,
   });
 }
 

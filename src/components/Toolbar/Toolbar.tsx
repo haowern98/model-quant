@@ -3,7 +3,12 @@ import { QuantPresetMenu } from "./QuantPresetMenu";
 import { RecipeControls } from "./RecipeControls";
 import { ProgressBar } from "./ProgressBar";
 import { TestButton } from "./TestButton";
-import type { QuantType, ProgressEvent, RecipeTestMode } from "../../types";
+import type {
+  QuantType,
+  ProgressEvent,
+  RecipeEvalPreset,
+  RecipeTestMode,
+} from "../../types";
 
 interface ToolbarProps {
   modelPath: string | null;
@@ -17,6 +22,8 @@ interface ToolbarProps {
   onExport: () => void;
   testMode: RecipeTestMode;
   onTestModeChange: (mode: RecipeTestMode) => void;
+  evalPreset: RecipeEvalPreset;
+  onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTest: () => void;
 }
 
@@ -32,6 +39,8 @@ export function Toolbar({
   onExport,
   testMode,
   onTestModeChange,
+  evalPreset,
+  onEvalPresetChange,
   onTest,
 }: ToolbarProps) {
   return (
@@ -50,6 +59,18 @@ export function Toolbar({
         onExport={onExport}
         disabled={!hasModel || running}
       />
+      <select
+        value={evalPreset}
+        onChange={(event) =>
+          onEvalPresetChange(event.target.value as RecipeEvalPreset)
+        }
+        disabled={!hasModel || running}
+        className="h-8 bg-bg-surface border border-border-default rounded px-2 text-sm text-text-primary disabled:opacity-40"
+        aria-label="Eval preset"
+      >
+        <option value="default">Default</option>
+        <option value="quick">Quick</option>
+      </select>
       <select
         value={testMode}
         onChange={(event) =>

@@ -185,6 +185,7 @@ pub async fn test_recipe(
     recipe: RecipeState,
     prompt_tokens: u32,
     test_mode: Option<String>,
+    eval_preset: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, RecipeStore>,
 ) -> Result<BenchmarkResult, String> {
@@ -202,13 +203,23 @@ pub async fn test_recipe(
 
     progress.requantizing(1.0, "skipped");
     progress.writing(1.0, "no temporary GGUF written");
+    let eval_preset =
+        crate::profile::benchmark::parse_standard_eval_preset(eval_preset.as_deref())?;
     let result = match test_mode.as_deref().unwrap_or("compare_baseline") {
-        "single" => {
-            run_native_recipe_single_benchmark(&source, &targets, prompt_tokens, &progress)?
-        }
-        "compare_baseline" => {
-            run_native_recipe_compare_benchmark(&source, &targets, prompt_tokens, &progress)?
-        }
+        "single" => run_native_recipe_single_benchmark(
+            &source,
+            &targets,
+            prompt_tokens,
+            eval_preset,
+            &progress,
+        )?,
+        "compare_baseline" => run_native_recipe_compare_benchmark(
+            &source,
+            &targets,
+            prompt_tokens,
+            eval_preset,
+            &progress,
+        )?,
         mode => return Err(format!("Unknown test recipe mode: {}", mode)),
     };
 

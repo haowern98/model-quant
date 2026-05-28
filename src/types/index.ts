@@ -139,6 +139,7 @@ export interface RecipeState {
 }
 
 export type RecipeTestMode = "single" | "compare_baseline";
+export type RecipeEvalPreset = "quick" | "default";
 
 // ---- Progress ----
 
