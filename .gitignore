@@ -33,6 +33,7 @@ _scaffold_temp/
 
 # Project docs (not part of the app build)
 CLAUDE.md
+handoff.md
 2026-05-23-model-surgery-design.md
 docs/
 

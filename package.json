@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "generate:eval-subset": "node scripts/lm-eval-subset.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
