@@ -672,8 +672,8 @@ fn load_standard_eval_subset(preset: StandardEvalPreset) -> Result<LoadedStandar
 }
 
 fn load_quick_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
-    const STANDARD_SUBSET: &str = include_str!("../../../evals/standard_subset.json");
-    load_standard_eval_subset_from_json(STANDARD_SUBSET, "bundled standard eval")
+    const STANDARD_SUBSET: &str = include_str!("../../../evals/lm_eval_subset.quick.generated.json");
+    load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated quick lm-eval subset")
 }
 
 fn load_default_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
@@ -766,16 +766,20 @@ mod tests {
     }
 
     #[test]
-    fn quick_standard_eval_remains_small_smoke_subset() {
+    fn quick_standard_eval_uses_smaller_official_row_subset() {
         let subset = load_standard_eval_subset(StandardEvalPreset::Quick).unwrap();
         let counts = task_counts(&subset);
 
-        assert_eq!(subset.samples.len(), 36);
-        assert_eq!(counts.get("arc_challenge"), Some(&6));
-        assert_eq!(counts.get("arc_easy"), Some(&6));
-        assert_eq!(counts.get("hellaswag"), Some(&6));
-        assert_eq!(counts.get("mmlu_mixed"), Some(&6));
-        assert_eq!(counts.get("gsm8k"), Some(&6));
-        assert_eq!(counts.get("truthfulqa_mc"), Some(&6));
+        assert_eq!(subset.samples.len(), 55);
+        assert_eq!(counts.get("arc_challenge"), Some(&10));
+        assert_eq!(counts.get("arc_easy"), Some(&10));
+        assert_eq!(counts.get("hellaswag"), Some(&10));
+        assert_eq!(counts.get("mmlu_high_school_physics"), Some(&5));
+        assert_eq!(counts.get("mmlu_college_computer_science"), Some(&5));
+        assert_eq!(counts.get("mmlu_professional_medicine"), Some(&5));
+        assert_eq!(counts.get("truthfulqa_mc1"), Some(&10));
+        assert!(!counts.contains_key("gsm8k"));
+        assert!(!counts.contains_key("mmlu_mixed"));
+        assert!(!counts.contains_key("truthfulqa_mc"));
     }
 }

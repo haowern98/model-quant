@@ -6,7 +6,10 @@ import {
   formatHellaSwagSample,
   formatMmluSample,
   formatTruthfulQaMc1Sample,
+  getPresetOutputPath,
+  getTaskSpecsForPreset,
   isRetriableStatus,
+  parseCliArgs,
   selectRowOffsets,
   selectRows,
 } from "./lm-eval-subset.mjs";
@@ -128,4 +131,53 @@ test("isRetriableStatus covers rate limits and transient server errors", () => {
   assert.equal(isRetriableStatus(503), true);
   assert.equal(isRetriableStatus(504), true);
   assert.equal(isRetriableStatus(404), false);
+});
+
+test("default preset keeps the frozen generated subset shape", () => {
+  const counts = Object.fromEntries(
+    getTaskSpecsForPreset("default").map((task) => [task.task, task.count]),
+  );
+
+  assert.equal(getPresetOutputPath("default"), "evals/lm_eval_subset.generated.json");
+  assert.deepEqual(counts, {
+    arc_challenge: 50,
+    arc_easy: 50,
+    hellaswag: 50,
+    mmlu_high_school_physics: 25,
+    mmlu_college_computer_science: 25,
+    mmlu_professional_medicine: 25,
+    truthfulqa_mc1: 50,
+  });
+});
+
+test("quick preset writes a separate smaller official-row subset", () => {
+  const counts = Object.fromEntries(
+    getTaskSpecsForPreset("quick").map((task) => [task.task, task.count]),
+  );
+
+  assert.equal(getPresetOutputPath("quick"), "evals/lm_eval_subset.quick.generated.json");
+  assert.deepEqual(counts, {
+    arc_challenge: 10,
+    arc_easy: 10,
+    hellaswag: 10,
+    mmlu_high_school_physics: 5,
+    mmlu_college_computer_science: 5,
+    mmlu_professional_medicine: 5,
+    truthfulqa_mc1: 10,
+  });
+});
+
+test("CLI defaults to default output and can generate quick independently", () => {
+  assert.deepEqual(parseCliArgs([]), {
+    preset: "default",
+    outputPath: "evals/lm_eval_subset.generated.json",
+  });
+  assert.deepEqual(parseCliArgs(["--preset", "quick"]), {
+    preset: "quick",
+    outputPath: "evals/lm_eval_subset.quick.generated.json",
+  });
+  assert.deepEqual(parseCliArgs(["--preset=quick", "tmp/quick.json"]), {
+    preset: "quick",
+    outputPath: "tmp/quick.json",
+  });
 });

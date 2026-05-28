@@ -15,13 +15,39 @@ const DEFAULT_PPL_TEXTS = [
   "Truthfulness evaluations test whether a model avoids common misconceptions and misleading claims. These tasks are useful for detecting whether compression changes a model's preference between true and false answers.",
 ];
 
+const PRESETS = {
+  default: {
+    outputPath: "evals/lm_eval_subset.generated.json",
+    counts: {
+      arc_challenge: 50,
+      arc_easy: 50,
+      hellaswag: 50,
+      mmlu_high_school_physics: 25,
+      mmlu_college_computer_science: 25,
+      mmlu_professional_medicine: 25,
+      truthfulqa_mc1: 50,
+    },
+  },
+  quick: {
+    outputPath: "evals/lm_eval_subset.quick.generated.json",
+    counts: {
+      arc_challenge: 10,
+      arc_easy: 10,
+      hellaswag: 10,
+      mmlu_high_school_physics: 5,
+      mmlu_college_computer_science: 5,
+      mmlu_professional_medicine: 5,
+      truthfulqa_mc1: 10,
+    },
+  },
+};
+
 const TASKS = [
   {
     task: "arc_challenge",
     source: "allenai/ai2_arc",
     config: "ARC-Challenge",
     split: "validation",
-    count: 50,
     formatter: formatArcSample,
   },
   {
@@ -29,7 +55,6 @@ const TASKS = [
     source: "allenai/ai2_arc",
     config: "ARC-Easy",
     split: "validation",
-    count: 50,
     formatter: formatArcSample,
   },
   {
@@ -37,7 +62,6 @@ const TASKS = [
     source: "Rowan/hellaswag",
     config: "default",
     split: "validation",
-    count: 50,
     formatter: formatHellaSwagSample,
   },
   {
@@ -45,7 +69,6 @@ const TASKS = [
     source: "cais/mmlu",
     config: "high_school_physics",
     split: "test",
-    count: 25,
     formatter: formatMmluSample,
   },
   {
@@ -53,7 +76,6 @@ const TASKS = [
     source: "cais/mmlu",
     config: "college_computer_science",
     split: "test",
-    count: 25,
     formatter: formatMmluSample,
   },
   {
@@ -61,7 +83,6 @@ const TASKS = [
     source: "cais/mmlu",
     config: "professional_medicine",
     split: "test",
-    count: 25,
     formatter: formatMmluSample,
   },
   {
@@ -69,7 +90,6 @@ const TASKS = [
     source: "truthfulqa/truthful_qa",
     config: "multiple_choice",
     split: "validation",
-    count: 50,
     formatter: formatTruthfulQaMc1Sample,
   },
 ];
@@ -248,9 +268,62 @@ async function fetchSelectedDatasetRows(task) {
   });
 }
 
-export async function buildSubset() {
+export function getTaskSpecsForPreset(presetName = "default") {
+  const preset = PRESETS[presetName];
+  if (!preset) {
+    throw new Error(`unknown preset: ${presetName}`);
+  }
+  return TASKS.map((task) => {
+    const count = preset.counts[task.task];
+    if (!Number.isInteger(count) || count < 1) {
+      throw new Error(`preset ${presetName} has invalid count for ${task.task}`);
+    }
+    return { ...task, count };
+  });
+}
+
+export function getPresetOutputPath(presetName = "default") {
+  const preset = PRESETS[presetName];
+  if (!preset) {
+    throw new Error(`unknown preset: ${presetName}`);
+  }
+  return preset.outputPath;
+}
+
+export function parseCliArgs(args) {
+  let preset = "default";
+  let outputPath = null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--preset") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--preset requires a value");
+      }
+      preset = value;
+      index += 1;
+    } else if (arg.startsWith("--preset=")) {
+      preset = arg.slice("--preset=".length);
+    } else if (arg.startsWith("--")) {
+      throw new Error(`unknown argument: ${arg}`);
+    } else if (!outputPath) {
+      outputPath = arg;
+    } else {
+      throw new Error(`unexpected argument: ${arg}`);
+    }
+  }
+
+  if (!PRESETS[preset]) {
+    throw new Error(`unknown preset: ${preset}`);
+  }
+
+  return { preset, outputPath: outputPath ?? getPresetOutputPath(preset) };
+}
+
+export async function buildSubset(presetName = "default") {
   const tasks = [];
-  for (const task of TASKS) {
+  for (const task of getTaskSpecsForPreset(presetName)) {
     const rows = await fetchSelectedDatasetRows(task);
     const samples = rows.map((row) => task.formatter(row, task));
     tasks.push({
@@ -269,6 +342,7 @@ export async function buildSubset() {
     provenance: {
       generatedBy: "scripts/lm-eval-subset.mjs",
       generatedAt: new Date().toISOString(),
+      preset: presetName,
       rowSelection: "evenly_spaced_by_source_row_index",
       sourceApi: DATASET_API,
       note: "Python-free fixed subset derived from Hugging Face dataset rows used by lm-eval-compatible tasks.",
@@ -279,9 +353,9 @@ export async function buildSubset() {
 }
 
 async function main() {
-  const outArg = process.argv[2] ?? "evals/lm_eval_subset.generated.json";
-  const outPath = resolve(process.cwd(), outArg);
-  const subset = await buildSubset();
+  const { preset, outputPath } = parseCliArgs(process.argv.slice(2));
+  const outPath = resolve(process.cwd(), outputPath);
+  const subset = await buildSubset(preset);
   await mkdir(dirname(outPath), { recursive: true });
   await writeFile(outPath, `${JSON.stringify(subset, null, 2)}\n`, "utf8");
 
