@@ -1,7 +1,15 @@
 use crate::gguf::types::{TensorInfo, TensorQuantPreflight};
 
-const DIRECT_TARGET_QUANTS: &[&str] = &[
-    "F32", "BF16", "F16", "Q8_0", "Q6_K", "Q5_K", "Q4_K", "Q3_K", "Q2_K",
+const DIRECT_TARGET_QUANTS: &[(&str, f32)] = &[
+    ("F32", 32.0),
+    ("BF16", 16.0),
+    ("F16", 16.0),
+    ("Q8_0", 8.0),
+    ("Q6_K", 6.6),
+    ("Q5_K", 5.5),
+    ("Q4_K", 4.5),
+    ("Q3_K", 3.4),
+    ("Q2_K", 2.6),
 ];
 
 pub fn analyze_tensor_quant_preflight(tensor: &TensorInfo) -> TensorQuantPreflight {
@@ -22,11 +30,16 @@ pub fn analyze_tensor_quant_preflight(tensor: &TensorInfo) -> TensorQuantPreflig
         return blocked("tensor row width is not divisible by Q8_0 block size 32");
     }
 
+    let Some(current_bits) = bits_per_weight(&tensor.current_quant) else {
+        return blocked("unsupported current quant type");
+    };
+
     TensorQuantPreflight {
         can_quantize: true,
         allowed_target_quants: DIRECT_TARGET_QUANTS
             .iter()
-            .map(|quant| quant.to_string())
+            .filter(|(_, target_bits)| *target_bits <= current_bits)
+            .map(|(quant, _)| quant.to_string())
             .collect(),
         blocked_reason: None,
     }
@@ -42,4 +55,21 @@ fn blocked(reason: &str) -> TensorQuantPreflight {
 
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn bits_per_weight(quant: &str) -> Option<f32> {
+    match quant {
+        "F32" => Some(32.0),
+        "BF16" | "F16" => Some(16.0),
+        "Q8_0" => Some(8.0),
+        "Q6_K" => Some(6.6),
+        "Q5_K" => Some(5.5),
+        "Q5_K_M" => Some(5.3),
+        "Q4_K_M" => Some(4.8),
+        "Q4_K" => Some(4.5),
+        "Q3_K_M" => Some(3.9),
+        "Q3_K" => Some(3.4),
+        "Q2_K" => Some(2.6),
+        _ => None,
+    }
 }
