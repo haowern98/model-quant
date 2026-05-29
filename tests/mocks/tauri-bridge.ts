@@ -7,6 +7,27 @@ import type {
 import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
+  const allowedTargetQuants: QuantType[] = [
+    "F32",
+    "BF16",
+    "F16",
+    "Q8_0",
+    "Q6_K",
+    "Q5_K",
+    "Q4_K",
+    "Q3_K",
+    "Q2_K",
+  ];
+  const allowedPreflight = {
+    canQuantize: true,
+    allowedTargetQuants,
+    blockedReason: null,
+  };
+  const blockedNormPreflight = {
+    canQuantize: false,
+    allowedTargetQuants: [],
+    blockedReason: "1D tensors are not quantizable weight matrices",
+  };
   const mockModel: ModelInfo = {
     metadata: {
       name: "Mock-Llama-3-8B",
@@ -22,6 +43,7 @@ export function createMockBridge() {
         sizeBytes: 262_000_000,
         layerIndex: -1,
         layerGroup: "embedding",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.attention.wq.weight",
@@ -30,6 +52,7 @@ export function createMockBridge() {
         sizeBytes: 80_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.attention.wk.weight",
@@ -38,6 +61,7 @@ export function createMockBridge() {
         sizeBytes: 20_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.attention.wv.weight",
@@ -46,6 +70,7 @@ export function createMockBridge() {
         sizeBytes: 20_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.attention.wo.weight",
@@ -54,6 +79,7 @@ export function createMockBridge() {
         sizeBytes: 80_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.feed_forward.w1.weight",
@@ -62,6 +88,7 @@ export function createMockBridge() {
         sizeBytes: 117_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.feed_forward.w2.weight",
@@ -70,6 +97,7 @@ export function createMockBridge() {
         sizeBytes: 117_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "layers.0.feed_forward.w3.weight",
@@ -78,6 +106,7 @@ export function createMockBridge() {
         sizeBytes: 117_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: allowedPreflight,
       },
       {
         name: "output_norm.weight",
@@ -86,6 +115,7 @@ export function createMockBridge() {
         sizeBytes: 16_000,
         layerIndex: -1,
         layerGroup: "output_norm",
+        quantPreflight: blockedNormPreflight,
       },
       {
         name: "output.weight",
@@ -94,6 +124,7 @@ export function createMockBridge() {
         sizeBytes: 262_000_000,
         layerIndex: -1,
         layerGroup: "output",
+        quantPreflight: allowedPreflight,
       },
     ],
     currentUniformQuant: "Q4_K_M",

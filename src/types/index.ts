@@ -94,6 +94,13 @@ export interface TensorInfo {
     | "output_norm"
     | "output"
     | "other";
+  quantPreflight: TensorQuantPreflight;
+}
+
+export interface TensorQuantPreflight {
+  canQuantize: boolean;
+  allowedTargetQuants: QuantType[];
+  blockedReason: string | null;
 }
 
 export interface ModelInfo {
