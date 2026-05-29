@@ -28,6 +28,11 @@ export function createMockBridge() {
     allowedTargetQuants: ["Q8_0", "Q6_K", "Q5_K", "Q4_K", "Q3_K", "Q2_K"] satisfies QuantType[],
     blockedReason: null,
   };
+  const q8OnlyPreflight = {
+    canQuantize: true,
+    allowedTargetQuants: ["Q8_0"] satisfies QuantType[],
+    blockedReason: null,
+  };
   const blockedNormPreflight = {
     canQuantize: false,
     allowedTargetQuants: [],
@@ -85,6 +90,15 @@ export function createMockBridge() {
         layerIndex: 0,
         layerGroup: "attention",
         quantPreflight: bf16AllowedPreflight,
+      },
+      {
+        name: "layers.0.attention.short.weight",
+        shape: [128, 4096],
+        currentQuant: "Q8_0",
+        sizeBytes: 2_000_000,
+        layerIndex: 0,
+        layerGroup: "attention",
+        quantPreflight: q8OnlyPreflight,
       },
       {
         name: "layers.0.feed_forward.w1.weight",

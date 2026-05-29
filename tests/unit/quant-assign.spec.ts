@@ -41,4 +41,20 @@ test.describe('Quant Assign', () => {
     expect(options).not.toContain('BF16');
     expect(options).not.toContain('F16');
   });
+
+  test('disables target quant dropdown when only the current quant is valid', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByText('Open GGUF...').click();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'mock.gguf',
+      mimeType: 'application/octet-stream',
+      buffer: Buffer.from('mock'),
+    });
+    await page.getByText('Layer 0', { exact: false }).click();
+
+    const q8OnlyRow = page.locator('tr').filter({ hasText: 'attention.short.weight' });
+    await expect(q8OnlyRow.locator('select')).toBeDisabled();
+    await expect(q8OnlyRow.locator('select option')).toHaveText(['Q8_0']);
+  });
 });

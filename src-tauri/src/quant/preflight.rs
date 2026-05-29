@@ -1,15 +1,21 @@
 use crate::gguf::types::{TensorInfo, TensorQuantPreflight};
 
-const DIRECT_TARGET_QUANTS: &[(&str, f32)] = &[
-    ("F32", 32.0),
-    ("BF16", 16.0),
-    ("F16", 16.0),
-    ("Q8_0", 8.0),
-    ("Q6_K", 6.6),
-    ("Q5_K", 5.5),
-    ("Q4_K", 4.5),
-    ("Q3_K", 3.4),
-    ("Q2_K", 2.6),
+struct TargetQuant {
+    name: &'static str,
+    bits_per_weight: f32,
+    block_size: Option<u64>,
+}
+
+const DIRECT_TARGET_QUANTS: &[TargetQuant] = &[
+    TargetQuant { name: "F32", bits_per_weight: 32.0, block_size: None },
+    TargetQuant { name: "BF16", bits_per_weight: 16.0, block_size: None },
+    TargetQuant { name: "F16", bits_per_weight: 16.0, block_size: None },
+    TargetQuant { name: "Q8_0", bits_per_weight: 8.0, block_size: Some(32) },
+    TargetQuant { name: "Q6_K", bits_per_weight: 6.6, block_size: Some(256) },
+    TargetQuant { name: "Q5_K", bits_per_weight: 5.5, block_size: Some(256) },
+    TargetQuant { name: "Q4_K", bits_per_weight: 4.5, block_size: Some(256) },
+    TargetQuant { name: "Q3_K", bits_per_weight: 3.4, block_size: Some(256) },
+    TargetQuant { name: "Q2_K", bits_per_weight: 2.6, block_size: Some(256) },
 ];
 
 pub fn analyze_tensor_quant_preflight(tensor: &TensorInfo) -> TensorQuantPreflight {
@@ -26,21 +32,24 @@ pub fn analyze_tensor_quant_preflight(tensor: &TensorInfo) -> TensorQuantPreflig
         return blocked("runtime or normalization tensors are not quantizable weight matrices");
     }
 
-    if tensor.shape[0] % 32 != 0 {
-        return blocked("tensor row width is not divisible by Q8_0 block size 32");
-    }
-
     let Some(current_bits) = bits_per_weight(&tensor.current_quant) else {
         return blocked("unsupported current quant type");
     };
 
+    let allowed_target_quants = DIRECT_TARGET_QUANTS
+        .iter()
+        .filter(|target| target.bits_per_weight <= current_bits)
+        .filter(|target| target.block_size.map_or(true, |block| tensor.shape[0] % block == 0))
+        .map(|target| target.name.to_string())
+        .collect::<Vec<_>>();
+
+    if allowed_target_quants.is_empty() {
+        return blocked("no equal-or-smaller target quant fits this tensor row");
+    }
+
     TensorQuantPreflight {
         can_quantize: true,
-        allowed_target_quants: DIRECT_TARGET_QUANTS
-            .iter()
-            .filter(|(_, target_bits)| *target_bits <= current_bits)
-            .map(|(quant, _)| quant.to_string())
-            .collect(),
+        allowed_target_quants,
         blocked_reason: None,
     }
 }

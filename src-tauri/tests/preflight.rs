@@ -117,16 +117,49 @@ fn preflight_filters_q2_tensor_to_q2_only() {
 
 #[test]
 fn preflight_blocks_rows_that_do_not_fit_q8_blocks() {
-    let result = analyze_tensor_quant_preflight(&tensor(
+    let result = analyze_tensor_quant_preflight(&tensor_with_quant(
         "layers.0.attn_q.weight",
         vec![33, 2048],
         "attention",
+        "Q8_0",
     ));
 
     assert!(!result.can_quantize);
     assert!(result.allowed_target_quants.is_empty());
     assert_eq!(
         result.blocked_reason.as_deref(),
-        Some("tensor row width is not divisible by Q8_0 block size 32")
+        Some("no equal-or-smaller target quant fits this tensor row")
     );
+}
+
+#[test]
+fn preflight_checks_each_target_quant_block_size() {
+    let result = analyze_tensor_quant_preflight(&tensor(
+        "layers.0.attn_q.weight",
+        vec![128, 2048],
+        "attention",
+    ));
+
+    assert!(result.can_quantize);
+    assert_eq!(
+        result.allowed_target_quants,
+        vec![
+            "BF16".to_string(),
+            "F16".to_string(),
+            "Q8_0".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn preflight_keeps_only_current_quant_when_no_smaller_target_fits() {
+    let result = analyze_tensor_quant_preflight(&tensor_with_quant(
+        "layers.0.attn_q.weight",
+        vec![128, 2048],
+        "attention",
+        "Q8_0",
+    ));
+
+    assert!(result.can_quantize);
+    assert_eq!(result.allowed_target_quants, vec!["Q8_0".to_string()]);
 }
