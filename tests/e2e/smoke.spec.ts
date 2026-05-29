@@ -17,9 +17,14 @@ test.describe('E2E Smoke', () => {
     await page.goto('/');
     const presetSelect = page.locator('select').first();
     const options = await presetSelect.locator('option').allTextContents();
-    expect(options).toContain('Q4_K_M');
+    expect(options).toContain('Q4_K');
+    expect(options).toContain('Q3_K');
+    expect(options).toContain('Q2_K');
     expect(options).toContain('Q8_0');
     expect(options).toContain('F16');
+    expect(options).not.toContain('Q5_K_M');
+    expect(options).not.toContain('Q4_K_M');
+    expect(options).not.toContain('Q3_K_M');
   });
 
   test('bulk assign panel shows all patterns', async ({ page }) => {

@@ -51,21 +51,8 @@ export const QUANT_TYPES: {
     quality: "Very high quality",
   },
   { value: "Q5_K", label: "Q5_K", bitsPerWeight: 5.5, quality: "High quality" },
-  {
-    value: "Q5_K_M",
-    label: "Q5_K_M",
-    bitsPerWeight: 5.3,
-    quality: "High quality",
-  },
   { value: "Q4_K", label: "Q4_K", bitsPerWeight: 4.5, quality: "Good" },
-  {
-    value: "Q4_K_M",
-    label: "Q4_K_M",
-    bitsPerWeight: 4.8,
-    quality: "Good (default trade-off)",
-  },
   { value: "Q3_K", label: "Q3_K", bitsPerWeight: 3.4, quality: "Passable" },
-  { value: "Q3_K_M", label: "Q3_K_M", bitsPerWeight: 3.9, quality: "Passable" },
   {
     value: "Q2_K",
     label: "Q2_K",
@@ -80,7 +67,7 @@ export function isQuantType(value: string): value is QuantType {
 
 export function toTargetQuant(
   value: string | null | undefined,
-  fallback: QuantType = "Q4_K_M",
+  fallback: QuantType = "Q4_K",
 ): QuantType {
   return value && isQuantType(value) ? value : fallback;
 }
