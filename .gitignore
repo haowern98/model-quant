@@ -15,11 +15,25 @@ dist-ssr
 # Rust
 src-tauri/target/
 
+# Native C++ build outputs
+native/cpp/build/
+
+# Local UI captures and generated assets
+.playwright-mcp/
+src/assets/
+test-results/
+
+# Local model downloads and Hugging Face cache
+models/
+*.gguf
+*.safetensors
+
 # Temp scaffold
 _scaffold_temp/
 
 # Project docs (not part of the app build)
 CLAUDE.md
+handoff.md
 2026-05-23-model-surgery-design.md
 docs/
 

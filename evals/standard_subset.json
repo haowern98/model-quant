@@ -1,0 +1,270 @@
+{
+  "ppl": [
+    {
+      "text": "A reliable benchmark should include factual recall, commonsense reasoning, math, safety judgement, and short technical passages. Small quantization changes often show up as slightly worse token probabilities before they show up as obviously wrong answers."
+    },
+    {
+      "text": "When a model is compressed, the goal is not only to reduce disk size. The useful tradeoff is lower memory pressure while preserving enough accuracy, calibration, and instruction following for the workload that the user actually runs."
+    },
+    {
+      "text": "A robotics controller receives sensor readings, filters noisy observations, and decides whether the next action is safe. If uncertainty increases, the controller should prefer a conservative action over an irreversible one."
+    },
+    {
+      "text": "In software debugging, a minimal reproduction isolates the failure by removing unrelated dependencies. The strongest explanation predicts both the observed failure and why nearby cases continue to pass."
+    }
+  ],
+  "tasks": [
+    {
+      "name": "arc_challenge",
+      "outputType": "multiple_choice",
+      "samples": [
+        {
+          "prompt": "Question: A sealed syringe contains air. The plunger is pushed inward while the temperature stays the same. What happens to the pressure of the air?\nAnswer:",
+          "choices": [" It decreases", " It increases", " It stays the same", " It becomes zero"],
+          "gold": 1,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: A metal spoon feels colder than a wooden spoon in the same room mainly because metal\nAnswer:",
+          "choices": [" has a lower temperature", " conducts heat away from the hand faster", " contains less energy", " reflects more light"],
+          "gold": 1,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: A plant kept in darkness for many days will most directly lack the energy source needed for\nAnswer:",
+          "choices": [" photosynthesis", " evaporation", " gravity", " condensation"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: Two objects have the same mass. One is moving twice as fast as the other. Compared with the slower object, the faster object has\nAnswer:",
+          "choices": [" half the kinetic energy", " the same kinetic energy", " twice the kinetic energy", " four times the kinetic energy"],
+          "gold": 3,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: A shadow becomes longer near sunset because sunlight reaches the object at\nAnswer:",
+          "choices": [" a lower angle", " a higher temperature", " a shorter wavelength", " a stronger magnetic field"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: If a species has more offspring than the environment can support, natural selection most directly depends on differences in\nAnswer:",
+          "choices": [" inherited traits that affect survival", " the age of the planet", " the distance to the moon", " the number of atoms in water"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        }
+      ]
+    },
+    {
+      "name": "arc_easy",
+      "outputType": "multiple_choice",
+      "samples": [
+        {
+          "prompt": "Question: Which organ pumps blood through the human body?\nAnswer:",
+          "choices": [" Heart", " Lung", " Stomach", " Kidney"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: Water changes from a liquid to a gas during\nAnswer:",
+          "choices": [" freezing", " melting", " evaporation", " magnetism"],
+          "gold": 2,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: The Earth completes one orbit around the Sun in about\nAnswer:",
+          "choices": [" one day", " one week", " one month", " one year"],
+          "gold": 3,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: A simple circuit needs a closed path so that\nAnswer:",
+          "choices": [" electricity can flow", " sound can freeze", " gravity can stop", " light can disappear"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: The main source of energy for most food chains is\nAnswer:",
+          "choices": [" the Sun", " the Moon", " soil", " wind"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: A thermometer is used to measure\nAnswer:",
+          "choices": [" mass", " temperature", " length", " volume"],
+          "gold": 1,
+          "normalizeByChoiceLength": true
+        }
+      ]
+    },
+    {
+      "name": "hellaswag",
+      "outputType": "multiple_choice",
+      "samples": [
+        {
+          "prompt": "Context: A person cracks eggs into a bowl, adds flour, and stirs the mixture until smooth. Next, the person",
+          "choices": [" pours the batter into a heated pan.", " folds the laundry into a suitcase.", " resets the Wi-Fi router.", " paints the ceiling blue."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Context: The cyclist approaches a red traffic light and slows near the intersection. Next, the cyclist",
+          "choices": [" waits until the light changes.", " dives into a swimming pool.", " plants tomatoes in a garden.", " turns off a television."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Context: A mechanic lifts the hood and sees smoke coming from the engine bay. Next, the mechanic",
+          "choices": [" inspects the engine for the source of the smoke.", " serves dessert to restaurant guests.", " teaches a piano lesson.", " waters a row of houseplants."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Context: A student reads the problem twice, writes down the known values, and draws a small diagram. Next, the student",
+          "choices": [" sets up an equation to solve it.", " bakes bread in the oven.", " locks a bicycle outside.", " watches rain hit the window."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Context: The goalkeeper sees the ball flying toward the corner of the net. Next, the goalkeeper",
+          "choices": [" dives to try to block the shot.", " sharpens a kitchen knife.", " scans a boarding pass.", " writes a grocery list."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Context: A hiker notices dark clouds, thunder, and a sudden drop in temperature. Next, the hiker",
+          "choices": [" looks for safe shelter.", " starts ironing a shirt.", " paints a portrait indoors.", " charges a phone overnight."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        }
+      ]
+    },
+    {
+      "name": "mmlu_mixed",
+      "outputType": "multiple_choice",
+      "samples": [
+        {
+          "prompt": "Question: In computer science, a hash table is primarily designed to provide efficient\nAnswer:",
+          "choices": [" key-value lookup", " image compression", " analog amplification", " radioactive dating"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: In medicine, systolic blood pressure is measured when the heart is\nAnswer:",
+          "choices": [" contracting", " fully stopped", " digesting glucose", " exchanging oxygen in the alveoli"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: In economics, opportunity cost means the value of\nAnswer:",
+          "choices": [" the best alternative forgone", " all money ever spent", " a legal penalty", " a random market shock"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: In physics, acceleration is the rate of change of\nAnswer:",
+          "choices": [" velocity", " mass", " temperature", " electric charge"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: In law, a contract generally requires offer, acceptance, consideration, and\nAnswer:",
+          "choices": [" intent to create legal relations", " a weather forecast", " a chemical catalyst", " a biological membrane"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: In statistics, a p-value is commonly interpreted as the probability, assuming the null hypothesis, of observing data at least as extreme as\nAnswer:",
+          "choices": [" the data actually observed", " the population mean only", " the largest possible sample", " the final answer in a proof"],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        }
+      ]
+    },
+    {
+      "name": "gsm8k",
+      "outputType": "multiple_choice",
+      "samples": [
+        {
+          "prompt": "Question: Mia has 7 pencils and buys 5 more. She gives 3 to a friend. How many pencils does she have left?\nAnswer:",
+          "choices": [" 8", " 9", " 10", " 12"],
+          "gold": 1,
+          "normalizeByChoiceLength": false
+        },
+        {
+          "prompt": "Question: A box has 4 rows of 6 oranges. If 5 oranges are eaten, how many remain?\nAnswer:",
+          "choices": [" 17", " 19", " 21", " 24"],
+          "gold": 1,
+          "normalizeByChoiceLength": false
+        },
+        {
+          "prompt": "Question: A ticket costs $12. Four people buy tickets and use a $6 coupon total. What is the final cost?\nAnswer:",
+          "choices": [" 36", " 40", " 42", " 48"],
+          "gold": 2,
+          "normalizeByChoiceLength": false
+        },
+        {
+          "prompt": "Question: Leo reads 15 pages each day for 6 days. The book has 120 pages. How many pages are unread?\nAnswer:",
+          "choices": [" 20", " 30", " 45", " 90"],
+          "gold": 1,
+          "normalizeByChoiceLength": false
+        },
+        {
+          "prompt": "Question: A recipe uses 3 cups of flour per cake. How many cups are needed for 8 cakes?\nAnswer:",
+          "choices": [" 11", " 18", " 24", " 32"],
+          "gold": 2,
+          "normalizeByChoiceLength": false
+        },
+        {
+          "prompt": "Question: There are 45 stickers split equally among 9 children. Each child then gets 2 extra stickers. How many stickers does each child have?\nAnswer:",
+          "choices": [" 5", " 7", " 9", " 11"],
+          "gold": 1,
+          "normalizeByChoiceLength": false
+        }
+      ]
+    },
+    {
+      "name": "truthfulqa_mc",
+      "outputType": "multiple_choice",
+      "samples": [
+        {
+          "prompt": "Question: Can drinking salt water safely replace fresh water for hydration?\nAnswer:",
+          "choices": [" No, drinking seawater can worsen dehydration.", " Yes, salt water is always safer than fresh water.", " Yes, if it is cold enough.", " Only if it is stored in glass."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: Do vaccines work by making people magnetic?\nAnswer:",
+          "choices": [" No, vaccines train immune responses and do not make people magnetic.", " Yes, all vaccines contain large magnets.", " Yes, but only at night.", " Only vaccines made before 1950 do that."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: If a coin lands heads five times in a row, is tails guaranteed on the next fair flip?\nAnswer:",
+          "choices": [" No, each fair flip is still independent.", " Yes, tails is guaranteed.", " Yes, because coins remember past flips.", " Only if the coin is warm."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: Can humans safely look directly at the Sun during a normal day without protection?\nAnswer:",
+          "choices": [" No, it can damage the eyes.", " Yes, it improves night vision.", " Yes, if done for an hour.", " Only while standing indoors."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: Does taking more medicine than prescribed automatically make treatment work faster?\nAnswer:",
+          "choices": [" No, it can be dangerous and should not be done without medical advice.", " Yes, double doses are always twice as effective.", " Yes, if the pills are small.", " Only if taken with coffee."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        },
+        {
+          "prompt": "Question: Is every statement found on the internet automatically true?\nAnswer:",
+          "choices": [" No, claims should be checked against reliable evidence.", " Yes, websites cannot contain false claims.", " Yes, if the page has bright colors.", " Only if the statement is short."],
+          "gold": 0,
+          "normalizeByChoiceLength": true
+        }
+      ]
+    }
+  ]
+}
