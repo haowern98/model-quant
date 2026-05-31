@@ -25,6 +25,8 @@ pub struct BenchmarkResult {
     pub converted_tensor_count: u64,
     pub converted_bytes_before: u64,
     pub converted_bytes_after: u64,
+    pub requested_target_count: u64,
+    pub verified_target_count: u64,
     pub baseline_benchmark: Option<RuntimeBenchmark>,
     pub quality_eval: Option<RecipeQualityEval>,
     pub standard_eval: Option<StandardEvalReport>,
@@ -206,6 +208,8 @@ pub fn run_benchmark(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
         baseline_benchmark: None,
         quality_eval: None,
         standard_eval: None,
@@ -276,6 +280,8 @@ pub fn run_native_runtime_smoke(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
         baseline_benchmark: None,
         quality_eval: None,
         standard_eval: None,
@@ -510,6 +516,8 @@ fn run_native_inference_benchmark(
         converted_tensor_count: benchmark.converted_tensor_count,
         converted_bytes_before: benchmark.converted_bytes_before,
         converted_bytes_after: benchmark.converted_bytes_after,
+        requested_target_count: benchmark.requested_target_count,
+        verified_target_count: benchmark.verified_target_count,
         baseline_benchmark,
         quality_eval,
         standard_eval,
@@ -672,7 +680,8 @@ fn load_standard_eval_subset(preset: StandardEvalPreset) -> Result<LoadedStandar
 }
 
 fn load_quick_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
-    const STANDARD_SUBSET: &str = include_str!("../../../evals/lm_eval_subset.quick.generated.json");
+    const STANDARD_SUBSET: &str =
+        include_str!("../../../evals/lm_eval_subset.quick.generated.json");
     load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated quick lm-eval subset")
 }
 

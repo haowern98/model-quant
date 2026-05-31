@@ -230,6 +230,8 @@ export function createMockBridge() {
           convertedTensorCount: 2,
           convertedBytesBefore: 160_000_000,
           convertedBytesAfter: 80_000_000,
+          requestedTargetCount: 2,
+          verifiedTargetCount: 2,
           baselineBenchmark: isCompare
             ? {
                 promptEvalTps: 1180,

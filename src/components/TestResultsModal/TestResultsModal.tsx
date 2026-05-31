@@ -293,7 +293,8 @@ export function TestResultsModal({
     result.copiedTensorCount > 0 ||
     result.convertedTensorCount > 0 ||
     result.convertedBytesBefore > 0 ||
-    result.convertedBytesAfter > 0;
+    result.convertedBytesAfter > 0 ||
+    result.requestedTargetCount > 0;
   const quality = result.qualityEval;
   const qualityHasBaseline =
     quality?.baselinePpl !== null && quality?.baselinePpl !== undefined;
@@ -347,6 +348,14 @@ export function TestResultsModal({
               <span className="text-right font-mono text-text-primary">
                 {formatBytes(result.convertedBytesAfter)}
               </span>
+              {result.requestedTargetCount > 0 && (
+                <>
+                  <span className="text-text-muted">Verified targets</span>
+                  <span className="text-right font-mono text-text-primary">
+                    {result.verifiedTargetCount}/{result.requestedTargetCount}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}

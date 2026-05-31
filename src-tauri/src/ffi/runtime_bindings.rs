@@ -30,6 +30,8 @@ pub struct MsBaselineBenchmark {
     pub converted_tensor_count: u64,
     pub converted_bytes_before: u64,
     pub converted_bytes_after: u64,
+    pub requested_target_count: u64,
+    pub verified_target_count: u64,
 }
 
 #[repr(C)]
@@ -313,6 +315,8 @@ pub fn benchmark_baseline(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
 
     let result = unsafe {
@@ -354,6 +358,8 @@ pub fn benchmark_user_copy(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
 
     let result = unsafe {
@@ -418,6 +424,8 @@ pub fn benchmark_recipe(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
 
     let result = unsafe {
@@ -603,6 +611,8 @@ fn eval_recipe_with_native_fn(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
     let mut eval = MsRecipeEvalResult {
         baseline_load_ms: 0.0,
@@ -830,6 +840,8 @@ fn empty_benchmark() -> MsBaselineBenchmark {
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     }
 }
 

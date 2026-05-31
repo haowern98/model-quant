@@ -39,6 +39,8 @@ typedef struct ms_baseline_benchmark {
     uint64_t converted_tensor_count;
     uint64_t converted_bytes_before;
     uint64_t converted_bytes_after;
+    uint64_t requested_target_count;
+    uint64_t verified_target_count;
 } ms_baseline_benchmark;
 
 typedef struct ms_recipe_tensor_target {

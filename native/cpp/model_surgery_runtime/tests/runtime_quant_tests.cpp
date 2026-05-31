@@ -61,11 +61,73 @@ void test_quantized_source_rows_can_decode_to_f32() {
     assert(max_error < 0.07);
 }
 
+void test_recipe_target_verification_counts_matching_changed_targets() {
+    ggml_tensor token_tensor = {};
+    token_tensor.type = GGML_TYPE_Q5_K;
+    ggml_tensor output_tensor = {};
+    output_tensor.type = GGML_TYPE_Q8_0;
+    ggml_tensor norm_tensor = {};
+    norm_tensor.type = GGML_TYPE_F32;
+
+    std::vector<std::pair<std::string, ggml_tensor *>> tensor_map = {
+        {"token_embd.weight", &token_tensor},
+        {"output.weight", &output_tensor},
+        {"output_norm.weight", &norm_tensor},
+    };
+    std::unordered_map<std::string, ggml_type> target_types = {
+        {"token_embd.weight", GGML_TYPE_Q5_K},
+        {"output.weight", GGML_TYPE_Q8_0},
+        {"output_norm.weight", GGML_TYPE_F32},
+    };
+    std::unordered_map<std::string, ggml_type> source_types = {
+        {"token_embd.weight", GGML_TYPE_BF16},
+        {"output.weight", GGML_TYPE_BF16},
+        {"output_norm.weight", GGML_TYPE_F32},
+    };
+
+    RecipeTargetVerification verification = verify_recipe_tensor_targets_in_map(
+        tensor_map,
+        target_types,
+        source_types);
+
+    assert(verification.requested_count == 2);
+    assert(verification.verified_count == 2);
+    assert(verification.mismatch_count == 0);
+    assert(verification.first_mismatch.empty());
+}
+
+void test_recipe_target_verification_reports_mismatch() {
+    ggml_tensor token_tensor = {};
+    token_tensor.type = GGML_TYPE_Q8_0;
+
+    std::vector<std::pair<std::string, ggml_tensor *>> tensor_map = {
+        {"token_embd.weight", &token_tensor},
+    };
+    std::unordered_map<std::string, ggml_type> target_types = {
+        {"token_embd.weight", GGML_TYPE_Q5_K},
+    };
+    std::unordered_map<std::string, ggml_type> source_types = {
+        {"token_embd.weight", GGML_TYPE_BF16},
+    };
+
+    RecipeTargetVerification verification = verify_recipe_tensor_targets_in_map(
+        tensor_map,
+        target_types,
+        source_types);
+
+    assert(verification.requested_count == 1);
+    assert(verification.verified_count == 0);
+    assert(verification.mismatch_count == 1);
+    assert(verification.first_mismatch.find("token_embd.weight expected Q5_K, loaded Q8_0") != std::string::npos);
+}
+
 }
 
 int main() {
     test_k_quant_recipe_targets_are_supported();
     test_quantized_source_rows_can_decode_to_f32();
+    test_recipe_target_verification_counts_matching_changed_targets();
+    test_recipe_target_verification_reports_mismatch();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;
 }

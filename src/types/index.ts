@@ -171,6 +171,8 @@ export interface BenchmarkResult {
   convertedTensorCount: number;
   convertedBytesBefore: number;
   convertedBytesAfter: number;
+  requestedTargetCount: number;
+  verifiedTargetCount: number;
   baselineBenchmark: RuntimeBenchmark | null;
   qualityEval: RecipeQualityEval | null;
   standardEval: StandardEvalReport | null;

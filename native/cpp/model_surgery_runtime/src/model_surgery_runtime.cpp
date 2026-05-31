@@ -326,11 +326,19 @@ struct UserCopyTensorReader {
     std::vector<float> f32_row_buffer;
     std::vector<char> quantized_row_buffer;
     std::unordered_map<std::string, ggml_type> target_types;
+    std::unordered_map<std::string, ggml_type> loaded_target_types;
     size_t data_offset = 0;
     uint64_t copied_tensors = 0;
     uint64_t converted_tensors = 0;
     uint64_t converted_bytes_before = 0;
     uint64_t converted_bytes_after = 0;
+};
+
+struct RecipeTargetVerification {
+    uint64_t requested_count = 0;
+    uint64_t verified_count = 0;
+    uint64_t mismatch_count = 0;
+    std::string first_mismatch;
 };
 
 struct PerplexityScore {
@@ -378,6 +386,8 @@ struct ModelSession {
     uint64_t converted_tensors = 0;
     uint64_t converted_bytes_before = 0;
     uint64_t converted_bytes_after = 0;
+    uint64_t requested_target_count = 0;
+    uint64_t verified_target_count = 0;
 
     ModelSession(llama_model * loaded_model, double load_time_ms, const VramTracker & vram_tracker)
         : model(loaded_model, llama_model_free),
@@ -484,6 +494,78 @@ std::unique_ptr<ModelSession> open_user_copy_session(const char * path, uint32_t
     return session;
 }
 
+std::unordered_map<std::string, ggml_type> build_source_types_for_targets(
+    gguf_context * source_metadata,
+    const std::unordered_map<std::string, ggml_type> & target_types) {
+    std::unordered_map<std::string, ggml_type> source_types;
+    for (const auto & entry : target_types) {
+        const int64_t tensor_id = gguf_find_tensor(source_metadata, entry.first.c_str());
+        if (tensor_id < 0) {
+            continue;
+        }
+        source_types.emplace(entry.first, gguf_get_tensor_type(source_metadata, tensor_id));
+    }
+    return source_types;
+}
+
+RecipeTargetVerification verify_recipe_tensor_target_types(
+    const std::unordered_map<std::string, ggml_type> & loaded_target_types,
+    const std::unordered_map<std::string, ggml_type> & target_types,
+    const std::unordered_map<std::string, ggml_type> & source_types) {
+    RecipeTargetVerification verification = {};
+
+    for (const auto & target : target_types) {
+        const auto source = source_types.find(target.first);
+        if (source == source_types.end() || source->second == target.second) {
+            continue;
+        }
+
+        verification.requested_count += 1;
+
+        const auto loaded = loaded_target_types.find(target.first);
+        if (loaded == loaded_target_types.end()) {
+            verification.mismatch_count += 1;
+            if (verification.first_mismatch.empty()) {
+                verification.first_mismatch = target.first
+                    + " expected " + display_quant_type(target.second)
+                    + ", loaded <missing>";
+            }
+            continue;
+        }
+
+        const ggml_type loaded_type = loaded->second;
+        if (loaded_type == target.second) {
+            verification.verified_count += 1;
+            continue;
+        }
+
+        verification.mismatch_count += 1;
+        if (verification.first_mismatch.empty()) {
+            verification.first_mismatch = target.first
+                + " expected " + display_quant_type(target.second)
+                + ", loaded " + display_quant_type(loaded_type);
+        }
+    }
+
+    return verification;
+}
+
+RecipeTargetVerification verify_recipe_tensor_targets_in_map(
+    const std::vector<std::pair<std::string, ggml_tensor *>> & tensor_map,
+    const std::unordered_map<std::string, ggml_type> & target_types,
+    const std::unordered_map<std::string, ggml_type> & source_types) {
+    std::unordered_map<std::string, ggml_type> loaded_target_types;
+    for (const auto & entry : tensor_map) {
+        if (entry.second != nullptr) {
+            loaded_target_types.emplace(entry.first, entry.second->type);
+        }
+    }
+    return verify_recipe_tensor_target_types(
+        loaded_target_types,
+        target_types,
+        source_types);
+}
+
 std::unique_ptr<ModelSession> open_recipe_session(
     const char * path,
     std::unordered_map<std::string, ggml_type> target_types,
@@ -509,6 +591,9 @@ std::unique_ptr<ModelSession> open_recipe_session(
     if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
         return nullptr;
     }
+    const std::unordered_map<std::string, ggml_type> source_types = build_source_types_for_targets(
+        source_metadata.get(),
+        target_types);
     apply_recipe_tensor_types(model_metadata.get(), target_types);
 
     UserCopyTensorReader reader = {};
@@ -539,11 +624,24 @@ std::unique_ptr<ModelSession> open_recipe_session(
     }
     vram_tracker.sample();
 
+    const RecipeTargetVerification verification = verify_recipe_tensor_target_types(
+        reader.loaded_target_types,
+        reader.target_types,
+        source_types);
+    if (verification.mismatch_count > 0) {
+        llama_model_free(model);
+        throw std::runtime_error(
+            "Recipe tensor verification failed: "
+            + verification.first_mismatch);
+    }
+
     auto session = std::make_unique<ModelSession>(model, elapsed_ms(load_start, load_end), vram_tracker);
     session->copied_tensors = reader.copied_tensors;
     session->converted_tensors = reader.converted_tensors;
     session->converted_bytes_before = reader.converted_bytes_before;
     session->converted_bytes_after = reader.converted_bytes_after;
+    session->requested_target_count = verification.requested_count;
+    session->verified_target_count = verification.verified_count;
     open_session_context(*session, context_tokens);
     return session;
 }
@@ -698,6 +796,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     const auto target = reader->target_types.find(name);
     const ggml_type target_type = target == reader->target_types.end() ? current_type : target->second;
     if (target_type != current_type) {
+        reader->loaded_target_types[name] = tensor->type;
         if (supports_recipe_conversion(name, current_type, target_type)) {
             convert_source_tensor_to_quant(tensor, reader, name, tensor_id, current_type, target_type);
             return;
@@ -1227,6 +1326,8 @@ int32_t run_session_benchmark(
     out_benchmark->converted_tensor_count = 0;
     out_benchmark->converted_bytes_before = 0;
     out_benchmark->converted_bytes_after = 0;
+    out_benchmark->requested_target_count = 0;
+    out_benchmark->verified_target_count = 0;
 
     return 0;
 }
@@ -1417,6 +1518,8 @@ int32_t ms_runtime_benchmark_user_copy(
             out_benchmark->converted_tensor_count = session->converted_tensors;
             out_benchmark->converted_bytes_before = session->converted_bytes_before;
             out_benchmark->converted_bytes_after = session->converted_bytes_after;
+            out_benchmark->requested_target_count = session->requested_target_count;
+            out_benchmark->verified_target_count = session->verified_target_count;
         }
         return result;
     } catch (const std::exception & err) {
@@ -1471,6 +1574,8 @@ int32_t ms_runtime_benchmark_recipe(
             out_benchmark->converted_tensor_count = session->converted_tensors;
             out_benchmark->converted_bytes_before = session->converted_bytes_before;
             out_benchmark->converted_bytes_after = session->converted_bytes_after;
+            out_benchmark->requested_target_count = session->requested_target_count;
+            out_benchmark->verified_target_count = session->verified_target_count;
         }
         return result;
     } catch (const std::exception & err) {
@@ -1569,6 +1674,8 @@ int32_t ms_runtime_eval_recipe(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         out_eval->baseline_load_ms = baseline_benchmark.load_ms;
         out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
@@ -1670,6 +1777,8 @@ int32_t ms_runtime_eval_recipe_single(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
@@ -1795,6 +1904,8 @@ int32_t ms_runtime_eval_recipe_standard(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         out_eval->baseline_load_ms = baseline_benchmark.load_ms;
         out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
@@ -1918,6 +2029,8 @@ int32_t ms_runtime_eval_recipe_standard_single(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
