@@ -17,6 +17,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -170,8 +171,37 @@ bool is_runtime_quantizable_tensor(std::string_view name) {
         && name.find("scale") == std::string_view::npos;
 }
 
+bool is_supported_recipe_target(ggml_type target_type) {
+    switch (target_type) {
+        case GGML_TYPE_BF16:
+        case GGML_TYPE_F16:
+        case GGML_TYPE_Q8_0:
+        case GGML_TYPE_Q6_K:
+        case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q3_K:
+        case GGML_TYPE_Q2_K:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool can_decode_source_to_f32(ggml_type current_type) {
+    if (current_type == GGML_TYPE_F32) {
+        return true;
+    }
+
+    const struct ggml_type_traits * traits = ggml_get_type_traits(current_type);
+    return traits != nullptr && traits->to_float != nullptr;
+}
+
 bool supports_recipe_conversion(std::string_view name, ggml_type current_type, ggml_type target_type) {
-    if (target_type != GGML_TYPE_Q8_0) {
+    if (!is_supported_recipe_target(target_type)) {
+        return false;
+    }
+
+    if (estimate_type_size(1024, current_type, target_type) > 1024) {
         return false;
     }
 
@@ -179,9 +209,7 @@ bool supports_recipe_conversion(std::string_view name, ggml_type current_type, g
         return false;
     }
 
-    return current_type == GGML_TYPE_F32
-        || current_type == GGML_TYPE_F16
-        || current_type == GGML_TYPE_BF16;
+    return can_decode_source_to_f32(current_type);
 }
 
 std::string join_preview(const std::vector<std::string> & values, size_t limit) {
@@ -275,7 +303,7 @@ bool validate_recipe_for_user_model(
         fail(
             "Recipe contains unsupported changed tensor target(s): "
             + join_preview(unsupported, 5)
-            + ". Phase 2 supports only F32/F16/BF16->Q8_0 conversions.");
+            + ". Test Recipe supports equal-or-smaller F16/BF16/Q8_0/K-quant targets for compatible weight tensors.");
         return false;
     }
 
@@ -538,22 +566,50 @@ void read_exact_at(
     }
 }
 
-void convert_source_tensor_to_q8_0(
+void decode_source_row_to_f32(
+    const void * source_row,
+    ggml_type current_type,
+    int64_t n_per_row,
+    float * f32_row,
+    std::string_view name) {
+    if (source_row == nullptr || f32_row == nullptr) {
+        throw std::runtime_error(std::string("cannot decode invalid tensor row for: ") + std::string(name));
+    }
+
+    if (current_type == GGML_TYPE_F32) {
+        std::memcpy(f32_row, source_row, static_cast<size_t>(n_per_row) * sizeof(float));
+        return;
+    }
+
+    const struct ggml_type_traits * traits = ggml_get_type_traits(current_type);
+    if (traits == nullptr || traits->to_float == nullptr) {
+        throw std::runtime_error(
+            std::string("unsupported source quant for recipe conversion: ")
+            + std::string(name) + " " + display_quant_type(current_type));
+    }
+
+    traits->to_float(source_row, f32_row, n_per_row);
+}
+
+void convert_source_tensor_to_quant(
     ggml_tensor * tensor,
     UserCopyTensorReader * reader,
     const char * name,
     int64_t tensor_id,
-    ggml_type current_type) {
+    ggml_type current_type,
+    ggml_type target_type) {
     const int64_t n_per_row = tensor->ne[0];
     if (n_per_row <= 0) {
         throw std::runtime_error(std::string("cannot quantize tensor with empty row: ") + name);
     }
 
-    const int64_t q8_block = ggml_blck_size(GGML_TYPE_Q8_0);
-    if (n_per_row % q8_block != 0) {
+    const int64_t target_block = ggml_blck_size(target_type);
+    if (n_per_row % target_block != 0) {
         throw std::runtime_error(
-            std::string("cannot quantize tensor to Q8_0 because row size is not divisible by ")
-            + std::to_string(q8_block) + ": " + name);
+            std::string("cannot quantize tensor to ")
+            + display_quant_type(target_type)
+            + " because row size is not divisible by "
+            + std::to_string(target_block) + ": " + name);
     }
 
     const int64_t element_count = ggml_nelements(tensor);
@@ -563,7 +619,7 @@ void convert_source_tensor_to_q8_0(
 
     const int64_t nrows = element_count / n_per_row;
     const size_t source_row_size = ggml_row_size(current_type, n_per_row);
-    const size_t target_row_size = ggml_row_size(GGML_TYPE_Q8_0, n_per_row);
+    const size_t target_row_size = ggml_row_size(target_type, n_per_row);
     const size_t source_size = gguf_get_tensor_size(reader->source_metadata, tensor_id);
     const size_t target_size = ggml_nbytes(tensor);
 
@@ -571,7 +627,10 @@ void convert_source_tensor_to_q8_0(
         throw std::runtime_error(std::string("source tensor size does not match row layout for: ") + name);
     }
     if (target_size != target_row_size * static_cast<size_t>(nrows)) {
-        throw std::runtime_error(std::string("target tensor size does not match Q8_0 row layout for: ") + name);
+        throw std::runtime_error(
+            std::string("target tensor size does not match ")
+            + display_quant_type(target_type)
+            + " row layout for: " + name);
     }
 
     reader->source_row_buffer.resize(source_row_size);
@@ -587,29 +646,15 @@ void convert_source_tensor_to_q8_0(
             source_row_size,
             name);
 
-        if (current_type == GGML_TYPE_F32) {
-            std::memcpy(
-                reader->f32_row_buffer.data(),
-                reader->source_row_buffer.data(),
-                source_row_size);
-        } else if (current_type == GGML_TYPE_F16) {
-            ggml_fp16_to_fp32_row(
-                reinterpret_cast<const ggml_fp16_t *>(reader->source_row_buffer.data()),
-                reader->f32_row_buffer.data(),
-                n_per_row);
-        } else if (current_type == GGML_TYPE_BF16) {
-            ggml_bf16_to_fp32_row(
-                reinterpret_cast<const ggml_bf16_t *>(reader->source_row_buffer.data()),
-                reader->f32_row_buffer.data(),
-                n_per_row);
-        } else {
-            throw std::runtime_error(
-                std::string("unsupported source quant for Q8_0 conversion: ")
-                + name + " " + display_quant_type(current_type));
-        }
+        decode_source_row_to_f32(
+            reader->source_row_buffer.data(),
+            current_type,
+            n_per_row,
+            reader->f32_row_buffer.data(),
+            name);
 
         const size_t written = ggml_quantize_chunk(
-            GGML_TYPE_Q8_0,
+            target_type,
             reader->f32_row_buffer.data(),
             reader->quantized_row_buffer.data(),
             0,
@@ -617,7 +662,9 @@ void convert_source_tensor_to_q8_0(
             n_per_row,
             nullptr);
         if (written != target_row_size) {
-            throw std::runtime_error(std::string("Q8_0 quantized row size mismatch for: ") + name);
+            throw std::runtime_error(
+                std::string(display_quant_type(target_type))
+                + " quantized row size mismatch for: " + name);
         }
 
         ggml_backend_tensor_set(
@@ -651,8 +698,8 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     const auto target = reader->target_types.find(name);
     const ggml_type target_type = target == reader->target_types.end() ? current_type : target->second;
     if (target_type != current_type) {
-        if (supports_recipe_conversion(name, current_type, target_type) && target_type == GGML_TYPE_Q8_0) {
-            convert_source_tensor_to_q8_0(tensor, reader, name, tensor_id, current_type);
+        if (supports_recipe_conversion(name, current_type, target_type)) {
+            convert_source_tensor_to_quant(tensor, reader, name, tensor_id, current_type, target_type);
             return;
         }
 
