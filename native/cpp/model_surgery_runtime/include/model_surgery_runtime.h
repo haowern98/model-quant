@@ -87,6 +87,7 @@ typedef struct ms_standard_eval_sample {
     const char * task;
     const char * prompt;
     const char * const * choices;
+    const uint64_t * choice_lengths;
     uint64_t choice_count;
     uint32_t gold_index;
     uint32_t normalize_by_choice_length;

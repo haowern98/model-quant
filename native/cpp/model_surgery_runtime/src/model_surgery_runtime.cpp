@@ -1020,6 +1020,9 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
         if (sample.choices == nullptr || sample.choice_count < 2) {
             throw std::runtime_error(std::string("standard eval sample needs at least two choices for task: ") + sample.task);
         }
+        if (sample.choice_lengths == nullptr) {
+            throw std::runtime_error(std::string("standard eval sample choice lengths are missing for task: ") + sample.task);
+        }
         if (sample.gold_index >= sample.choice_count) {
             throw std::runtime_error(std::string("standard eval gold index is outside choices for task: ") + sample.task);
         }
@@ -1033,8 +1036,12 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
                 sample.prompt,
                 sample.choices[choice_index],
                 &token_count);
-            const double denominator = sample.normalize_by_choice_length != 0 && token_count > 0
-                ? static_cast<double>(token_count)
+            const uint64_t choice_length = sample.choice_lengths[static_cast<size_t>(choice_index)];
+            if (sample.normalize_by_choice_length != 0 && choice_length == 0) {
+                throw std::runtime_error(std::string("standard eval choice length is zero for task: ") + sample.task);
+            }
+            const double denominator = sample.normalize_by_choice_length != 0
+                ? static_cast<double>(choice_length)
                 : 1.0;
             choice_nlls[static_cast<size_t>(choice_index)] = nll;
             choice_scores[static_cast<size_t>(choice_index)] = -nll / denominator;

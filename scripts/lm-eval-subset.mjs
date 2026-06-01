@@ -94,12 +94,12 @@ const TASKS = [
   },
 ];
 
-function prefixedChoice(value) {
+function rawChoice(value) {
   const text = String(value ?? "").trim();
   if (!text) {
     throw new Error("choice text is empty");
   }
-  return ` ${text}`;
+  return text;
 }
 
 function makeBaseSample(row, task, metric, normalizeByChoiceLength) {
@@ -112,6 +112,7 @@ function makeBaseSample(row, task, metric, normalizeByChoiceLength) {
     outputType: "multiple_choice",
     metric,
     normalizeByChoiceLength,
+    targetDelimiter: " ",
   };
 }
 
@@ -126,7 +127,7 @@ export function formatArcSample(row, task) {
     ...makeBaseSample(row, task, "acc_norm", true),
     docId: row.row.id ?? row.row_idx,
     prompt: `Question: ${row.row.question.trim()}\nAnswer:`,
-    choices: row.row.choices.text.map(prefixedChoice),
+    choices: row.row.choices.text.map(rawChoice),
     gold,
   };
 }
@@ -141,7 +142,7 @@ export function formatHellaSwagSample(row, task) {
     ...makeBaseSample(row, task, "acc_norm", true),
     docId: row.row.ind ?? row.row_idx,
     prompt: row.row.ctx.trim(),
-    choices: row.row.endings.map(prefixedChoice),
+    choices: row.row.endings.map(rawChoice),
     gold,
   };
 }
@@ -155,7 +156,7 @@ export function formatMmluSample(row, task) {
   return {
     ...makeBaseSample(row, task, "acc", false),
     prompt: `Question: ${row.row.question.trim()}\nAnswer:`,
-    choices: row.row.choices.map(prefixedChoice),
+    choices: row.row.choices.map(rawChoice),
     gold,
   };
 }
@@ -173,7 +174,7 @@ export function formatTruthfulQaMc1Sample(row, task) {
   return {
     ...makeBaseSample(row, task, "acc", false),
     prompt: `Question: ${row.row.question.trim()}\nAnswer:`,
-    choices: targets.choices.map(prefixedChoice),
+    choices: targets.choices.map(rawChoice),
     gold,
   };
 }
@@ -345,7 +346,7 @@ export async function buildSubset(presetName = "default") {
       preset: presetName,
       rowSelection: "evenly_spaced_by_source_row_index",
       sourceApi: DATASET_API,
-      note: "Python-free fixed subset derived from Hugging Face dataset rows used by lm-eval-compatible tasks.",
+      note: "Python-free fixed subset derived from Hugging Face dataset rows used by lm-eval-style local tasks.",
     },
     ppl: DEFAULT_PPL_TEXTS.map((text) => ({ text })),
     tasks,

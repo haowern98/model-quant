@@ -32,7 +32,8 @@ test("formats ARC rows as acc_norm multiple-choice samples", () => {
   assert.equal(sample.docId, "Mercury_1");
   assert.equal(sample.metric, "acc_norm");
   assert.equal(sample.prompt, "Question: Which object is attracted by a magnet?\nAnswer:");
-  assert.deepEqual(sample.choices, [" paper", " iron", " glass"]);
+  assert.equal(sample.targetDelimiter, " ");
+  assert.deepEqual(sample.choices, ["paper", "iron", "glass"]);
   assert.equal(sample.gold, 1);
   assert.equal(sample.normalizeByChoiceLength, true);
 });
@@ -54,7 +55,8 @@ test("formats HellaSwag rows as acc_norm continuation samples", () => {
   assert.equal(sample.task, "hellaswag");
   assert.equal(sample.docId, 24);
   assert.equal(sample.prompt, "A man is sitting on a roof. he");
-  assert.deepEqual(sample.choices, [" falls asleep.", " starts pulling up roofing."]);
+  assert.equal(sample.targetDelimiter, " ");
+  assert.deepEqual(sample.choices, ["falls asleep.", "starts pulling up roofing."]);
   assert.equal(sample.gold, 1);
   assert.equal(sample.normalizeByChoiceLength, true);
 });
@@ -79,7 +81,8 @@ test("formats MMLU rows as single-gold multiple-choice samples", () => {
   assert.equal(sample.task, "mmlu_high_school_physics");
   assert.equal(sample.metric, "acc");
   assert.equal(sample.prompt, "Question: What is 2 + 2?\nAnswer:");
-  assert.deepEqual(sample.choices, [" 3", " 4", " 5", " 6"]);
+  assert.equal(sample.targetDelimiter, " ");
+  assert.deepEqual(sample.choices, ["3", "4", "5", "6"]);
   assert.equal(sample.gold, 1);
   assert.equal(sample.normalizeByChoiceLength, false);
 });
@@ -102,10 +105,8 @@ test("formats TruthfulQA MC1 rows with the sole true label as gold", () => {
   assert.equal(sample.task, "truthfulqa_mc1");
   assert.equal(sample.metric, "acc");
   assert.equal(sample.prompt, "Question: Can a coin remember previous flips?\nAnswer:");
-  assert.deepEqual(sample.choices, [
-    " No, each fair flip is independent.",
-    " Yes, coins remember.",
-  ]);
+  assert.equal(sample.targetDelimiter, " ");
+  assert.deepEqual(sample.choices, ["No, each fair flip is independent.", "Yes, coins remember."]);
   assert.equal(sample.gold, 0);
   assert.equal(sample.normalizeByChoiceLength, false);
 });

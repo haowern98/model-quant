@@ -86,6 +86,7 @@ struct MsStandardEvalSample {
     task: *const c_char,
     prompt: *const c_char,
     choices: *const *const c_char,
+    choice_lengths: *const u64,
     choice_count: u64,
     gold_index: u32,
     normalize_by_choice_length: u32,
@@ -115,7 +116,8 @@ pub struct MsStandardEvalTaskResult {
 pub struct StandardEvalSampleInput {
     pub task: String,
     pub prompt: String,
-    pub choices: Vec<String>,
+    pub continuations: Vec<String>,
+    pub choice_lengths: Vec<u64>,
     pub gold_index: u32,
     pub normalize_by_choice_length: bool,
 }
@@ -757,7 +759,7 @@ fn eval_recipe_standard_with_native_fn(
         .iter()
         .map(|sample| {
             sample
-                .choices
+                .continuations
                 .iter()
                 .map(|choice| {
                     CString::new(choice.as_str()).map_err(|_| {
@@ -770,6 +772,20 @@ fn eval_recipe_standard_with_native_fn(
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
+    for sample in standard_samples {
+        if sample.continuations.len() != sample.choice_lengths.len() {
+            return Err(format!(
+                "standard eval choice length count does not match continuation count: {}",
+                sample.task
+            ));
+        }
+        if sample.choice_lengths.iter().any(|length| *length == 0) {
+            return Err(format!(
+                "standard eval choice length must be positive: {}",
+                sample.task
+            ));
+        }
+    }
     let standard_choice_ptrs = c_standard_choices
         .iter()
         .map(|choices| {
@@ -786,6 +802,7 @@ fn eval_recipe_standard_with_native_fn(
             task: c_standard_tasks[index].as_ptr(),
             prompt: c_standard_prompts[index].as_ptr(),
             choices: standard_choice_ptrs[index].as_ptr(),
+            choice_lengths: sample.choice_lengths.as_ptr(),
             choice_count: standard_choice_ptrs[index].len() as u64,
             gold_index: sample.gold_index,
             normalize_by_choice_length: u32::from(sample.normalize_by_choice_length),

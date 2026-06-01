@@ -127,9 +127,11 @@ struct StandardTask {
 #[serde(rename_all = "camelCase")]
 struct StandardSample {
     prompt: String,
+    target_delimiter: Option<String>,
     choices: Vec<String>,
     gold: u32,
     normalize_by_choice_length: bool,
+    doc_id: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -384,7 +386,7 @@ pub fn run_native_recipe_single_benchmark(
         },
         |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in eval with {} PPL tokens and {} standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style local eval with {} PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval_preset.label(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
@@ -427,7 +429,7 @@ pub fn run_native_recipe_compare_benchmark(
         },
         |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in recipe drift eval with {} PPL tokens and {} standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style recipe drift eval with {} PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval_preset.label(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
@@ -682,12 +684,12 @@ fn load_standard_eval_subset(preset: StandardEvalPreset) -> Result<LoadedStandar
 fn load_quick_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
     const STANDARD_SUBSET: &str =
         include_str!("../../../evals/lm_eval_subset.quick.generated.json");
-    load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated quick lm-eval subset")
+    load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated quick lm-eval-style subset")
 }
 
 fn load_default_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
     const STANDARD_SUBSET: &str = include_str!("../../../evals/lm_eval_subset.generated.json");
-    load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated lm-eval subset")
+    load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated lm-eval-style subset")
 }
 
 fn load_standard_eval_subset_from_json(
@@ -715,6 +717,17 @@ fn load_standard_eval_subset_from_json(
             ));
         }
         for sample in task.samples {
+            let doc_label = sample
+                .doc_id
+                .as_ref()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            let target_delimiter = sample.target_delimiter.ok_or_else(|| {
+                format!(
+                    "{} sample missing targetDelimiter for task {} docId {}",
+                    label, task.name, doc_label
+                )
+            })?;
             if sample.choices.len() < 2 {
                 return Err(format!(
                     "{} sample for {} has fewer than two choices",
@@ -727,10 +740,23 @@ fn load_standard_eval_subset_from_json(
                     label, task.name
                 ));
             }
+            let mut continuations = Vec::with_capacity(sample.choices.len());
+            let mut choice_lengths = Vec::with_capacity(sample.choices.len());
+            for choice in sample.choices {
+                if choice.is_empty() {
+                    return Err(format!(
+                        "{} sample for {} docId {} has an empty choice",
+                        label, task.name, doc_label
+                    ));
+                }
+                choice_lengths.push(choice.chars().count() as u64);
+                continuations.push(format!("{}{}", target_delimiter, choice));
+            }
             samples.push(crate::ffi::runtime_bindings::StandardEvalSampleInput {
                 task: task.name.clone(),
                 prompt: sample.prompt,
-                choices: sample.choices,
+                continuations,
+                choice_lengths,
                 gold_index: sample.gold,
                 normalize_by_choice_length: sample.normalize_by_choice_length,
             });
@@ -790,5 +816,55 @@ mod tests {
         assert!(!counts.contains_key("gsm8k"));
         assert!(!counts.contains_key("mmlu_mixed"));
         assert!(!counts.contains_key("truthfulqa_mc"));
+    }
+
+    #[test]
+    fn standard_eval_requires_explicit_target_delimiter() {
+        let contents = r#"{
+          "ppl": [{"text": "small fixed corpus"}],
+          "tasks": [{
+            "name": "arc_challenge",
+            "outputType": "multiple_choice",
+            "samples": [{
+              "prompt": "Question: x\nAnswer:",
+              "choices": [" yes", " no"],
+              "gold": 0,
+              "normalizeByChoiceLength": true
+            }]
+          }]
+        }"#;
+
+        let err = match load_standard_eval_subset_from_json(contents, "test subset") {
+            Ok(_) => panic!("expected missing targetDelimiter error"),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains("missing targetDelimiter"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn standard_eval_builds_delimited_continuations_and_raw_choice_lengths() {
+        let contents = r#"{
+          "ppl": [{"text": "small fixed corpus"}],
+          "tasks": [{
+            "name": "arc_challenge",
+            "outputType": "multiple_choice",
+            "samples": [{
+              "docId": "sample-1",
+              "prompt": "Question: x\nAnswer:",
+              "targetDelimiter": " ",
+              "choices": ["yes", "nope", "é"],
+              "gold": 0,
+              "normalizeByChoiceLength": true
+            }]
+          }]
+        }"#;
+
+        let subset = load_standard_eval_subset_from_json(contents, "test subset").unwrap();
+        let sample = &subset.samples[0];
+        assert_eq!(sample.continuations, vec![" yes", " nope", " é"]);
+        assert_eq!(sample.choice_lengths, vec![3, 4, 1]);
     }
 }
