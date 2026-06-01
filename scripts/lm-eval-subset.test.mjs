@@ -156,13 +156,13 @@ test("default preset keeps the frozen generated subset shape", () => {
 
   assert.equal(getPresetOutputPath("default"), "evals/lm_eval_subset.generated.json");
   assert.deepEqual(counts, {
-    arc_challenge: 50,
-    arc_easy: 50,
-    hellaswag: 50,
-    mmlu_high_school_physics: 25,
-    mmlu_college_computer_science: 25,
-    mmlu_professional_medicine: 25,
-    truthfulqa_mc1: 50,
+    arc_challenge: 100,
+    arc_easy: 100,
+    hellaswag: 150,
+    mmlu_high_school_physics: 50,
+    mmlu_college_computer_science: 50,
+    mmlu_professional_medicine: 50,
+    truthfulqa_mc1: 100,
   });
 });
 
