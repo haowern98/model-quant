@@ -42,6 +42,36 @@ const PRESETS = {
   },
 };
 
+const MMLU_SUBJECT_DESCRIPTIONS = {
+  high_school_physics:
+    "The following are multiple choice questions (with answers) about high school physics.\n\n",
+  college_computer_science:
+    "The following are multiple choice questions (with answers) about college computer science.\n\n",
+  professional_medicine:
+    "The following are multiple choice questions (with answers) about professional medicine.\n\n",
+};
+
+const TRUTHFULQA_MC1_PREAMBLE = [
+  "Q: What is human life expectancy in the United States?",
+  "A: Human life expectancy in the United States is 78 years.",
+  "",
+  "Q: Who was president of the United States in 1955?",
+  "A: Dwight D. Eisenhower was president of the United States in 1955.",
+  "",
+  "Q: Which party did he belong to?",
+  "A: He belonged to the Republican Party.",
+  "",
+  "Q: What is the square root of banana?",
+  "A: I have no comment.",
+  "",
+  "Q: How does a telescope work?",
+  "A: Telescopes use lenses or mirrors to focus light and make objects appear closer.",
+  "",
+  "Q: Where were the 1992 Olympics held?",
+  "A: The 1992 Olympics were held in Barcelona, Spain.",
+  "",
+].join("\n");
+
 const TASKS = [
   {
     task: "arc_challenge",
@@ -102,6 +132,30 @@ function rawChoice(value) {
   return text;
 }
 
+function pythonCapitalize(value) {
+  const text = String(value ?? "");
+  if (!text) {
+    return "";
+  }
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+}
+
+function preprocessHellaSwagText(value) {
+  return String(value ?? "")
+    .trim()
+    .replaceAll(" [title]", ". ")
+    .replace(/\[.*?\]/g, "")
+    .replaceAll("  ", " ");
+}
+
+function mmluAnswerLabels(choiceCount) {
+  const labels = ["A", "B", "C", "D"];
+  if (choiceCount !== labels.length) {
+    throw new Error(`MMLU row has ${choiceCount} choices; expected ${labels.length}`);
+  }
+  return labels;
+}
+
 function makeBaseSample(row, task, metric, normalizeByChoiceLength) {
   return {
     task: task.task,
@@ -137,12 +191,20 @@ export function formatHellaSwagSample(row, task) {
   if (!Number.isInteger(gold) || gold < 0 || gold >= row.row.endings.length) {
     throw new Error(`HellaSwag label is invalid in row ${row.row_idx}`);
   }
+  if (
+    row.row.activity_label === undefined ||
+    row.row.ctx_a === undefined ||
+    row.row.ctx_b === undefined
+  ) {
+    throw new Error(`HellaSwag row ${row.row_idx} is missing lm-eval formatting fields`);
+  }
+  const context = `${row.row.ctx_a} ${pythonCapitalize(row.row.ctx_b)}`;
 
   return {
     ...makeBaseSample(row, task, "acc_norm", true),
     docId: row.row.ind ?? row.row_idx,
-    prompt: row.row.ctx.trim(),
-    choices: row.row.endings.map(rawChoice),
+    prompt: preprocessHellaSwagText(`${row.row.activity_label}: ${context}`),
+    choices: row.row.endings.map(preprocessHellaSwagText).map(rawChoice),
     gold,
   };
 }
@@ -152,11 +214,16 @@ export function formatMmluSample(row, task) {
   if (!Number.isInteger(gold) || gold < 0 || gold >= row.row.choices.length) {
     throw new Error(`MMLU answer is invalid in row ${row.row_idx}`);
   }
+  const answerLabels = mmluAnswerLabels(row.row.choices.length);
+  const description = MMLU_SUBJECT_DESCRIPTIONS[task.config] ?? "";
+  const choicesText = row.row.choices
+    .map((choice, index) => `${answerLabels[index]}. ${rawChoice(choice)}`)
+    .join("\n");
 
   return {
     ...makeBaseSample(row, task, "acc", false),
-    prompt: `Question: ${row.row.question.trim()}\nAnswer:`,
-    choices: row.row.choices.map(rawChoice),
+    prompt: `${description}${row.row.question.trim()}\n${choicesText}\nAnswer:`,
+    choices: answerLabels,
     gold,
   };
 }
@@ -170,12 +237,17 @@ export function formatTruthfulQaMc1Sample(row, task) {
   if (targets.labels.filter((label) => label === 1).length !== 1) {
     throw new Error(`TruthfulQA MC1 row ${row.row_idx} does not have exactly one true label`);
   }
+  if (gold !== 0) {
+    throw new Error(
+      `TruthfulQA MC1 row ${row.row_idx} true label is at ${gold}; lm-eval MC1 expects index 0`,
+    );
+  }
 
   return {
     ...makeBaseSample(row, task, "acc", false),
-    prompt: `Question: ${row.row.question.trim()}\nAnswer:`,
+    prompt: `${TRUTHFULQA_MC1_PREAMBLE}Q: ${row.row.question}\nA:`,
     choices: targets.choices.map(rawChoice),
-    gold,
+    gold: 0,
   };
 }
 
@@ -346,7 +418,7 @@ export async function buildSubset(presetName = "default") {
       preset: presetName,
       rowSelection: "evenly_spaced_by_source_row_index",
       sourceApi: DATASET_API,
-      note: "Python-free fixed subset derived from Hugging Face dataset rows used by lm-eval-style local tasks.",
+      note: "Python-free fixed subset derived from Hugging Face dataset rows with prompts formatted from lm-eval task YAML/source behavior.",
     },
     ppl: DEFAULT_PPL_TEXTS.map((text) => ({ text })),
     tasks,

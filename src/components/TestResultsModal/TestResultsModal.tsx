@@ -54,6 +54,10 @@ function formatSignedNumber(value: number, digits = 3): string {
   return `${sign}${value.toFixed(digits)}`;
 }
 
+function choiceLabel(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
 function runtimeElapsed(result: BenchmarkResult): number {
   return result.loadMs + result.promptEvalMs + result.generationMs;
 }
@@ -278,6 +282,103 @@ function StandardEvalTable({ result }: { result: BenchmarkResult }) {
   );
 }
 
+function StandardEvalSampleAudit({ result }: { result: BenchmarkResult }) {
+  const audits = result.standardEval?.sampleAudits ?? [];
+  if (audits.length === 0) return null;
+
+  return (
+    <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+      <details>
+        <summary className="cursor-pointer font-semibold text-text-muted uppercase tracking-wider">
+          Sample Audit ({audits.length})
+        </summary>
+        <div className="mt-3 space-y-4">
+          {audits.map((audit) => (
+            <div
+              key={`${audit.sampleIndex}-${audit.task}-${audit.docId}`}
+              className="border-t border-border-default pt-3 first:border-t-0 first:pt-0"
+            >
+              <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+                <span className="text-text-muted truncate">
+                  {audit.task} / {audit.docId}
+                </span>
+                <span className="font-mono text-text-primary uppercase">
+                  {audit.flipType.replaceAll("_", " ")}
+                </span>
+                <span className="text-text-muted">
+                  Gold {choiceLabel(audit.goldIndex)}
+                </span>
+                <span className="font-mono text-text-primary">
+                  {audit.baselinePredictionIndex !== null
+                    ? `Base ${choiceLabel(audit.baselinePredictionIndex)} / `
+                    : ""}
+                  Recipe {choiceLabel(audit.recipePredictionIndex)}
+                </span>
+              </div>
+
+              <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded border border-border-default bg-bg-base p-2 font-mono text-[11px] text-text-muted">
+                {audit.prompt}
+              </pre>
+
+              <div className="mt-2 grid grid-cols-[32px_minmax(120px,1fr)_72px_88px_88px_88px_88px] gap-x-3 gap-y-1">
+                <span className="text-text-muted uppercase">#</span>
+                <span className="text-text-muted uppercase">Continuation</span>
+                <span className="text-right text-text-muted uppercase">
+                  Denom
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Base NLL
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Base Score
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Recipe NLL
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Recipe Score
+                </span>
+                {audit.choices.map((choice) => (
+                  <Fragment key={choice.index}>
+                    <span className="font-mono text-text-primary">
+                      {choiceLabel(choice.index)}
+                    </span>
+                    <span
+                      className="font-mono text-text-primary truncate"
+                      title={choice.continuation}
+                    >
+                      {JSON.stringify(choice.continuation)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.denominator.toFixed(0)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.baselineNll === null
+                        ? "-"
+                        : choice.baselineNll.toFixed(3)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.baselineScore === null
+                        ? "-"
+                        : choice.baselineScore.toFixed(3)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.recipeNll.toFixed(3)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.recipeScore.toFixed(3)}
+                    </span>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export function TestResultsModal({
   result,
   onSave,
@@ -414,6 +515,7 @@ export function TestResultsModal({
         )}
 
         <StandardEvalTable result={result} />
+        <StandardEvalSampleAudit result={result} />
 
         {result.baselineBenchmark ? (
           <RuntimeComparison result={result} />

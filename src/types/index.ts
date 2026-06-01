@@ -221,6 +221,7 @@ export interface StandardEvalReport {
   recipeAvgMargin: number;
   marginDelta: number | null;
   tasks: StandardEvalTaskReport[];
+  sampleAudits: StandardEvalSampleAuditReport[];
 }
 
 export interface StandardEvalTaskReport {
@@ -239,6 +240,34 @@ export interface StandardEvalTaskReport {
   marginDelta: number | null;
   baselineAvgCorrectNll: number | null;
   recipeAvgCorrectNll: number;
+}
+
+export interface StandardEvalSampleAuditReport {
+  task: string;
+  docId: string;
+  sampleIndex: number;
+  prompt: string;
+  targetDelimiter: string;
+  goldIndex: number;
+  baselinePredictionIndex: number | null;
+  recipePredictionIndex: number;
+  baselineCorrect: boolean | null;
+  recipeCorrect: boolean;
+  flipType: string;
+  choices: StandardEvalChoiceAuditReport[];
+}
+
+export interface StandardEvalChoiceAuditReport {
+  index: number;
+  choice: string;
+  continuation: string;
+  denominator: number;
+  baselineNll: number | null;
+  baselineLoglikelihood: number | null;
+  baselineScore: number | null;
+  recipeNll: number;
+  recipeLoglikelihood: number;
+  recipeScore: number;
 }
 
 // ---- Bulk Assign ----

@@ -354,11 +354,15 @@ struct PerplexityScore {
 
 struct StandardEvalSampleScore {
     std::string task;
+    uint64_t sample_index = 0;
     uint32_t gold_index = 0;
     uint32_t prediction_index = 0;
     bool correct = false;
     double margin = 0.0;
     double correct_nll = 0.0;
+    std::vector<double> choice_denominators;
+    std::vector<double> choice_nlls;
+    std::vector<double> choice_scores;
 };
 
 struct StandardEvalAccumulator {
@@ -1029,6 +1033,7 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
 
         std::vector<double> choice_scores(static_cast<size_t>(sample.choice_count));
         std::vector<double> choice_nlls(static_cast<size_t>(sample.choice_count));
+        std::vector<double> choice_denominators(static_cast<size_t>(sample.choice_count));
         for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
             uint64_t token_count = 0;
             const double nll = score_continuation_nll(
@@ -1043,6 +1048,7 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
             const double denominator = sample.normalize_by_choice_length != 0
                 ? static_cast<double>(choice_length)
                 : 1.0;
+            choice_denominators[static_cast<size_t>(choice_index)] = denominator;
             choice_nlls[static_cast<size_t>(choice_index)] = nll;
             choice_scores[static_cast<size_t>(choice_index)] = -nll / denominator;
         }
@@ -1065,11 +1071,15 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
 
         StandardEvalSampleScore score = {};
         score.task = sample.task;
+        score.sample_index = sample_index;
         score.gold_index = sample.gold_index;
         score.prediction_index = best_index;
         score.correct = best_index == sample.gold_index;
         score.margin = choice_scores[best_index] - choice_scores[second_index];
         score.correct_nll = choice_nlls[static_cast<size_t>(sample.gold_index)];
+        score.choice_denominators = std::move(choice_denominators);
+        score.choice_nlls = std::move(choice_nlls);
+        score.choice_scores = std::move(choice_scores);
         scores.push_back(std::move(score));
     }
 
@@ -1176,6 +1186,107 @@ bool write_standard_eval_results(
         out_task_results[out_index++] = result;
     }
 
+    return true;
+}
+
+void write_choice_audit_values(
+    const std::vector<double> & values,
+    double (& out_values)[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    uint32_t choice_count) {
+    for (uint32_t i = 0; i < choice_count; ++i) {
+        out_values[i] = values[static_cast<size_t>(i)];
+    }
+}
+
+bool write_standard_eval_sample_audits(
+    const std::vector<StandardEvalSampleScore> * baseline_scores,
+    const std::vector<StandardEvalSampleScore> & recipe_scores,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count) {
+    if (out_sample_audit_count == nullptr) {
+        fail("standard eval sample audit count output pointer is null");
+        return false;
+    }
+
+    *out_sample_audit_count = 0;
+    if (recipe_scores.empty() || sample_audit_capacity == 0) {
+        return true;
+    }
+    if (out_sample_audits == nullptr) {
+        fail("standard eval sample audit pointer is null");
+        return false;
+    }
+    if (baseline_scores != nullptr && baseline_scores->size() != recipe_scores.size()) {
+        fail("baseline and recipe standard eval sample audit counts do not match");
+        return false;
+    }
+
+    std::vector<size_t> selected;
+    selected.reserve(static_cast<size_t>(sample_audit_capacity));
+    auto add_index = [&](size_t index) {
+        if (selected.size() >= static_cast<size_t>(sample_audit_capacity)) {
+            return;
+        }
+        if (std::find(selected.begin(), selected.end(), index) == selected.end()) {
+            selected.push_back(index);
+        }
+    };
+
+    if (baseline_scores != nullptr) {
+        for (size_t i = 0; i < recipe_scores.size(); ++i) {
+            const StandardEvalSampleScore & baseline = (*baseline_scores)[i];
+            const StandardEvalSampleScore & recipe = recipe_scores[i];
+            if (baseline.prediction_index != recipe.prediction_index) {
+                add_index(i);
+            }
+        }
+    }
+    for (size_t i = 0; i < recipe_scores.size(); ++i) {
+        if (!recipe_scores[i].correct) {
+            add_index(i);
+        }
+    }
+    for (size_t i = 0; i < recipe_scores.size(); ++i) {
+        add_index(i);
+    }
+
+    for (size_t out_index = 0; out_index < selected.size(); ++out_index) {
+        const size_t score_index = selected[out_index];
+        const StandardEvalSampleScore & recipe = recipe_scores[score_index];
+        const StandardEvalSampleScore * baseline = baseline_scores == nullptr
+            ? nullptr
+            : &(*baseline_scores)[score_index];
+
+        if (baseline != nullptr && baseline->task != recipe.task) {
+            fail("baseline and recipe standard eval sample audit order does not match");
+            return false;
+        }
+        const size_t source_choice_count = recipe.choice_scores.size();
+        const uint32_t choice_count = static_cast<uint32_t>(
+            std::min<size_t>(source_choice_count, MS_STANDARD_EVAL_AUDIT_MAX_CHOICES));
+
+        ms_standard_eval_sample_audit audit = {};
+        audit.sample_index = recipe.sample_index;
+        copy_task_name(audit.task, recipe.task);
+        audit.choice_count = choice_count;
+        audit.gold_index = recipe.gold_index;
+        audit.has_baseline = baseline == nullptr ? 0u : 1u;
+        audit.baseline_prediction_index = baseline == nullptr ? 0u : baseline->prediction_index;
+        audit.recipe_prediction_index = recipe.prediction_index;
+        audit.baseline_correct = baseline != nullptr && baseline->correct ? 1u : 0u;
+        audit.recipe_correct = recipe.correct ? 1u : 0u;
+        write_choice_audit_values(recipe.choice_denominators, audit.choice_denominators, choice_count);
+        write_choice_audit_values(recipe.choice_nlls, audit.recipe_choice_nlls, choice_count);
+        write_choice_audit_values(recipe.choice_scores, audit.recipe_choice_scores, choice_count);
+        if (baseline != nullptr) {
+            write_choice_audit_values(baseline->choice_nlls, audit.baseline_choice_nlls, choice_count);
+            write_choice_audit_values(baseline->choice_scores, audit.baseline_choice_scores, choice_count);
+        }
+        out_sample_audits[out_index] = audit;
+    }
+
+    *out_sample_audit_count = static_cast<uint64_t>(selected.size());
     return true;
 }
 
@@ -1819,7 +1930,10 @@ int32_t ms_runtime_eval_recipe_standard(
     ms_recipe_eval_result * out_eval,
     ms_standard_eval_task_result * out_task_results,
     uint64_t task_result_capacity,
-    uint64_t * out_task_result_count) {
+    uint64_t * out_task_result_count,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count) {
     clear_error();
 
     if (path == nullptr || path[0] == '\0') {
@@ -1842,7 +1956,7 @@ int32_t ms_runtime_eval_recipe_standard(
         return fail("benchmark prompt is empty");
     }
 
-    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr) {
+    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr || out_sample_audit_count == nullptr) {
         return fail("standard eval output pointer is null");
     }
 
@@ -1947,6 +2061,14 @@ int32_t ms_runtime_eval_recipe_standard(
                 out_task_result_count)) {
             return -1;
         }
+        if (!write_standard_eval_sample_audits(
+                &baseline_standard_scores,
+                recipe_standard_scores,
+                out_sample_audits,
+                sample_audit_capacity,
+                out_sample_audit_count)) {
+            return -1;
+        }
         return 0;
     } catch (const std::exception & err) {
         return fail(err.what());
@@ -1970,7 +2092,10 @@ int32_t ms_runtime_eval_recipe_standard_single(
     ms_recipe_eval_result * out_eval,
     ms_standard_eval_task_result * out_task_results,
     uint64_t task_result_capacity,
-    uint64_t * out_task_result_count) {
+    uint64_t * out_task_result_count,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count) {
     clear_error();
 
     if (path == nullptr || path[0] == '\0') {
@@ -1993,7 +2118,7 @@ int32_t ms_runtime_eval_recipe_standard_single(
         return fail("benchmark prompt is empty");
     }
 
-    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr) {
+    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr || out_sample_audit_count == nullptr) {
         return fail("standard eval output pointer is null");
     }
 
@@ -2055,6 +2180,14 @@ int32_t ms_runtime_eval_recipe_standard_single(
                 out_task_results,
                 task_result_capacity,
                 out_task_result_count)) {
+            return -1;
+        }
+        if (!write_standard_eval_sample_audits(
+                nullptr,
+                recipe_standard_scores,
+                out_sample_audits,
+                sample_audit_capacity,
+                out_sample_audit_count)) {
             return -1;
         }
         return 0;

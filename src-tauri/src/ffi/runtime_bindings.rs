@@ -3,6 +3,8 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 
+const STANDARD_EVAL_AUDIT_MAX_CHOICES: usize = 32;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MsGgufSummary {
@@ -94,6 +96,25 @@ struct MsStandardEvalSample {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
+pub struct MsStandardEvalSampleAudit {
+    pub sample_index: u64,
+    pub task: [c_char; 64],
+    pub choice_count: u32,
+    pub gold_index: u32,
+    pub has_baseline: u32,
+    pub baseline_prediction_index: u32,
+    pub recipe_prediction_index: u32,
+    pub baseline_correct: u32,
+    pub recipe_correct: u32,
+    pub choice_denominators: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub baseline_choice_nlls: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub baseline_choice_scores: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub recipe_choice_nlls: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub recipe_choice_scores: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct MsStandardEvalTaskResult {
     pub task: [c_char; 64],
     pub sample_count: u64,
@@ -114,8 +135,11 @@ pub struct MsStandardEvalTaskResult {
 
 #[derive(Debug, Clone)]
 pub struct StandardEvalSampleInput {
+    pub doc_id: String,
     pub task: String,
     pub prompt: String,
+    pub target_delimiter: String,
+    pub choices: Vec<String>,
     pub continuations: Vec<String>,
     pub choice_lengths: Vec<u64>,
     pub gold_index: u32,
@@ -193,6 +217,9 @@ extern "C" {
         out_task_results: *mut MsStandardEvalTaskResult,
         task_result_capacity: u64,
         out_task_result_count: *mut u64,
+        out_sample_audits: *mut MsStandardEvalSampleAudit,
+        sample_audit_capacity: u64,
+        out_sample_audit_count: *mut u64,
     ) -> c_int;
     fn ms_runtime_eval_recipe_standard_single(
         path: *const c_char,
@@ -210,6 +237,9 @@ extern "C" {
         out_task_results: *mut MsStandardEvalTaskResult,
         task_result_capacity: u64,
         out_task_result_count: *mut u64,
+        out_sample_audits: *mut MsStandardEvalSampleAudit,
+        sample_audit_capacity: u64,
+        out_sample_audit_count: *mut u64,
     ) -> c_int;
 }
 
@@ -498,6 +528,7 @@ pub fn eval_recipe_standard(
         MsBaselineBenchmark,
         MsRecipeEvalResult,
         Vec<MsStandardEvalTaskResult>,
+        Vec<MsStandardEvalSampleAudit>,
     ),
     String,
 > {
@@ -526,6 +557,7 @@ pub fn eval_recipe_standard_single(
         MsBaselineBenchmark,
         MsRecipeEvalResult,
         Vec<MsStandardEvalTaskResult>,
+        Vec<MsStandardEvalSampleAudit>,
     ),
     String,
 > {
@@ -686,12 +718,16 @@ fn eval_recipe_standard_with_native_fn(
         *mut MsStandardEvalTaskResult,
         u64,
         *mut u64,
+        *mut MsStandardEvalSampleAudit,
+        u64,
+        *mut u64,
     ) -> c_int,
 ) -> Result<
     (
         MsBaselineBenchmark,
         MsRecipeEvalResult,
         Vec<MsStandardEvalTaskResult>,
+        Vec<MsStandardEvalSampleAudit>,
     ),
     String,
 > {
@@ -813,6 +849,9 @@ fn eval_recipe_standard_with_native_fn(
     let mut eval = empty_eval();
     let mut task_results = vec![empty_standard_task_result(); standard_samples.len().max(1)];
     let mut task_result_count = 0u64;
+    let mut sample_audits =
+        vec![empty_standard_sample_audit(); 20usize.min(standard_samples.len().max(1))];
+    let mut sample_audit_count = 0u64;
 
     let result = unsafe {
         native_fn(
@@ -831,11 +870,15 @@ fn eval_recipe_standard_with_native_fn(
             task_results.as_mut_ptr(),
             task_results.len() as u64,
             &mut task_result_count,
+            sample_audits.as_mut_ptr(),
+            sample_audits.len() as u64,
+            &mut sample_audit_count,
         )
     };
     if result == 0 {
         task_results.truncate(task_result_count as usize);
-        Ok((benchmark, eval, task_results))
+        sample_audits.truncate(sample_audit_count as usize);
+        Ok((benchmark, eval, task_results, sample_audits))
     } else {
         Err(unsafe { c_string(ms_runtime_last_error()) })
     }
@@ -906,6 +949,25 @@ fn empty_standard_task_result() -> MsStandardEvalTaskResult {
         margin_delta: 0.0,
         baseline_avg_correct_nll: 0.0,
         recipe_avg_correct_nll: 0.0,
+    }
+}
+
+fn empty_standard_sample_audit() -> MsStandardEvalSampleAudit {
+    MsStandardEvalSampleAudit {
+        sample_index: 0,
+        task: [0; 64],
+        choice_count: 0,
+        gold_index: 0,
+        has_baseline: 0,
+        baseline_prediction_index: 0,
+        recipe_prediction_index: 0,
+        baseline_correct: 0,
+        recipe_correct: 0,
+        choice_denominators: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        baseline_choice_nlls: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        baseline_choice_scores: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        recipe_choice_nlls: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        recipe_choice_scores: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
     }
 }
 

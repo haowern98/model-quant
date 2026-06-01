@@ -44,8 +44,10 @@ test("formats HellaSwag rows as acc_norm continuation samples", () => {
       row_idx: 3,
       row: {
         ind: 24,
-        ctx: "A man is sitting on a roof. he",
-        endings: ["falls asleep.", "starts pulling up roofing."],
+        activity_label: "Roof repair",
+        ctx_a: "A man is sitting on a roof.",
+        ctx_b: "he pulls up old shingles.",
+        endings: [" [title] Falls asleep.", "starts pulling up roofing."],
         label: "1",
       },
     },
@@ -54,14 +56,14 @@ test("formats HellaSwag rows as acc_norm continuation samples", () => {
 
   assert.equal(sample.task, "hellaswag");
   assert.equal(sample.docId, 24);
-  assert.equal(sample.prompt, "A man is sitting on a roof. he");
+  assert.equal(sample.prompt, "Roof repair: A man is sitting on a roof. He pulls up old shingles.");
   assert.equal(sample.targetDelimiter, " ");
-  assert.deepEqual(sample.choices, ["falls asleep.", "starts pulling up roofing."]);
+  assert.deepEqual(sample.choices, ["Falls asleep.", "starts pulling up roofing."]);
   assert.equal(sample.gold, 1);
   assert.equal(sample.normalizeByChoiceLength, true);
 });
 
-test("formats MMLU rows as single-gold multiple-choice samples", () => {
+test("formats MMLU rows with default lm-eval answer-letter continuations", () => {
   const sample = formatMmluSample(
     {
       row_idx: 2,
@@ -80,14 +82,26 @@ test("formats MMLU rows as single-gold multiple-choice samples", () => {
 
   assert.equal(sample.task, "mmlu_high_school_physics");
   assert.equal(sample.metric, "acc");
-  assert.equal(sample.prompt, "Question: What is 2 + 2?\nAnswer:");
+  assert.equal(
+    sample.prompt,
+    [
+      "The following are multiple choice questions (with answers) about high school physics.",
+      "",
+      "What is 2 + 2?",
+      "A. 3",
+      "B. 4",
+      "C. 5",
+      "D. 6",
+      "Answer:",
+    ].join("\n"),
+  );
   assert.equal(sample.targetDelimiter, " ");
-  assert.deepEqual(sample.choices, ["3", "4", "5", "6"]);
+  assert.deepEqual(sample.choices, ["A", "B", "C", "D"]);
   assert.equal(sample.gold, 1);
   assert.equal(sample.normalizeByChoiceLength, false);
 });
 
-test("formats TruthfulQA MC1 rows with the sole true label as gold", () => {
+test("formats TruthfulQA MC1 rows with the lm-eval MC1 preamble", () => {
   const sample = formatTruthfulQaMc1Sample(
     {
       row_idx: 5,
@@ -104,7 +118,8 @@ test("formats TruthfulQA MC1 rows with the sole true label as gold", () => {
 
   assert.equal(sample.task, "truthfulqa_mc1");
   assert.equal(sample.metric, "acc");
-  assert.equal(sample.prompt, "Question: Can a coin remember previous flips?\nAnswer:");
+  assert.match(sample.prompt, /^Q: What is human life expectancy in the United States\?/);
+  assert.match(sample.prompt, /\nQ: Can a coin remember previous flips\?\nA:$/);
   assert.equal(sample.targetDelimiter, " ");
   assert.deepEqual(sample.choices, ["No, each fair flip is independent.", "Yes, coins remember."]);
   assert.equal(sample.gold, 0);
