@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { AppShell } from "./components/AppShell";
 import { Toolbar } from "./components/Toolbar/Toolbar";
@@ -41,7 +41,7 @@ function App() {
   } = useModel();
   const {
     recipe,
-    initRecipe,
+    resetRecipeForModel,
     setRecipeState,
     assignQuant,
     assignAll,
@@ -63,6 +63,21 @@ function App() {
   const [recipeEvalPreset, setRecipeEvalPreset] =
     useState<RecipeEvalPreset>("default");
 
+  const resetForLoadedModel = useCallback(
+    (path: string, loadedModel: NonNullable<typeof model>) => {
+      const tensors = loadedModel.tensors.map((t) => ({
+        name: t.name,
+        currentQuant: t.currentQuant,
+      }));
+      resetRecipeForModel(path, tensors);
+      setSelectedLayerIndex(null);
+      setBenchmarkResult(null);
+      setShowResults(false);
+      setAppError(null);
+    },
+    [resetRecipeForModel],
+  );
+
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
 
@@ -80,7 +95,10 @@ function App() {
       input.style.display = "none";
       input.onchange = async (e) => {
         const file = (e.target as HTMLInputElement).files?.[0];
-        if (file) await openModel(file.name);
+        if (file) {
+          const loadedModel = await openModel(file.name);
+          if (loadedModel) resetForLoadedModel(file.name, loadedModel);
+        }
         input.remove();
       };
       document.body.appendChild(input);
@@ -88,20 +106,18 @@ function App() {
       return;
     }
 
-    if (selected) await openModel(selected);
-  }, [openModel]);
-
-  useEffect(() => {
-    if (!model || recipe) return;
-    const tensors = model.tensors.map((t) => ({
-      name: t.name,
-      currentQuant: t.currentQuant,
-    }));
-    initRecipe(modelPath ?? "unknown.gguf", tensors);
-  }, [model, modelPath, recipe, initRecipe]);
+    if (selected) {
+      const loadedModel = await openModel(selected);
+      if (loadedModel) resetForLoadedModel(selected, loadedModel);
+    }
+  }, [openModel, resetForLoadedModel]);
 
   const handleTest = useCallback(async () => {
     if (!recipe) return;
+    if (recipe.baseModel !== modelPath) {
+      setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
+      return;
+    }
     startOperation();
     try {
       const result = await testRecipe(
@@ -121,6 +137,7 @@ function App() {
     }
   }, [
     recipe,
+    modelPath,
     recipeTestMode,
     recipeEvalPreset,
     startOperation,

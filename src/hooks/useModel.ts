@@ -14,13 +14,15 @@ export function useModel() {
     model: null, modelPath: null, loading: false, error: null,
   });
 
-  const openModel = useCallback(async (path: string) => {
+  const openModel = useCallback(async (path: string): Promise<ModelInfo | null> => {
     setState(s => ({ ...s, loading: true, error: null }));
     try {
       const model = await openModelCmd(path);
       setState({ model, modelPath: path, loading: false, error: null });
+      return model;
     } catch (e) {
       setState(s => ({ ...s, loading: false, error: (e as Error).message }));
+      return null;
     }
   }, []);
 
