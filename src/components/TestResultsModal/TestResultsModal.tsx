@@ -577,6 +577,14 @@ export function TestResultsModal({
               <span className="text-right font-mono text-text-primary">
                 {formatPpl(quality.recipePpl, quality.recipePplUncertainty)}
               </span>
+              {qualityHasBaseline && (
+                <>
+                  <span className="text-text-muted">Baseline NLL</span>
+                  <span className="text-right font-mono text-text-primary">
+                    {quality.baselineNll!.toFixed(3)}
+                  </span>
+                </>
+              )}
               <span className="text-text-muted">Recipe NLL</span>
               <span className="text-right font-mono text-text-primary">
                 {quality.recipeNll.toFixed(3)}
