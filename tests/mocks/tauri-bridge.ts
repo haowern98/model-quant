@@ -249,11 +249,13 @@ export function createMockBridge() {
           qualityEval: {
             baselineNll: isCompare ? 1.92 : null,
             baselinePpl: isCompare ? 6.82 : null,
+            baselinePplUncertainty: isCompare ? 0.08 : null,
             baselineEvalMs: isCompare ? 920 : null,
             baselineVramPeakMb: isCompare ? 7140 : null,
             baselineVramAllocatedMb: isCompare ? 7040 : null,
             recipeNll: 1.96,
             recipePpl: 7.1,
+            recipePplUncertainty: 0.09,
             recipeEvalMs: 860,
             recipeVramPeakMb: 5820,
             recipeVramAllocatedMb: 5760,

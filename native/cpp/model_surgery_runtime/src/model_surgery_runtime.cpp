@@ -344,6 +344,7 @@ struct RecipeTargetVerification {
 struct PerplexityScore {
     double total_nll = 0.0;
     double ppl = 0.0;
+    double ppl_uncertainty = 0.0;
     double eval_ms = 0.0;
     double vram_peak_mb = 0.0;
     double vram_allocated_mb = 0.0;
@@ -351,6 +352,8 @@ struct PerplexityScore {
     uint64_t sample_count = 0;
     uint64_t skipped_count = 0;
 };
+
+constexpr uint32_t LLAMA_PPL_CONTEXT_TOKENS = 512;
 
 struct StandardEvalSampleScore {
     std::string task;
@@ -871,38 +874,49 @@ std::vector<llama_token> tokenize_text(
     return tokens;
 }
 
-struct RollingPplWindow {
+struct LlamaPplChunk {
     size_t begin = 0;
-    size_t target_begin = 0;
+    size_t first_scored = 0;
     size_t end = 0;
 };
 
-std::vector<RollingPplWindow> build_rolling_ppl_windows(size_t token_count, uint32_t context_tokens) {
-    std::vector<RollingPplWindow> windows;
-    if (token_count < 2) {
-        return windows;
+std::vector<LlamaPplChunk> build_llama_ppl_chunks(
+    size_t token_count,
+    uint32_t context_tokens = LLAMA_PPL_CONTEXT_TOKENS) {
+    std::vector<LlamaPplChunk> chunks;
+    const size_t context = std::max<size_t>(2, context_tokens);
+    if (token_count < 2 * context) {
+        return chunks;
     }
 
-    const size_t context = std::max<size_t>(2, context_tokens == 0 ? 128 : context_tokens);
-    const size_t stride = std::max<size_t>(1, context / 2);
-
-    size_t target_begin = 1;
-    while (target_begin < token_count) {
-        const size_t target_end = target_begin == 1
-            ? std::min(token_count, context)
-            : std::min(token_count, target_begin + stride);
-        const size_t begin = target_end > context ? target_end - context : 0;
-
-        windows.push_back(RollingPplWindow {
+    const size_t chunk_count = token_count / context;
+    chunks.reserve(chunk_count);
+    for (size_t chunk_index = 0; chunk_index < chunk_count; ++chunk_index) {
+        const size_t begin = chunk_index * context;
+        chunks.push_back(LlamaPplChunk {
             begin,
-            target_begin,
-            target_end,
+            begin + context / 2,
+            begin + context,
         });
-
-        target_begin = target_end;
     }
 
-    return windows;
+    return chunks;
+}
+
+double llama_ppl_uncertainty(double nll_sum, double nll_sq_sum, uint64_t token_count) {
+    if (token_count <= 1) {
+        return 0.0;
+    }
+
+    const double count = static_cast<double>(token_count);
+    const double mean_nll = nll_sum / count;
+    double variance = (nll_sq_sum / count) - (mean_nll * mean_nll);
+    if (variance <= 0.0 || !std::isfinite(variance)) {
+        return 0.0;
+    }
+
+    variance = std::sqrt(variance / static_cast<double>(token_count - 1));
+    return variance * std::exp(std::min(mean_nll, 700.0));
 }
 
 double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token target) {
@@ -1326,6 +1340,7 @@ PerplexityScore score_session_perplexity(
     uint64_t eval_text_count,
     uint32_t max_eval_tokens) {
     PerplexityScore score = {};
+    (void)max_eval_tokens;
     if (eval_texts == nullptr || eval_text_count == 0) {
         throw std::runtime_error("eval text set is empty");
     }
@@ -1335,10 +1350,10 @@ PerplexityScore score_session_perplexity(
     if (n_vocab <= 0) {
         throw std::runtime_error("model vocabulary is empty");
     }
+    const bool add_bos = llama_vocab_get_add_bos(vocab);
+    const llama_token bos_token = llama_vocab_bos(vocab);
 
-    const uint32_t eval_limit = std::max<uint32_t>(2, max_eval_tokens == 0 ? 128 : max_eval_tokens);
-
-    const auto eval_start = std::chrono::steady_clock::now();
+    std::string corpus;
     for (uint64_t text_index = 0; text_index < eval_text_count; ++text_index) {
         const char * text = eval_texts[text_index];
         if (text == nullptr || text[0] == '\0') {
@@ -1346,39 +1361,50 @@ PerplexityScore score_session_perplexity(
             continue;
         }
 
-        std::vector<llama_token> tokens = tokenize_text(vocab, text);
-        if (tokens.size() < 2) {
-            score.skipped_count += 1;
-            continue;
+        if (!corpus.empty()) {
+            corpus.append("\n\n");
         }
+        corpus.append(text);
+        score.sample_count += 1;
+    }
 
-        const std::vector<RollingPplWindow> windows = build_rolling_ppl_windows(tokens.size(), eval_limit);
-        if (windows.empty()) {
-            score.skipped_count += 1;
-            continue;
-        }
+    if (corpus.empty()) {
+        throw std::runtime_error("eval text set is empty");
+    }
 
-        for (const RollingPplWindow & window : windows) {
-            reset_session_context(session);
-            for (size_t token_index = window.begin; token_index + 1 < window.end; ++token_index) {
-                llama_token token = tokens[token_index];
-                llama_batch batch = llama_batch_get_one(&token, 1);
-                const int decode_result = llama_decode(session.ctx.get(), batch);
-                if (decode_result != 0) {
-                    throw std::runtime_error("failed to decode eval token");
-                }
-                llama_synchronize(session.ctx.get());
+    std::vector<llama_token> tokens = tokenize_text(vocab, corpus.c_str());
+    const std::vector<LlamaPplChunk> chunks = build_llama_ppl_chunks(tokens.size());
+    if (chunks.empty()) {
+        throw std::runtime_error("eval text set produced too few tokens for llama.cpp-style PPL");
+    }
 
+    double nll_squared_sum = 0.0;
+
+    const auto eval_start = std::chrono::steady_clock::now();
+    for (const LlamaPplChunk & chunk : chunks) {
+        reset_session_context(session);
+        for (size_t token_index = chunk.begin; token_index + 1 < chunk.end; ++token_index) {
+            llama_token token = tokens[token_index];
+            if (add_bos && token_index == chunk.begin) {
+                token = bos_token;
+            }
+
+            llama_batch batch = llama_batch_get_one(&token, 1);
+            const int decode_result = llama_decode(session.ctx.get(), batch);
+            if (decode_result != 0) {
+                throw std::runtime_error("failed to decode eval token");
+            }
+            llama_synchronize(session.ctx.get());
+
+            if (token_index >= chunk.first_scored) {
                 const size_t target_index = token_index + 1;
-                if (target_index >= window.target_begin) {
-                    const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
-                    score.total_nll += token_nll_from_logits(logits, n_vocab, tokens[target_index]);
-                    score.token_count += 1;
-                }
+                const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
+                const double token_nll = token_nll_from_logits(logits, n_vocab, tokens[target_index]);
+                score.total_nll += token_nll;
+                nll_squared_sum += token_nll * token_nll;
+                score.token_count += 1;
             }
         }
-
-        score.sample_count += 1;
         session.vram.sample();
     }
     const auto eval_end = std::chrono::steady_clock::now();
@@ -1390,6 +1416,10 @@ PerplexityScore score_session_perplexity(
     score.eval_ms = elapsed_ms(eval_start, eval_end);
     const double avg_nll = score.total_nll / static_cast<double>(score.token_count);
     score.ppl = std::exp(std::min(avg_nll, 700.0));
+    score.ppl_uncertainty = llama_ppl_uncertainty(
+        score.total_nll,
+        nll_squared_sum,
+        score.token_count);
     score.vram_peak_mb = session.vram.peak_mb;
     score.vram_allocated_mb = session.vram.current_mb;
     return score;
@@ -1845,11 +1875,13 @@ int32_t ms_runtime_eval_recipe(
         out_eval->baseline_runtime_elapsed_ms = benchmark_runtime_elapsed_ms(baseline_benchmark);
         out_eval->baseline_nll = baseline_score.total_nll / static_cast<double>(baseline_score.token_count);
         out_eval->baseline_ppl = baseline_score.ppl;
+        out_eval->baseline_ppl_uncertainty = baseline_score.ppl_uncertainty;
         out_eval->baseline_eval_ms = baseline_score.eval_ms;
         out_eval->baseline_vram_peak_mb = baseline_benchmark.vram_peak_mb;
         out_eval->baseline_vram_allocated_mb = baseline_benchmark.vram_allocated_mb;
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -1942,6 +1974,7 @@ int32_t ms_runtime_eval_recipe_single(
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -2078,11 +2111,13 @@ int32_t ms_runtime_eval_recipe_standard(
         out_eval->baseline_runtime_elapsed_ms = benchmark_runtime_elapsed_ms(baseline_benchmark);
         out_eval->baseline_nll = baseline_score.total_nll / static_cast<double>(baseline_score.token_count);
         out_eval->baseline_ppl = baseline_score.ppl;
+        out_eval->baseline_ppl_uncertainty = baseline_score.ppl_uncertainty;
         out_eval->baseline_eval_ms = baseline_score.eval_ms;
         out_eval->baseline_vram_peak_mb = baseline_benchmark.vram_peak_mb;
         out_eval->baseline_vram_allocated_mb = baseline_benchmark.vram_allocated_mb;
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -2208,6 +2243,7 @@ int32_t ms_runtime_eval_recipe_standard_single(
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;

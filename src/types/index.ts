@@ -181,11 +181,13 @@ export interface BenchmarkResult {
 export interface RecipeQualityEval {
   baselineNll: number | null;
   baselinePpl: number | null;
+  baselinePplUncertainty: number | null;
   baselineEvalMs: number | null;
   baselineVramPeakMb: number | null;
   baselineVramAllocatedMb: number | null;
   recipeNll: number;
   recipePpl: number;
+  recipePplUncertainty: number;
   recipeEvalMs: number;
   recipeVramPeakMb: number;
   recipeVramAllocatedMb: number;

@@ -37,11 +37,13 @@ pub struct BenchmarkResult {
 pub struct RecipeQualityEval {
     pub baseline_nll: Option<f64>,
     pub baseline_ppl: Option<f64>,
+    pub baseline_ppl_uncertainty: Option<f64>,
     pub baseline_eval_ms: Option<f64>,
     pub baseline_vram_peak_mb: Option<f64>,
     pub baseline_vram_allocated_mb: Option<f64>,
     pub recipe_nll: f64,
     pub recipe_ppl: f64,
+    pub recipe_ppl_uncertainty: f64,
     pub recipe_eval_ms: f64,
     pub recipe_vram_peak_mb: f64,
     pub recipe_vram_allocated_mb: f64,
@@ -424,7 +426,7 @@ pub fn run_native_recipe_single_benchmark(
         },
         |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style local eval with {} rolling PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style local eval with {} llama.cpp PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval_preset.label(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
@@ -470,7 +472,7 @@ pub fn run_native_recipe_compare_benchmark(
         },
         |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style recipe drift eval with {} rolling PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style recipe drift eval with {} llama.cpp PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval_preset.label(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
@@ -592,11 +594,13 @@ fn recipe_quality_eval_from_native(
     RecipeQualityEval {
         baseline_nll: has_baseline.then_some(eval.baseline_nll),
         baseline_ppl: has_baseline.then_some(eval.baseline_ppl),
+        baseline_ppl_uncertainty: has_baseline.then_some(eval.baseline_ppl_uncertainty),
         baseline_eval_ms: has_baseline.then_some(eval.baseline_eval_ms),
         baseline_vram_peak_mb: has_baseline.then_some(eval.baseline_vram_peak_mb),
         baseline_vram_allocated_mb: has_baseline.then_some(eval.baseline_vram_allocated_mb),
         recipe_nll: eval.recipe_nll,
         recipe_ppl: eval.recipe_ppl,
+        recipe_ppl_uncertainty: eval.recipe_ppl_uncertainty,
         recipe_eval_ms: eval.recipe_eval_ms,
         recipe_vram_peak_mb: eval.recipe_vram_peak_mb,
         recipe_vram_allocated_mb: eval.recipe_vram_allocated_mb,
@@ -802,9 +806,19 @@ fn load_standard_eval_subset(preset: StandardEvalPreset) -> Result<LoadedStandar
 }
 
 fn load_quick_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
-    const STANDARD_SUBSET: &str =
+    const QUICK_STANDARD_SUBSET: &str =
         include_str!("../../../evals/lm_eval_subset.quick.generated.json");
-    load_standard_eval_subset_from_json(STANDARD_SUBSET, "generated quick lm-eval-style subset")
+    const DEFAULT_STANDARD_SUBSET: &str = include_str!("../../../evals/lm_eval_subset.generated.json");
+    let mut subset = load_standard_eval_subset_from_json(
+        QUICK_STANDARD_SUBSET,
+        "generated quick lm-eval-style subset",
+    )?;
+    let default_subset = load_standard_eval_subset_from_json(
+        DEFAULT_STANDARD_SUBSET,
+        "generated lm-eval-style subset",
+    )?;
+    subset.ppl_texts = expand_quick_ppl_corpus(subset.ppl_texts, default_subset.ppl_texts);
+    Ok(subset)
 }
 
 fn load_default_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
@@ -892,6 +906,15 @@ fn load_standard_eval_subset_from_json(
     Ok(LoadedStandardSubset { ppl_texts, samples })
 }
 
+fn expand_quick_ppl_corpus(mut quick_ppl: Vec<String>, default_ppl: Vec<String>) -> Vec<String> {
+    for text in default_ppl {
+        if !quick_ppl.iter().any(|existing| existing == &text) {
+            quick_ppl.push(text);
+        }
+    }
+    quick_ppl
+}
+
 fn standard_doc_id_label(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(text) => text.clone(),
@@ -917,14 +940,14 @@ mod tests {
         let subset = load_standard_eval_subset(StandardEvalPreset::Default).unwrap();
         let counts = task_counts(&subset);
 
-        assert_eq!(subset.samples.len(), 275);
-        assert_eq!(counts.get("arc_challenge"), Some(&50));
-        assert_eq!(counts.get("arc_easy"), Some(&50));
-        assert_eq!(counts.get("hellaswag"), Some(&50));
-        assert_eq!(counts.get("mmlu_high_school_physics"), Some(&25));
-        assert_eq!(counts.get("mmlu_college_computer_science"), Some(&25));
-        assert_eq!(counts.get("mmlu_professional_medicine"), Some(&25));
-        assert_eq!(counts.get("truthfulqa_mc1"), Some(&50));
+        assert_eq!(subset.samples.len(), 600);
+        assert_eq!(counts.get("arc_challenge"), Some(&100));
+        assert_eq!(counts.get("arc_easy"), Some(&100));
+        assert_eq!(counts.get("hellaswag"), Some(&150));
+        assert_eq!(counts.get("mmlu_high_school_physics"), Some(&50));
+        assert_eq!(counts.get("mmlu_college_computer_science"), Some(&50));
+        assert_eq!(counts.get("mmlu_professional_medicine"), Some(&50));
+        assert_eq!(counts.get("truthfulqa_mc1"), Some(&100));
         assert!(!counts.contains_key("gsm8k"));
         assert!(!counts.contains_key("mmlu_mixed"));
         assert!(!counts.contains_key("truthfulqa_mc"));
@@ -946,6 +969,24 @@ mod tests {
         assert!(!counts.contains_key("gsm8k"));
         assert!(!counts.contains_key("mmlu_mixed"));
         assert!(!counts.contains_key("truthfulqa_mc"));
+    }
+
+    #[test]
+    fn quick_standard_eval_expands_only_the_ppl_corpus_from_default() {
+        let quick = load_standard_eval_subset(StandardEvalPreset::Quick).unwrap();
+        let default = load_standard_eval_subset(StandardEvalPreset::Default).unwrap();
+        let quick_counts = task_counts(&quick);
+
+        assert_eq!(quick.samples.len(), 55);
+        assert_eq!(quick_counts.get("arc_challenge"), Some(&10));
+        assert_eq!(quick_counts.get("truthfulqa_mc1"), Some(&10));
+        assert!(quick.ppl_texts.len() >= default.ppl_texts.len());
+        assert!(
+            default
+                .ppl_texts
+                .iter()
+                .all(|text| quick.ppl_texts.iter().any(|quick_text| quick_text == text))
+        );
     }
 
     #[test]

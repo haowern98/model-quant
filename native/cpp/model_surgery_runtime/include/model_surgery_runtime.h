@@ -68,11 +68,13 @@ typedef struct ms_recipe_eval_result {
     double baseline_runtime_elapsed_ms;
     double baseline_nll;
     double baseline_ppl;
+    double baseline_ppl_uncertainty;
     double baseline_eval_ms;
     double baseline_vram_peak_mb;
     double baseline_vram_allocated_mb;
     double recipe_nll;
     double recipe_ppl;
+    double recipe_ppl_uncertainty;
     double recipe_eval_ms;
     double recipe_vram_peak_mb;
     double recipe_vram_allocated_mb;

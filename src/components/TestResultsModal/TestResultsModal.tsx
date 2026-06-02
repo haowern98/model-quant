@@ -46,6 +46,18 @@ function formatMetricValue(value: number): string {
   return value.toFixed(3);
 }
 
+function formatPpl(value: number, uncertainty?: number | null): string {
+  if (
+    uncertainty === null ||
+    uncertainty === undefined ||
+    !Number.isFinite(uncertainty) ||
+    uncertainty <= 0
+  ) {
+    return value.toFixed(3);
+  }
+  return `${value.toFixed(3)} +/- ${uncertainty.toFixed(3)}`;
+}
+
 function formatMetricDelta(value: number | null): string {
   if (value === null) return "-";
   return formatSignedNumber(value, 3);
@@ -554,13 +566,16 @@ export function TestResultsModal({
                 <>
                   <span className="text-text-muted">Baseline PPL</span>
                   <span className="text-right font-mono text-text-primary">
-                    {quality.baselinePpl!.toFixed(3)}
+                    {formatPpl(
+                      quality.baselinePpl!,
+                      quality.baselinePplUncertainty,
+                    )}
                   </span>
                 </>
               )}
               <span className="text-text-muted">Recipe PPL</span>
               <span className="text-right font-mono text-text-primary">
-                {quality.recipePpl.toFixed(3)}
+                {formatPpl(quality.recipePpl, quality.recipePplUncertainty)}
               </span>
               <span className="text-text-muted">Recipe NLL</span>
               <span className="text-right font-mono text-text-primary">
@@ -578,7 +593,7 @@ export function TestResultsModal({
                   </span>
                 </>
               )}
-              <span className="text-text-muted">Rolling PPL tokens</span>
+              <span className="text-text-muted">llama.cpp PPL tokens</span>
               <span className="text-right font-mono text-text-primary">
                 {quality.evalTokenCount}
               </span>
