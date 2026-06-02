@@ -39,6 +39,8 @@ typedef struct ms_baseline_benchmark {
     uint64_t converted_tensor_count;
     uint64_t converted_bytes_before;
     uint64_t converted_bytes_after;
+    uint64_t requested_target_count;
+    uint64_t verified_target_count;
 } ms_baseline_benchmark;
 
 typedef struct ms_recipe_tensor_target {
@@ -66,11 +68,13 @@ typedef struct ms_recipe_eval_result {
     double baseline_runtime_elapsed_ms;
     double baseline_nll;
     double baseline_ppl;
+    double baseline_ppl_uncertainty;
     double baseline_eval_ms;
     double baseline_vram_peak_mb;
     double baseline_vram_allocated_mb;
     double recipe_nll;
     double recipe_ppl;
+    double recipe_ppl_uncertainty;
     double recipe_eval_ms;
     double recipe_vram_peak_mb;
     double recipe_vram_allocated_mb;
@@ -85,6 +89,7 @@ typedef struct ms_standard_eval_sample {
     const char * task;
     const char * prompt;
     const char * const * choices;
+    const uint64_t * choice_lengths;
     uint64_t choice_count;
     uint32_t gold_index;
     uint32_t normalize_by_choice_length;
@@ -107,6 +112,27 @@ typedef struct ms_standard_eval_task_result {
     double baseline_avg_correct_nll;
     double recipe_avg_correct_nll;
 } ms_standard_eval_task_result;
+
+enum {
+    MS_STANDARD_EVAL_AUDIT_MAX_CHOICES = 32
+};
+
+typedef struct ms_standard_eval_sample_audit {
+    uint64_t sample_index;
+    char task[64];
+    uint32_t choice_count;
+    uint32_t gold_index;
+    uint32_t has_baseline;
+    uint32_t baseline_prediction_index;
+    uint32_t recipe_prediction_index;
+    uint32_t baseline_correct;
+    uint32_t recipe_correct;
+    double choice_denominators[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES];
+    double baseline_choice_nlls[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES];
+    double baseline_choice_scores[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES];
+    double recipe_choice_nlls[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES];
+    double recipe_choice_scores[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES];
+} ms_standard_eval_sample_audit;
 
 MS_RUNTIME_API const char * ms_runtime_version(void);
 MS_RUNTIME_API const char * ms_runtime_llama_system_info(void);
@@ -171,7 +197,10 @@ MS_RUNTIME_API int32_t ms_runtime_eval_recipe_standard(
     ms_recipe_eval_result * out_eval,
     ms_standard_eval_task_result * out_task_results,
     uint64_t task_result_capacity,
-    uint64_t * out_task_result_count);
+    uint64_t * out_task_result_count,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count);
 MS_RUNTIME_API int32_t ms_runtime_eval_recipe_standard_single(
     const char * path,
     const ms_recipe_tensor_target * targets,
@@ -187,7 +216,10 @@ MS_RUNTIME_API int32_t ms_runtime_eval_recipe_standard_single(
     ms_recipe_eval_result * out_eval,
     ms_standard_eval_task_result * out_task_results,
     uint64_t task_result_capacity,
-    uint64_t * out_task_result_count);
+    uint64_t * out_task_result_count,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count);
 
 #ifdef __cplusplus
 }

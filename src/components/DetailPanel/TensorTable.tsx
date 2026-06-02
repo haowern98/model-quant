@@ -31,6 +31,17 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
             const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
             const currentSize = t.sizeBytes;
             const targetSize = estQuantSize(t.shape, QUANT_TYPES.find(q => q.value === assignedQuant)!.bitsPerWeight);
+            const canAssignTarget = t.quantPreflight?.canQuantize ?? true;
+            const disabledReason = t.quantPreflight?.blockedReason ?? 'Tensor cannot be quantized';
+            const allowedTargetQuants = t.quantPreflight?.allowedTargetQuants;
+            const quantOptions = allowedTargetQuants && allowedTargetQuants.length > 0
+              ? QUANT_TYPES.filter(q => allowedTargetQuants.includes(q.value))
+              : QUANT_TYPES;
+            const hasAlternateTarget = quantOptions.some(q => q.value !== assignedQuant);
+            const targetDisabled = !canAssignTarget || !hasAlternateTarget;
+            const targetDisabledReason = !canAssignTarget
+              ? disabledReason
+              : 'No compatible smaller target quant is available';
             return (
               <tr key={t.name} className="border-b border-border-default/50 hover:bg-bg-surface-alt/50">
                 <td className="px-4 py-2 font-mono text-text-primary text-xs" title={t.name}>
@@ -42,10 +53,12 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
                   <select
                     value={assignedQuant}
                     onChange={e => onAssignQuant(t.name, e.target.value as QuantType)}
+                    disabled={targetDisabled}
+                    title={targetDisabled ? targetDisabledReason : undefined}
                     className="bg-bg-surface-alt border border-border-default rounded px-1 py-0.5 text-xs text-text-primary
-                               focus:outline-none focus:border-accent-copper font-mono"
+                               focus:outline-none focus:border-accent-copper disabled:opacity-40 font-mono"
                   >
-                    {QUANT_TYPES.map(q => (
+                    {quantOptions.map(q => (
                       <option key={q.value} value={q.value}>{q.label}</option>
                     ))}
                   </select>

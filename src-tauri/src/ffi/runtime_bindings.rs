@@ -3,6 +3,8 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 
+const STANDARD_EVAL_AUDIT_MAX_CHOICES: usize = 32;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MsGgufSummary {
@@ -30,6 +32,8 @@ pub struct MsBaselineBenchmark {
     pub converted_tensor_count: u64,
     pub converted_bytes_before: u64,
     pub converted_bytes_after: u64,
+    pub requested_target_count: u64,
+    pub verified_target_count: u64,
 }
 
 #[repr(C)]
@@ -63,11 +67,13 @@ pub struct MsRecipeEvalResult {
     pub baseline_runtime_elapsed_ms: f64,
     pub baseline_nll: f64,
     pub baseline_ppl: f64,
+    pub baseline_ppl_uncertainty: f64,
     pub baseline_eval_ms: f64,
     pub baseline_vram_peak_mb: f64,
     pub baseline_vram_allocated_mb: f64,
     pub recipe_nll: f64,
     pub recipe_ppl: f64,
+    pub recipe_ppl_uncertainty: f64,
     pub recipe_eval_ms: f64,
     pub recipe_vram_peak_mb: f64,
     pub recipe_vram_allocated_mb: f64,
@@ -84,9 +90,29 @@ struct MsStandardEvalSample {
     task: *const c_char,
     prompt: *const c_char,
     choices: *const *const c_char,
+    choice_lengths: *const u64,
     choice_count: u64,
     gold_index: u32,
     normalize_by_choice_length: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MsStandardEvalSampleAudit {
+    pub sample_index: u64,
+    pub task: [c_char; 64],
+    pub choice_count: u32,
+    pub gold_index: u32,
+    pub has_baseline: u32,
+    pub baseline_prediction_index: u32,
+    pub recipe_prediction_index: u32,
+    pub baseline_correct: u32,
+    pub recipe_correct: u32,
+    pub choice_denominators: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub baseline_choice_nlls: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub baseline_choice_scores: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub recipe_choice_nlls: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    pub recipe_choice_scores: [f64; STANDARD_EVAL_AUDIT_MAX_CHOICES],
 }
 
 #[repr(C)]
@@ -111,9 +137,13 @@ pub struct MsStandardEvalTaskResult {
 
 #[derive(Debug, Clone)]
 pub struct StandardEvalSampleInput {
+    pub doc_id: String,
     pub task: String,
     pub prompt: String,
+    pub target_delimiter: String,
     pub choices: Vec<String>,
+    pub continuations: Vec<String>,
+    pub choice_lengths: Vec<u64>,
     pub gold_index: u32,
     pub normalize_by_choice_length: bool,
 }
@@ -189,6 +219,9 @@ extern "C" {
         out_task_results: *mut MsStandardEvalTaskResult,
         task_result_capacity: u64,
         out_task_result_count: *mut u64,
+        out_sample_audits: *mut MsStandardEvalSampleAudit,
+        sample_audit_capacity: u64,
+        out_sample_audit_count: *mut u64,
     ) -> c_int;
     fn ms_runtime_eval_recipe_standard_single(
         path: *const c_char,
@@ -206,6 +239,9 @@ extern "C" {
         out_task_results: *mut MsStandardEvalTaskResult,
         task_result_capacity: u64,
         out_task_result_count: *mut u64,
+        out_sample_audits: *mut MsStandardEvalSampleAudit,
+        sample_audit_capacity: u64,
+        out_sample_audit_count: *mut u64,
     ) -> c_int;
 }
 
@@ -313,6 +349,8 @@ pub fn benchmark_baseline(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
 
     let result = unsafe {
@@ -354,6 +392,8 @@ pub fn benchmark_user_copy(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
 
     let result = unsafe {
@@ -418,6 +458,8 @@ pub fn benchmark_recipe(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
 
     let result = unsafe {
@@ -488,6 +530,7 @@ pub fn eval_recipe_standard(
         MsBaselineBenchmark,
         MsRecipeEvalResult,
         Vec<MsStandardEvalTaskResult>,
+        Vec<MsStandardEvalSampleAudit>,
     ),
     String,
 > {
@@ -516,6 +559,7 @@ pub fn eval_recipe_standard_single(
         MsBaselineBenchmark,
         MsRecipeEvalResult,
         Vec<MsStandardEvalTaskResult>,
+        Vec<MsStandardEvalSampleAudit>,
     ),
     String,
 > {
@@ -603,6 +647,8 @@ fn eval_recipe_with_native_fn(
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     };
     let mut eval = MsRecipeEvalResult {
         baseline_load_ms: 0.0,
@@ -614,11 +660,13 @@ fn eval_recipe_with_native_fn(
         baseline_runtime_elapsed_ms: 0.0,
         baseline_nll: 0.0,
         baseline_ppl: 0.0,
+        baseline_ppl_uncertainty: 0.0,
         baseline_eval_ms: 0.0,
         baseline_vram_peak_mb: 0.0,
         baseline_vram_allocated_mb: 0.0,
         recipe_nll: 0.0,
         recipe_ppl: 0.0,
+        recipe_ppl_uncertainty: 0.0,
         recipe_eval_ms: 0.0,
         recipe_vram_peak_mb: 0.0,
         recipe_vram_allocated_mb: 0.0,
@@ -674,12 +722,16 @@ fn eval_recipe_standard_with_native_fn(
         *mut MsStandardEvalTaskResult,
         u64,
         *mut u64,
+        *mut MsStandardEvalSampleAudit,
+        u64,
+        *mut u64,
     ) -> c_int,
 ) -> Result<
     (
         MsBaselineBenchmark,
         MsRecipeEvalResult,
         Vec<MsStandardEvalTaskResult>,
+        Vec<MsStandardEvalSampleAudit>,
     ),
     String,
 > {
@@ -747,7 +799,7 @@ fn eval_recipe_standard_with_native_fn(
         .iter()
         .map(|sample| {
             sample
-                .choices
+                .continuations
                 .iter()
                 .map(|choice| {
                     CString::new(choice.as_str()).map_err(|_| {
@@ -760,6 +812,20 @@ fn eval_recipe_standard_with_native_fn(
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
+    for sample in standard_samples {
+        if sample.continuations.len() != sample.choice_lengths.len() {
+            return Err(format!(
+                "standard eval choice length count does not match continuation count: {}",
+                sample.task
+            ));
+        }
+        if sample.choice_lengths.iter().any(|length| *length == 0) {
+            return Err(format!(
+                "standard eval choice length must be positive: {}",
+                sample.task
+            ));
+        }
+    }
     let standard_choice_ptrs = c_standard_choices
         .iter()
         .map(|choices| {
@@ -776,6 +842,7 @@ fn eval_recipe_standard_with_native_fn(
             task: c_standard_tasks[index].as_ptr(),
             prompt: c_standard_prompts[index].as_ptr(),
             choices: standard_choice_ptrs[index].as_ptr(),
+            choice_lengths: sample.choice_lengths.as_ptr(),
             choice_count: standard_choice_ptrs[index].len() as u64,
             gold_index: sample.gold_index,
             normalize_by_choice_length: u32::from(sample.normalize_by_choice_length),
@@ -786,6 +853,9 @@ fn eval_recipe_standard_with_native_fn(
     let mut eval = empty_eval();
     let mut task_results = vec![empty_standard_task_result(); standard_samples.len().max(1)];
     let mut task_result_count = 0u64;
+    let mut sample_audits =
+        vec![empty_standard_sample_audit(); 20usize.min(standard_samples.len().max(1))];
+    let mut sample_audit_count = 0u64;
 
     let result = unsafe {
         native_fn(
@@ -804,11 +874,15 @@ fn eval_recipe_standard_with_native_fn(
             task_results.as_mut_ptr(),
             task_results.len() as u64,
             &mut task_result_count,
+            sample_audits.as_mut_ptr(),
+            sample_audits.len() as u64,
+            &mut sample_audit_count,
         )
     };
     if result == 0 {
         task_results.truncate(task_result_count as usize);
-        Ok((benchmark, eval, task_results))
+        sample_audits.truncate(sample_audit_count as usize);
+        Ok((benchmark, eval, task_results, sample_audits))
     } else {
         Err(unsafe { c_string(ms_runtime_last_error()) })
     }
@@ -830,6 +904,8 @@ fn empty_benchmark() -> MsBaselineBenchmark {
         converted_tensor_count: 0,
         converted_bytes_before: 0,
         converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
     }
 }
 
@@ -844,11 +920,13 @@ fn empty_eval() -> MsRecipeEvalResult {
         baseline_runtime_elapsed_ms: 0.0,
         baseline_nll: 0.0,
         baseline_ppl: 0.0,
+        baseline_ppl_uncertainty: 0.0,
         baseline_eval_ms: 0.0,
         baseline_vram_peak_mb: 0.0,
         baseline_vram_allocated_mb: 0.0,
         recipe_nll: 0.0,
         recipe_ppl: 0.0,
+        recipe_ppl_uncertainty: 0.0,
         recipe_eval_ms: 0.0,
         recipe_vram_peak_mb: 0.0,
         recipe_vram_allocated_mb: 0.0,
@@ -877,6 +955,25 @@ fn empty_standard_task_result() -> MsStandardEvalTaskResult {
         margin_delta: 0.0,
         baseline_avg_correct_nll: 0.0,
         recipe_avg_correct_nll: 0.0,
+    }
+}
+
+fn empty_standard_sample_audit() -> MsStandardEvalSampleAudit {
+    MsStandardEvalSampleAudit {
+        sample_index: 0,
+        task: [0; 64],
+        choice_count: 0,
+        gold_index: 0,
+        has_baseline: 0,
+        baseline_prediction_index: 0,
+        recipe_prediction_index: 0,
+        baseline_correct: 0,
+        recipe_correct: 0,
+        choice_denominators: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        baseline_choice_nlls: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        baseline_choice_scores: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        recipe_choice_nlls: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
+        recipe_choice_scores: [0.0; STANDARD_EVAL_AUDIT_MAX_CHOICES],
     }
 }
 

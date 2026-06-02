@@ -2,7 +2,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use super::types::{GgufMetadata, ModelInfo, TensorInfo};
+use super::types::{GgufMetadata, ModelInfo, TensorInfo, TensorQuantPreflight};
+use crate::quant::preflight::analyze_tensor_quant_preflight;
 
 const GGUF_MAGIC: u32 = 0x46554747;
 
@@ -208,14 +209,17 @@ pub fn parse_gguf(path: &Path) -> Result<ModelInfo, GgufError> {
         let layer_index = extract_layer_index(&name);
         let layer_group = classify_tensor(&name, layer_index).to_string();
 
-        tensors.push(TensorInfo {
+        let mut tensor = TensorInfo {
             name,
             shape,
             current_quant: quant_name.to_string(),
             size_bytes,
             layer_index,
             layer_group,
-        });
+            quant_preflight: TensorQuantPreflight::pending(),
+        };
+        tensor.quant_preflight = analyze_tensor_quant_preflight(&tensor);
+        tensors.push(tensor);
     }
 
     tensors.sort_by_key(|t| t.layer_index);

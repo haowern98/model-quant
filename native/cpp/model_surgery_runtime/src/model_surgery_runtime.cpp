@@ -17,6 +17,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -170,8 +171,37 @@ bool is_runtime_quantizable_tensor(std::string_view name) {
         && name.find("scale") == std::string_view::npos;
 }
 
+bool is_supported_recipe_target(ggml_type target_type) {
+    switch (target_type) {
+        case GGML_TYPE_BF16:
+        case GGML_TYPE_F16:
+        case GGML_TYPE_Q8_0:
+        case GGML_TYPE_Q6_K:
+        case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q3_K:
+        case GGML_TYPE_Q2_K:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool can_decode_source_to_f32(ggml_type current_type) {
+    if (current_type == GGML_TYPE_F32) {
+        return true;
+    }
+
+    const struct ggml_type_traits * traits = ggml_get_type_traits(current_type);
+    return traits != nullptr && traits->to_float != nullptr;
+}
+
 bool supports_recipe_conversion(std::string_view name, ggml_type current_type, ggml_type target_type) {
-    if (target_type != GGML_TYPE_Q8_0) {
+    if (!is_supported_recipe_target(target_type)) {
+        return false;
+    }
+
+    if (estimate_type_size(1024, current_type, target_type) > 1024) {
         return false;
     }
 
@@ -179,9 +209,7 @@ bool supports_recipe_conversion(std::string_view name, ggml_type current_type, g
         return false;
     }
 
-    return current_type == GGML_TYPE_F32
-        || current_type == GGML_TYPE_F16
-        || current_type == GGML_TYPE_BF16;
+    return can_decode_source_to_f32(current_type);
 }
 
 std::string join_preview(const std::vector<std::string> & values, size_t limit) {
@@ -275,7 +303,7 @@ bool validate_recipe_for_user_model(
         fail(
             "Recipe contains unsupported changed tensor target(s): "
             + join_preview(unsupported, 5)
-            + ". Phase 2 supports only F32/F16/BF16->Q8_0 conversions.");
+            + ". Test Recipe supports equal-or-smaller F16/BF16/Q8_0/K-quant targets for compatible weight tensors.");
         return false;
     }
 
@@ -298,6 +326,7 @@ struct UserCopyTensorReader {
     std::vector<float> f32_row_buffer;
     std::vector<char> quantized_row_buffer;
     std::unordered_map<std::string, ggml_type> target_types;
+    std::unordered_map<std::string, ggml_type> loaded_target_types;
     size_t data_offset = 0;
     uint64_t copied_tensors = 0;
     uint64_t converted_tensors = 0;
@@ -305,9 +334,17 @@ struct UserCopyTensorReader {
     uint64_t converted_bytes_after = 0;
 };
 
+struct RecipeTargetVerification {
+    uint64_t requested_count = 0;
+    uint64_t verified_count = 0;
+    uint64_t mismatch_count = 0;
+    std::string first_mismatch;
+};
+
 struct PerplexityScore {
     double total_nll = 0.0;
     double ppl = 0.0;
+    double ppl_uncertainty = 0.0;
     double eval_ms = 0.0;
     double vram_peak_mb = 0.0;
     double vram_allocated_mb = 0.0;
@@ -316,13 +353,19 @@ struct PerplexityScore {
     uint64_t skipped_count = 0;
 };
 
+constexpr uint32_t LLAMA_PPL_CONTEXT_TOKENS = 512;
+
 struct StandardEvalSampleScore {
     std::string task;
+    uint64_t sample_index = 0;
     uint32_t gold_index = 0;
     uint32_t prediction_index = 0;
     bool correct = false;
     double margin = 0.0;
     double correct_nll = 0.0;
+    std::vector<double> choice_denominators;
+    std::vector<double> choice_nlls;
+    std::vector<double> choice_scores;
 };
 
 struct StandardEvalAccumulator {
@@ -350,6 +393,8 @@ struct ModelSession {
     uint64_t converted_tensors = 0;
     uint64_t converted_bytes_before = 0;
     uint64_t converted_bytes_after = 0;
+    uint64_t requested_target_count = 0;
+    uint64_t verified_target_count = 0;
 
     ModelSession(llama_model * loaded_model, double load_time_ms, const VramTracker & vram_tracker)
         : model(loaded_model, llama_model_free),
@@ -456,6 +501,78 @@ std::unique_ptr<ModelSession> open_user_copy_session(const char * path, uint32_t
     return session;
 }
 
+std::unordered_map<std::string, ggml_type> build_source_types_for_targets(
+    gguf_context * source_metadata,
+    const std::unordered_map<std::string, ggml_type> & target_types) {
+    std::unordered_map<std::string, ggml_type> source_types;
+    for (const auto & entry : target_types) {
+        const int64_t tensor_id = gguf_find_tensor(source_metadata, entry.first.c_str());
+        if (tensor_id < 0) {
+            continue;
+        }
+        source_types.emplace(entry.first, gguf_get_tensor_type(source_metadata, tensor_id));
+    }
+    return source_types;
+}
+
+RecipeTargetVerification verify_recipe_tensor_target_types(
+    const std::unordered_map<std::string, ggml_type> & loaded_target_types,
+    const std::unordered_map<std::string, ggml_type> & target_types,
+    const std::unordered_map<std::string, ggml_type> & source_types) {
+    RecipeTargetVerification verification = {};
+
+    for (const auto & target : target_types) {
+        const auto source = source_types.find(target.first);
+        if (source == source_types.end() || source->second == target.second) {
+            continue;
+        }
+
+        verification.requested_count += 1;
+
+        const auto loaded = loaded_target_types.find(target.first);
+        if (loaded == loaded_target_types.end()) {
+            verification.mismatch_count += 1;
+            if (verification.first_mismatch.empty()) {
+                verification.first_mismatch = target.first
+                    + " expected " + display_quant_type(target.second)
+                    + ", loaded <missing>";
+            }
+            continue;
+        }
+
+        const ggml_type loaded_type = loaded->second;
+        if (loaded_type == target.second) {
+            verification.verified_count += 1;
+            continue;
+        }
+
+        verification.mismatch_count += 1;
+        if (verification.first_mismatch.empty()) {
+            verification.first_mismatch = target.first
+                + " expected " + display_quant_type(target.second)
+                + ", loaded " + display_quant_type(loaded_type);
+        }
+    }
+
+    return verification;
+}
+
+RecipeTargetVerification verify_recipe_tensor_targets_in_map(
+    const std::vector<std::pair<std::string, ggml_tensor *>> & tensor_map,
+    const std::unordered_map<std::string, ggml_type> & target_types,
+    const std::unordered_map<std::string, ggml_type> & source_types) {
+    std::unordered_map<std::string, ggml_type> loaded_target_types;
+    for (const auto & entry : tensor_map) {
+        if (entry.second != nullptr) {
+            loaded_target_types.emplace(entry.first, entry.second->type);
+        }
+    }
+    return verify_recipe_tensor_target_types(
+        loaded_target_types,
+        target_types,
+        source_types);
+}
+
 std::unique_ptr<ModelSession> open_recipe_session(
     const char * path,
     std::unordered_map<std::string, ggml_type> target_types,
@@ -481,6 +598,9 @@ std::unique_ptr<ModelSession> open_recipe_session(
     if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
         return nullptr;
     }
+    const std::unordered_map<std::string, ggml_type> source_types = build_source_types_for_targets(
+        source_metadata.get(),
+        target_types);
     apply_recipe_tensor_types(model_metadata.get(), target_types);
 
     UserCopyTensorReader reader = {};
@@ -511,11 +631,24 @@ std::unique_ptr<ModelSession> open_recipe_session(
     }
     vram_tracker.sample();
 
+    const RecipeTargetVerification verification = verify_recipe_tensor_target_types(
+        reader.loaded_target_types,
+        reader.target_types,
+        source_types);
+    if (verification.mismatch_count > 0) {
+        llama_model_free(model);
+        throw std::runtime_error(
+            "Recipe tensor verification failed: "
+            + verification.first_mismatch);
+    }
+
     auto session = std::make_unique<ModelSession>(model, elapsed_ms(load_start, load_end), vram_tracker);
     session->copied_tensors = reader.copied_tensors;
     session->converted_tensors = reader.converted_tensors;
     session->converted_bytes_before = reader.converted_bytes_before;
     session->converted_bytes_after = reader.converted_bytes_after;
+    session->requested_target_count = verification.requested_count;
+    session->verified_target_count = verification.verified_count;
     open_session_context(*session, context_tokens);
     return session;
 }
@@ -538,22 +671,50 @@ void read_exact_at(
     }
 }
 
-void convert_source_tensor_to_q8_0(
+void decode_source_row_to_f32(
+    const void * source_row,
+    ggml_type current_type,
+    int64_t n_per_row,
+    float * f32_row,
+    std::string_view name) {
+    if (source_row == nullptr || f32_row == nullptr) {
+        throw std::runtime_error(std::string("cannot decode invalid tensor row for: ") + std::string(name));
+    }
+
+    if (current_type == GGML_TYPE_F32) {
+        std::memcpy(f32_row, source_row, static_cast<size_t>(n_per_row) * sizeof(float));
+        return;
+    }
+
+    const struct ggml_type_traits * traits = ggml_get_type_traits(current_type);
+    if (traits == nullptr || traits->to_float == nullptr) {
+        throw std::runtime_error(
+            std::string("unsupported source quant for recipe conversion: ")
+            + std::string(name) + " " + display_quant_type(current_type));
+    }
+
+    traits->to_float(source_row, f32_row, n_per_row);
+}
+
+void convert_source_tensor_to_quant(
     ggml_tensor * tensor,
     UserCopyTensorReader * reader,
     const char * name,
     int64_t tensor_id,
-    ggml_type current_type) {
+    ggml_type current_type,
+    ggml_type target_type) {
     const int64_t n_per_row = tensor->ne[0];
     if (n_per_row <= 0) {
         throw std::runtime_error(std::string("cannot quantize tensor with empty row: ") + name);
     }
 
-    const int64_t q8_block = ggml_blck_size(GGML_TYPE_Q8_0);
-    if (n_per_row % q8_block != 0) {
+    const int64_t target_block = ggml_blck_size(target_type);
+    if (n_per_row % target_block != 0) {
         throw std::runtime_error(
-            std::string("cannot quantize tensor to Q8_0 because row size is not divisible by ")
-            + std::to_string(q8_block) + ": " + name);
+            std::string("cannot quantize tensor to ")
+            + display_quant_type(target_type)
+            + " because row size is not divisible by "
+            + std::to_string(target_block) + ": " + name);
     }
 
     const int64_t element_count = ggml_nelements(tensor);
@@ -563,7 +724,7 @@ void convert_source_tensor_to_q8_0(
 
     const int64_t nrows = element_count / n_per_row;
     const size_t source_row_size = ggml_row_size(current_type, n_per_row);
-    const size_t target_row_size = ggml_row_size(GGML_TYPE_Q8_0, n_per_row);
+    const size_t target_row_size = ggml_row_size(target_type, n_per_row);
     const size_t source_size = gguf_get_tensor_size(reader->source_metadata, tensor_id);
     const size_t target_size = ggml_nbytes(tensor);
 
@@ -571,7 +732,10 @@ void convert_source_tensor_to_q8_0(
         throw std::runtime_error(std::string("source tensor size does not match row layout for: ") + name);
     }
     if (target_size != target_row_size * static_cast<size_t>(nrows)) {
-        throw std::runtime_error(std::string("target tensor size does not match Q8_0 row layout for: ") + name);
+        throw std::runtime_error(
+            std::string("target tensor size does not match ")
+            + display_quant_type(target_type)
+            + " row layout for: " + name);
     }
 
     reader->source_row_buffer.resize(source_row_size);
@@ -587,29 +751,15 @@ void convert_source_tensor_to_q8_0(
             source_row_size,
             name);
 
-        if (current_type == GGML_TYPE_F32) {
-            std::memcpy(
-                reader->f32_row_buffer.data(),
-                reader->source_row_buffer.data(),
-                source_row_size);
-        } else if (current_type == GGML_TYPE_F16) {
-            ggml_fp16_to_fp32_row(
-                reinterpret_cast<const ggml_fp16_t *>(reader->source_row_buffer.data()),
-                reader->f32_row_buffer.data(),
-                n_per_row);
-        } else if (current_type == GGML_TYPE_BF16) {
-            ggml_bf16_to_fp32_row(
-                reinterpret_cast<const ggml_bf16_t *>(reader->source_row_buffer.data()),
-                reader->f32_row_buffer.data(),
-                n_per_row);
-        } else {
-            throw std::runtime_error(
-                std::string("unsupported source quant for Q8_0 conversion: ")
-                + name + " " + display_quant_type(current_type));
-        }
+        decode_source_row_to_f32(
+            reader->source_row_buffer.data(),
+            current_type,
+            n_per_row,
+            reader->f32_row_buffer.data(),
+            name);
 
         const size_t written = ggml_quantize_chunk(
-            GGML_TYPE_Q8_0,
+            target_type,
             reader->f32_row_buffer.data(),
             reader->quantized_row_buffer.data(),
             0,
@@ -617,7 +767,9 @@ void convert_source_tensor_to_q8_0(
             n_per_row,
             nullptr);
         if (written != target_row_size) {
-            throw std::runtime_error(std::string("Q8_0 quantized row size mismatch for: ") + name);
+            throw std::runtime_error(
+                std::string(display_quant_type(target_type))
+                + " quantized row size mismatch for: " + name);
         }
 
         ggml_backend_tensor_set(
@@ -651,8 +803,9 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
     const auto target = reader->target_types.find(name);
     const ggml_type target_type = target == reader->target_types.end() ? current_type : target->second;
     if (target_type != current_type) {
-        if (supports_recipe_conversion(name, current_type, target_type) && target_type == GGML_TYPE_Q8_0) {
-            convert_source_tensor_to_q8_0(tensor, reader, name, tensor_id, current_type);
+        reader->loaded_target_types[name] = tensor->type;
+        if (supports_recipe_conversion(name, current_type, target_type)) {
+            convert_source_tensor_to_quant(tensor, reader, name, tensor_id, current_type, target_type);
             return;
         }
 
@@ -691,8 +844,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
 
 std::vector<llama_token> tokenize_text(
     const llama_vocab * vocab,
-    const char * text,
-    uint32_t max_eval_tokens) {
+    const char * text) {
     const int32_t text_len = static_cast<int32_t>(std::strlen(text));
     int32_t token_count = llama_tokenize(vocab, text, text_len, nullptr, 0, true, true);
     if (token_count == INT32_MIN) {
@@ -719,10 +871,52 @@ std::vector<llama_token> tokenize_text(
     }
 
     tokens.resize(static_cast<size_t>(actual_tokens));
-    if (max_eval_tokens > 0 && tokens.size() > max_eval_tokens) {
-        tokens.resize(static_cast<size_t>(max_eval_tokens));
-    }
     return tokens;
+}
+
+struct LlamaPplChunk {
+    size_t begin = 0;
+    size_t first_scored = 0;
+    size_t end = 0;
+};
+
+std::vector<LlamaPplChunk> build_llama_ppl_chunks(
+    size_t token_count,
+    uint32_t context_tokens = LLAMA_PPL_CONTEXT_TOKENS) {
+    std::vector<LlamaPplChunk> chunks;
+    const size_t context = std::max<size_t>(2, context_tokens);
+    if (token_count < 2 * context) {
+        return chunks;
+    }
+
+    const size_t chunk_count = token_count / context;
+    chunks.reserve(chunk_count);
+    for (size_t chunk_index = 0; chunk_index < chunk_count; ++chunk_index) {
+        const size_t begin = chunk_index * context;
+        chunks.push_back(LlamaPplChunk {
+            begin,
+            begin + context / 2,
+            begin + context,
+        });
+    }
+
+    return chunks;
+}
+
+double llama_ppl_uncertainty(double nll_sum, double nll_sq_sum, uint64_t token_count) {
+    if (token_count <= 1) {
+        return 0.0;
+    }
+
+    const double count = static_cast<double>(token_count);
+    const double mean_nll = nll_sum / count;
+    double variance = (nll_sq_sum / count) - (mean_nll * mean_nll);
+    if (variance <= 0.0 || !std::isfinite(variance)) {
+        return 0.0;
+    }
+
+    variance = std::sqrt(variance / static_cast<double>(token_count - 1));
+    return variance * std::exp(std::min(mean_nll, 700.0));
 }
 
 double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token target) {
@@ -747,107 +941,86 @@ double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token 
     return log_sum_exp - static_cast<double>(logits[target]);
 }
 
-double score_continuation_nll(
-    ModelSession & session,
-    const char * prompt,
-    const char * continuation,
-    uint64_t * out_token_count) {
-    if (prompt == nullptr || prompt[0] == '\0') {
-        throw std::runtime_error("standard eval sample prompt is empty");
-    }
-    if (continuation == nullptr || continuation[0] == '\0') {
-        throw std::runtime_error("standard eval sample choice is empty");
+size_t find_common_token_prefix(const std::vector<std::vector<llama_token>> & sequences) {
+    if (sequences.empty()) {
+        return 0;
     }
 
+    size_t min_len = sequences.front().size();
+    for (const std::vector<llama_token> & sequence : sequences) {
+        min_len = std::min(min_len, sequence.size());
+    }
+
+    size_t prefix = 0;
+    for (; prefix < min_len; ++prefix) {
+        const llama_token token = sequences.front()[prefix];
+        bool all_same = true;
+        for (size_t i = 1; i < sequences.size(); ++i) {
+            if (sequences[i][prefix] != token) {
+                all_same = false;
+                break;
+            }
+        }
+        if (!all_same) {
+            break;
+        }
+    }
+
+    return prefix;
+}
+
+double llama_mcq_choice_score(double nll, uint64_t scored_token_count) {
+    if (scored_token_count == 0) {
+        throw std::runtime_error("standard eval choice produced no scored tokens");
+    }
+    return -nll / static_cast<double>(scored_token_count);
+}
+
+double score_sequence_suffix_nll(
+    ModelSession & session,
+    const std::vector<llama_token> & sequence,
+    size_t first_scored_token,
+    uint64_t * out_token_count) {
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t n_vocab = llama_vocab_n_tokens(vocab);
     if (n_vocab <= 0) {
         throw std::runtime_error("model vocabulary is empty");
     }
-
-    const int32_t prompt_len = static_cast<int32_t>(std::strlen(prompt));
-    int32_t prompt_token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
-    if (prompt_token_count == INT32_MIN) {
-        throw std::runtime_error("standard eval prompt tokenization overflowed");
+    if (sequence.size() < 2 || first_scored_token == 0 || first_scored_token >= sequence.size()) {
+        throw std::runtime_error("standard eval choice produced no scored tokens");
     }
-    if (prompt_token_count < 0) {
-        prompt_token_count = -prompt_token_count;
-    }
-    if (prompt_token_count <= 0) {
-        throw std::runtime_error("standard eval prompt produced no tokens");
-    }
-
-    std::vector<llama_token> prompt_tokens(static_cast<size_t>(prompt_token_count));
-    const int32_t actual_prompt_tokens = llama_tokenize(
-        vocab,
-        prompt,
-        prompt_len,
-        prompt_tokens.data(),
-        prompt_token_count,
-        true,
-        true);
-    if (actual_prompt_tokens <= 0) {
-        throw std::runtime_error("failed to tokenize standard eval prompt");
-    }
-    prompt_tokens.resize(static_cast<size_t>(actual_prompt_tokens));
-
-    const int32_t continuation_len = static_cast<int32_t>(std::strlen(continuation));
-    int32_t continuation_token_count = llama_tokenize(
-        vocab,
-        continuation,
-        continuation_len,
-        nullptr,
-        0,
-        false,
-        true);
-    if (continuation_token_count == INT32_MIN) {
-        throw std::runtime_error("standard eval choice tokenization overflowed");
-    }
-    if (continuation_token_count < 0) {
-        continuation_token_count = -continuation_token_count;
-    }
-    if (continuation_token_count <= 0) {
-        throw std::runtime_error("standard eval choice produced no tokens");
-    }
-
-    std::vector<llama_token> continuation_tokens(static_cast<size_t>(continuation_token_count));
-    const int32_t actual_continuation_tokens = llama_tokenize(
-        vocab,
-        continuation,
-        continuation_len,
-        continuation_tokens.data(),
-        continuation_token_count,
-        false,
-        true);
-    if (actual_continuation_tokens <= 0) {
-        throw std::runtime_error("failed to tokenize standard eval choice");
-    }
-    continuation_tokens.resize(static_cast<size_t>(actual_continuation_tokens));
 
     reset_session_context(session);
-    const int prompt_res = llama_decode(
+    const int prefix_res = llama_decode(
         session.ctx.get(),
-        llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size())));
-    if (prompt_res != 0) {
-        throw std::runtime_error("failed to decode standard eval prompt");
+        llama_batch_get_one(
+            const_cast<llama_token *>(sequence.data()),
+            static_cast<int32_t>(first_scored_token)));
+    if (prefix_res != 0) {
+        throw std::runtime_error("failed to decode standard eval common prefix");
     }
     llama_synchronize(session.ctx.get());
 
     double nll = 0.0;
-    for (llama_token token : continuation_tokens) {
+    uint64_t scored_tokens = 0;
+    for (size_t target_index = first_scored_token; target_index < sequence.size(); ++target_index) {
         const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
-        nll += token_nll_from_logits(logits, n_vocab, token);
+        nll += token_nll_from_logits(logits, n_vocab, sequence[target_index]);
+        scored_tokens += 1;
 
-        llama_batch batch = llama_batch_get_one(&token, 1);
-        const int decode_result = llama_decode(session.ctx.get(), batch);
-        if (decode_result != 0) {
-            throw std::runtime_error("failed to decode standard eval choice token");
+        if (target_index + 1 < sequence.size()) {
+            llama_token token = sequence[target_index];
+            llama_batch batch = llama_batch_get_one(&token, 1);
+            const int decode_result = llama_decode(session.ctx.get(), batch);
+            if (decode_result != 0) {
+                throw std::runtime_error("failed to decode standard eval choice token");
+            }
+            llama_synchronize(session.ctx.get());
         }
-        llama_synchronize(session.ctx.get());
     }
 
     if (out_token_count != nullptr) {
-        *out_token_count = static_cast<uint64_t>(continuation_tokens.size());
+        *out_token_count = scored_tokens;
     }
     session.vram.sample();
     return nll;
@@ -874,24 +1047,49 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
         if (sample.choices == nullptr || sample.choice_count < 2) {
             throw std::runtime_error(std::string("standard eval sample needs at least two choices for task: ") + sample.task);
         }
+        if (sample.choice_lengths == nullptr) {
+            throw std::runtime_error(std::string("standard eval sample choice lengths are missing for task: ") + sample.task);
+        }
         if (sample.gold_index >= sample.choice_count) {
             throw std::runtime_error(std::string("standard eval gold index is outside choices for task: ") + sample.task);
         }
 
         std::vector<double> choice_scores(static_cast<size_t>(sample.choice_count));
         std::vector<double> choice_nlls(static_cast<size_t>(sample.choice_count));
+        std::vector<double> choice_denominators(static_cast<size_t>(sample.choice_count));
+        std::vector<std::vector<llama_token>> choice_token_sequences;
+        choice_token_sequences.reserve(static_cast<size_t>(sample.choice_count));
+
+        const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
+        for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
+            if (sample.choices[choice_index] == nullptr || sample.choices[choice_index][0] == '\0') {
+                throw std::runtime_error(std::string("standard eval sample choice is empty for task: ") + sample.task);
+            }
+            std::string candidate = sample.prompt;
+            candidate += sample.choices[choice_index];
+            std::vector<llama_token> tokens = tokenize_text(vocab, candidate.c_str());
+            if (tokens.size() < 2) {
+                throw std::runtime_error(std::string("standard eval sample choice produced too few tokens for task: ") + sample.task);
+            }
+            choice_token_sequences.push_back(std::move(tokens));
+        }
+
+        const size_t common_prefix = find_common_token_prefix(choice_token_sequences);
+        if (common_prefix == 0) {
+            throw std::runtime_error(std::string("standard eval choices share no prompt prefix for task: ") + sample.task);
+        }
+
         for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
             uint64_t token_count = 0;
-            const double nll = score_continuation_nll(
+            const double nll = score_sequence_suffix_nll(
                 session,
-                sample.prompt,
-                sample.choices[choice_index],
+                choice_token_sequences[static_cast<size_t>(choice_index)],
+                common_prefix,
                 &token_count);
-            const double denominator = sample.normalize_by_choice_length != 0 && token_count > 0
-                ? static_cast<double>(token_count)
-                : 1.0;
+            const double denominator = static_cast<double>(token_count);
+            choice_denominators[static_cast<size_t>(choice_index)] = denominator;
             choice_nlls[static_cast<size_t>(choice_index)] = nll;
-            choice_scores[static_cast<size_t>(choice_index)] = -nll / denominator;
+            choice_scores[static_cast<size_t>(choice_index)] = llama_mcq_choice_score(nll, token_count);
         }
 
         uint32_t best_index = 0;
@@ -912,11 +1110,15 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
 
         StandardEvalSampleScore score = {};
         score.task = sample.task;
+        score.sample_index = sample_index;
         score.gold_index = sample.gold_index;
         score.prediction_index = best_index;
         score.correct = best_index == sample.gold_index;
         score.margin = choice_scores[best_index] - choice_scores[second_index];
         score.correct_nll = choice_nlls[static_cast<size_t>(sample.gold_index)];
+        score.choice_denominators = std::move(choice_denominators);
+        score.choice_nlls = std::move(choice_nlls);
+        score.choice_scores = std::move(choice_scores);
         scores.push_back(std::move(score));
     }
 
@@ -1026,12 +1228,114 @@ bool write_standard_eval_results(
     return true;
 }
 
+void write_choice_audit_values(
+    const std::vector<double> & values,
+    double (& out_values)[MS_STANDARD_EVAL_AUDIT_MAX_CHOICES],
+    uint32_t choice_count) {
+    for (uint32_t i = 0; i < choice_count; ++i) {
+        out_values[i] = values[static_cast<size_t>(i)];
+    }
+}
+
+bool write_standard_eval_sample_audits(
+    const std::vector<StandardEvalSampleScore> * baseline_scores,
+    const std::vector<StandardEvalSampleScore> & recipe_scores,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count) {
+    if (out_sample_audit_count == nullptr) {
+        fail("standard eval sample audit count output pointer is null");
+        return false;
+    }
+
+    *out_sample_audit_count = 0;
+    if (recipe_scores.empty() || sample_audit_capacity == 0) {
+        return true;
+    }
+    if (out_sample_audits == nullptr) {
+        fail("standard eval sample audit pointer is null");
+        return false;
+    }
+    if (baseline_scores != nullptr && baseline_scores->size() != recipe_scores.size()) {
+        fail("baseline and recipe standard eval sample audit counts do not match");
+        return false;
+    }
+
+    std::vector<size_t> selected;
+    selected.reserve(static_cast<size_t>(sample_audit_capacity));
+    auto add_index = [&](size_t index) {
+        if (selected.size() >= static_cast<size_t>(sample_audit_capacity)) {
+            return;
+        }
+        if (std::find(selected.begin(), selected.end(), index) == selected.end()) {
+            selected.push_back(index);
+        }
+    };
+
+    if (baseline_scores != nullptr) {
+        for (size_t i = 0; i < recipe_scores.size(); ++i) {
+            const StandardEvalSampleScore & baseline = (*baseline_scores)[i];
+            const StandardEvalSampleScore & recipe = recipe_scores[i];
+            if (baseline.prediction_index != recipe.prediction_index) {
+                add_index(i);
+            }
+        }
+    }
+    for (size_t i = 0; i < recipe_scores.size(); ++i) {
+        if (!recipe_scores[i].correct) {
+            add_index(i);
+        }
+    }
+    for (size_t i = 0; i < recipe_scores.size(); ++i) {
+        add_index(i);
+    }
+
+    for (size_t out_index = 0; out_index < selected.size(); ++out_index) {
+        const size_t score_index = selected[out_index];
+        const StandardEvalSampleScore & recipe = recipe_scores[score_index];
+        const StandardEvalSampleScore * baseline = baseline_scores == nullptr
+            ? nullptr
+            : &(*baseline_scores)[score_index];
+
+        if (baseline != nullptr && baseline->task != recipe.task) {
+            fail("baseline and recipe standard eval sample audit order does not match");
+            return false;
+        }
+        const size_t source_choice_count = recipe.choice_scores.size();
+        const uint32_t choice_count = static_cast<uint32_t>(
+            std::min<size_t>(source_choice_count, MS_STANDARD_EVAL_AUDIT_MAX_CHOICES));
+
+        ms_standard_eval_sample_audit audit = {};
+        audit.sample_index = recipe.sample_index;
+        copy_task_name(audit.task, recipe.task);
+        audit.choice_count = choice_count;
+        audit.gold_index = recipe.gold_index;
+        audit.has_baseline = baseline == nullptr ? 0u : 1u;
+        audit.baseline_prediction_index = baseline == nullptr ? 0u : baseline->prediction_index;
+        audit.recipe_prediction_index = recipe.prediction_index;
+        audit.baseline_correct = baseline != nullptr && baseline->correct ? 1u : 0u;
+        audit.recipe_correct = recipe.correct ? 1u : 0u;
+        write_choice_audit_values(recipe.choice_denominators, audit.choice_denominators, choice_count);
+        write_choice_audit_values(recipe.choice_nlls, audit.recipe_choice_nlls, choice_count);
+        write_choice_audit_values(recipe.choice_scores, audit.recipe_choice_scores, choice_count);
+        if (baseline != nullptr) {
+            write_choice_audit_values(baseline->choice_nlls, audit.baseline_choice_nlls, choice_count);
+            write_choice_audit_values(baseline->choice_scores, audit.baseline_choice_scores, choice_count);
+        }
+        out_sample_audits[out_index] = audit;
+    }
+
+    *out_sample_audit_count = static_cast<uint64_t>(selected.size());
+    return true;
+}
+
 PerplexityScore score_session_perplexity(
     ModelSession & session,
     const char * const * eval_texts,
     uint64_t eval_text_count,
     uint32_t max_eval_tokens) {
     PerplexityScore score = {};
+    (void)max_eval_tokens;
     if (eval_texts == nullptr || eval_text_count == 0) {
         throw std::runtime_error("eval text set is empty");
     }
@@ -1041,10 +1345,10 @@ PerplexityScore score_session_perplexity(
     if (n_vocab <= 0) {
         throw std::runtime_error("model vocabulary is empty");
     }
+    const bool add_bos = llama_vocab_get_add_bos(vocab);
+    const llama_token bos_token = llama_vocab_bos(vocab);
 
-    const uint32_t eval_limit = std::max<uint32_t>(2, max_eval_tokens == 0 ? 128 : max_eval_tokens);
-
-    const auto eval_start = std::chrono::steady_clock::now();
+    std::string corpus;
     for (uint64_t text_index = 0; text_index < eval_text_count; ++text_index) {
         const char * text = eval_texts[text_index];
         if (text == nullptr || text[0] == '\0') {
@@ -1052,15 +1356,34 @@ PerplexityScore score_session_perplexity(
             continue;
         }
 
-        std::vector<llama_token> tokens = tokenize_text(vocab, text, eval_limit);
-        if (tokens.size() < 2) {
-            score.skipped_count += 1;
-            continue;
+        if (!corpus.empty()) {
+            corpus.append("\n\n");
         }
+        corpus.append(text);
+        score.sample_count += 1;
+    }
 
+    if (corpus.empty()) {
+        throw std::runtime_error("eval text set is empty");
+    }
+
+    std::vector<llama_token> tokens = tokenize_text(vocab, corpus.c_str());
+    const std::vector<LlamaPplChunk> chunks = build_llama_ppl_chunks(tokens.size());
+    if (chunks.empty()) {
+        throw std::runtime_error("eval text set produced too few tokens for llama.cpp-style PPL");
+    }
+
+    double nll_squared_sum = 0.0;
+
+    const auto eval_start = std::chrono::steady_clock::now();
+    for (const LlamaPplChunk & chunk : chunks) {
         reset_session_context(session);
-        for (size_t token_index = 0; token_index + 1 < tokens.size(); ++token_index) {
+        for (size_t token_index = chunk.begin; token_index + 1 < chunk.end; ++token_index) {
             llama_token token = tokens[token_index];
+            if (add_bos && token_index == chunk.begin) {
+                token = bos_token;
+            }
+
             llama_batch batch = llama_batch_get_one(&token, 1);
             const int decode_result = llama_decode(session.ctx.get(), batch);
             if (decode_result != 0) {
@@ -1068,12 +1391,15 @@ PerplexityScore score_session_perplexity(
             }
             llama_synchronize(session.ctx.get());
 
-            const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
-            score.total_nll += token_nll_from_logits(logits, n_vocab, tokens[token_index + 1]);
-            score.token_count += 1;
+            if (token_index >= chunk.first_scored) {
+                const size_t target_index = token_index + 1;
+                const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
+                const double token_nll = token_nll_from_logits(logits, n_vocab, tokens[target_index]);
+                score.total_nll += token_nll;
+                nll_squared_sum += token_nll * token_nll;
+                score.token_count += 1;
+            }
         }
-
-        score.sample_count += 1;
         session.vram.sample();
     }
     const auto eval_end = std::chrono::steady_clock::now();
@@ -1085,6 +1411,10 @@ PerplexityScore score_session_perplexity(
     score.eval_ms = elapsed_ms(eval_start, eval_end);
     const double avg_nll = score.total_nll / static_cast<double>(score.token_count);
     score.ppl = std::exp(std::min(avg_nll, 700.0));
+    score.ppl_uncertainty = llama_ppl_uncertainty(
+        score.total_nll,
+        nll_squared_sum,
+        score.token_count);
     score.vram_peak_mb = session.vram.peak_mb;
     score.vram_allocated_mb = session.vram.current_mb;
     return score;
@@ -1180,6 +1510,8 @@ int32_t run_session_benchmark(
     out_benchmark->converted_tensor_count = 0;
     out_benchmark->converted_bytes_before = 0;
     out_benchmark->converted_bytes_after = 0;
+    out_benchmark->requested_target_count = 0;
+    out_benchmark->verified_target_count = 0;
 
     return 0;
 }
@@ -1370,6 +1702,8 @@ int32_t ms_runtime_benchmark_user_copy(
             out_benchmark->converted_tensor_count = session->converted_tensors;
             out_benchmark->converted_bytes_before = session->converted_bytes_before;
             out_benchmark->converted_bytes_after = session->converted_bytes_after;
+            out_benchmark->requested_target_count = session->requested_target_count;
+            out_benchmark->verified_target_count = session->verified_target_count;
         }
         return result;
     } catch (const std::exception & err) {
@@ -1424,6 +1758,8 @@ int32_t ms_runtime_benchmark_recipe(
             out_benchmark->converted_tensor_count = session->converted_tensors;
             out_benchmark->converted_bytes_before = session->converted_bytes_before;
             out_benchmark->converted_bytes_after = session->converted_bytes_after;
+            out_benchmark->requested_target_count = session->requested_target_count;
+            out_benchmark->verified_target_count = session->verified_target_count;
         }
         return result;
     } catch (const std::exception & err) {
@@ -1522,6 +1858,8 @@ int32_t ms_runtime_eval_recipe(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         out_eval->baseline_load_ms = baseline_benchmark.load_ms;
         out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
@@ -1532,11 +1870,13 @@ int32_t ms_runtime_eval_recipe(
         out_eval->baseline_runtime_elapsed_ms = benchmark_runtime_elapsed_ms(baseline_benchmark);
         out_eval->baseline_nll = baseline_score.total_nll / static_cast<double>(baseline_score.token_count);
         out_eval->baseline_ppl = baseline_score.ppl;
+        out_eval->baseline_ppl_uncertainty = baseline_score.ppl_uncertainty;
         out_eval->baseline_eval_ms = baseline_score.eval_ms;
         out_eval->baseline_vram_peak_mb = baseline_benchmark.vram_peak_mb;
         out_eval->baseline_vram_allocated_mb = baseline_benchmark.vram_allocated_mb;
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -1623,10 +1963,13 @@ int32_t ms_runtime_eval_recipe_single(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -1656,7 +1999,10 @@ int32_t ms_runtime_eval_recipe_standard(
     ms_recipe_eval_result * out_eval,
     ms_standard_eval_task_result * out_task_results,
     uint64_t task_result_capacity,
-    uint64_t * out_task_result_count) {
+    uint64_t * out_task_result_count,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count) {
     clear_error();
 
     if (path == nullptr || path[0] == '\0') {
@@ -1679,7 +2025,7 @@ int32_t ms_runtime_eval_recipe_standard(
         return fail("benchmark prompt is empty");
     }
 
-    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr) {
+    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr || out_sample_audit_count == nullptr) {
         return fail("standard eval output pointer is null");
     }
 
@@ -1748,6 +2094,8 @@ int32_t ms_runtime_eval_recipe_standard(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         out_eval->baseline_load_ms = baseline_benchmark.load_ms;
         out_eval->baseline_prompt_eval_ms = baseline_benchmark.prompt_eval_ms;
@@ -1758,11 +2106,13 @@ int32_t ms_runtime_eval_recipe_standard(
         out_eval->baseline_runtime_elapsed_ms = benchmark_runtime_elapsed_ms(baseline_benchmark);
         out_eval->baseline_nll = baseline_score.total_nll / static_cast<double>(baseline_score.token_count);
         out_eval->baseline_ppl = baseline_score.ppl;
+        out_eval->baseline_ppl_uncertainty = baseline_score.ppl_uncertainty;
         out_eval->baseline_eval_ms = baseline_score.eval_ms;
         out_eval->baseline_vram_peak_mb = baseline_benchmark.vram_peak_mb;
         out_eval->baseline_vram_allocated_mb = baseline_benchmark.vram_allocated_mb;
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -1780,6 +2130,14 @@ int32_t ms_runtime_eval_recipe_standard(
                 out_task_results,
                 task_result_capacity,
                 out_task_result_count)) {
+            return -1;
+        }
+        if (!write_standard_eval_sample_audits(
+                &baseline_standard_scores,
+                recipe_standard_scores,
+                out_sample_audits,
+                sample_audit_capacity,
+                out_sample_audit_count)) {
             return -1;
         }
         return 0;
@@ -1805,7 +2163,10 @@ int32_t ms_runtime_eval_recipe_standard_single(
     ms_recipe_eval_result * out_eval,
     ms_standard_eval_task_result * out_task_results,
     uint64_t task_result_capacity,
-    uint64_t * out_task_result_count) {
+    uint64_t * out_task_result_count,
+    ms_standard_eval_sample_audit * out_sample_audits,
+    uint64_t sample_audit_capacity,
+    uint64_t * out_sample_audit_count) {
     clear_error();
 
     if (path == nullptr || path[0] == '\0') {
@@ -1828,7 +2189,7 @@ int32_t ms_runtime_eval_recipe_standard_single(
         return fail("benchmark prompt is empty");
     }
 
-    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr) {
+    if (out_benchmark == nullptr || out_eval == nullptr || out_task_result_count == nullptr || out_sample_audit_count == nullptr) {
         return fail("standard eval output pointer is null");
     }
 
@@ -1871,10 +2232,13 @@ int32_t ms_runtime_eval_recipe_standard_single(
         out_benchmark->converted_tensor_count = recipe_session->converted_tensors;
         out_benchmark->converted_bytes_before = recipe_session->converted_bytes_before;
         out_benchmark->converted_bytes_after = recipe_session->converted_bytes_after;
+        out_benchmark->requested_target_count = recipe_session->requested_target_count;
+        out_benchmark->verified_target_count = recipe_session->verified_target_count;
 
         *out_eval = {};
         out_eval->recipe_nll = recipe_score.total_nll / static_cast<double>(recipe_score.token_count);
         out_eval->recipe_ppl = recipe_score.ppl;
+        out_eval->recipe_ppl_uncertainty = recipe_score.ppl_uncertainty;
         out_eval->recipe_eval_ms = recipe_score.eval_ms;
         out_eval->recipe_vram_peak_mb = recipe_score.vram_peak_mb;
         out_eval->recipe_vram_allocated_mb = recipe_score.vram_allocated_mb;
@@ -1888,6 +2252,14 @@ int32_t ms_runtime_eval_recipe_standard_single(
                 out_task_results,
                 task_result_capacity,
                 out_task_result_count)) {
+            return -1;
+        }
+        if (!write_standard_eval_sample_audits(
+                nullptr,
+                recipe_standard_scores,
+                out_sample_audits,
+                sample_audit_capacity,
+                out_sample_audit_count)) {
             return -1;
         }
         return 0;

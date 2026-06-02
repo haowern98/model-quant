@@ -1,6 +1,4 @@
 import { Fragment } from "react";
-import { LatencyTable } from "./LatencyTable";
-import { VRAMChart } from "./VRAMChart";
 import { SaveOrDiscard } from "./SaveOrDiscard";
 import type { BenchmarkResult, RuntimeBenchmark } from "../../types";
 
@@ -39,19 +37,44 @@ function formatTps(value: number, digits = 1): string {
   return `${value.toFixed(digits)} t/s`;
 }
 
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatSignedPercent(value: number): string {
-  const percent = value * 100;
-  const sign = percent > 0 ? "+" : "";
-  return `${sign}${percent.toFixed(1)}%`;
-}
-
 function formatSignedNumber(value: number, digits = 3): string {
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(digits)}`;
+}
+
+function formatMetricValue(value: number): string {
+  return value.toFixed(3);
+}
+
+function formatPpl(value: number, uncertainty?: number | null): string {
+  if (
+    uncertainty === null ||
+    uncertainty === undefined ||
+    !Number.isFinite(uncertainty) ||
+    uncertainty <= 0
+  ) {
+    return value.toFixed(3);
+  }
+  return `${value.toFixed(3)} +/- ${uncertainty.toFixed(3)}`;
+}
+
+function formatMetricDelta(value: number | null): string {
+  if (value === null) return "-";
+  return formatSignedNumber(value, 3);
+}
+
+function formatStdErr(value: number, sampleCount: number): string {
+  if (sampleCount <= 0) return "-";
+  const variance = Math.max(0, (value * (1 - value)) / sampleCount);
+  return Math.sqrt(variance).toFixed(3);
+}
+
+function choiceLabel(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+function metricForTask(_task: string): string {
+  return "acc_norm";
 }
 
 function runtimeElapsed(result: BenchmarkResult): number {
@@ -73,9 +96,7 @@ function recipeAsRuntime(result: BenchmarkResult): RuntimeBenchmark {
   };
 }
 
-function RuntimeComparison({ result }: { result: BenchmarkResult }) {
-  if (!result.baselineBenchmark) return null;
-
+function RuntimeSection({ result }: { result: BenchmarkResult }) {
   const baseline = result.baselineBenchmark;
   const recipe = recipeAsRuntime(result);
   const recipeDiskMb =
@@ -83,197 +104,359 @@ function RuntimeComparison({ result }: { result: BenchmarkResult }) {
       ? result.convertedBytesAfter / (1024 * 1024)
       : result.diskSizeMb;
 
-  const rows = [
-    [
-      "Prompt eval",
-      formatTps(baseline.promptEvalTps, 0),
-      formatTps(recipe.promptEvalTps, 0),
-    ],
-    [
-      "Token gen",
-      formatTps(baseline.tokenGenTps),
-      formatTps(recipe.tokenGenTps),
-    ],
-    [
-      "TTFT",
-      `${baseline.ttftMs.toFixed(0)} ms`,
-      `${recipe.ttftMs.toFixed(0)} ms`,
-    ],
-    ["Load", formatSeconds(baseline.loadMs), formatSeconds(recipe.loadMs)],
-    [
-      "Total elapsed",
-      formatSeconds(baseline.elapsedMs),
-      formatSeconds(recipe.elapsedMs),
-    ],
-    [
-      "Tensors",
-      baseline.modelTensorCount?.toString() ?? "-",
-      recipe.modelTensorCount?.toString() ?? "-",
-    ],
-    [
-      "Peak alloc",
-      `${baseline.vramPeakMb.toFixed(0)} MB`,
-      `${recipe.vramPeakMb.toFixed(0)} MB`,
-    ],
-    [
-      "Working set",
-      `${baseline.vramAllocatedMb.toFixed(0)} MB`,
-      `${recipe.vramAllocatedMb.toFixed(0)} MB`,
-    ],
-    [
-      "Disk size",
-      `${result.diskSizeMb.toFixed(0)} MB`,
-      `${recipeDiskMb.toFixed(0)} MB`,
-    ],
+  const singleRows = [
+    ["Prompt eval", formatTps(recipe.promptEvalTps, 0)],
+    ["Token gen", formatTps(recipe.tokenGenTps)],
+    ["TTFT", `${recipe.ttftMs.toFixed(0)} ms`],
+    ["Load", formatSeconds(recipe.loadMs)],
+    ["Total elapsed", formatSeconds(recipe.elapsedMs)],
+    ["Tensors", recipe.modelTensorCount?.toString() ?? "-"],
+    ["Peak alloc", `${recipe.vramPeakMb.toFixed(0)} MB`],
+    ["Working set", `${recipe.vramAllocatedMb.toFixed(0)} MB`],
+    ["Disk size", `${recipeDiskMb.toFixed(0)} MB`],
   ];
+
+  const compareRows = baseline
+    ? [
+        [
+          "Prompt eval",
+          formatTps(baseline.promptEvalTps, 0),
+          formatTps(recipe.promptEvalTps, 0),
+        ],
+        [
+          "Token gen",
+          formatTps(baseline.tokenGenTps),
+          formatTps(recipe.tokenGenTps),
+        ],
+        [
+          "TTFT",
+          `${baseline.ttftMs.toFixed(0)} ms`,
+          `${recipe.ttftMs.toFixed(0)} ms`,
+        ],
+        ["Load", formatSeconds(baseline.loadMs), formatSeconds(recipe.loadMs)],
+        [
+          "Total elapsed",
+          formatSeconds(baseline.elapsedMs),
+          formatSeconds(recipe.elapsedMs),
+        ],
+        [
+          "Tensors",
+          baseline.modelTensorCount?.toString() ?? "-",
+          recipe.modelTensorCount?.toString() ?? "-",
+        ],
+        [
+          "Peak alloc",
+          `${baseline.vramPeakMb.toFixed(0)} MB`,
+          `${recipe.vramPeakMb.toFixed(0)} MB`,
+        ],
+        [
+          "Working set",
+          `${baseline.vramAllocatedMb.toFixed(0)} MB`,
+          `${recipe.vramAllocatedMb.toFixed(0)} MB`,
+        ],
+        [
+          "Disk size",
+          `${result.diskSizeMb.toFixed(0)} MB`,
+          `${recipeDiskMb.toFixed(0)} MB`,
+        ],
+      ]
+    : [];
 
   return (
     <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
       <h3 className="font-semibold text-text-muted uppercase tracking-wider mb-2">
-        Runtime Compare
+        {baseline ? "Runtime Compare" : "Runtime"}
       </h3>
-      <div className="grid grid-cols-[1fr_96px_96px] gap-x-4 gap-y-1">
-        <span />
-        <span className="text-right text-text-muted uppercase tracking-wider">
-          Baseline
-        </span>
-        <span className="text-right text-text-muted uppercase tracking-wider">
-          Recipe
-        </span>
-        {rows.map(([label, baseValue, recipeValue]) => (
-          <Fragment key={label}>
-            <span className="text-text-muted">{label}</span>
-            <span className="text-right font-mono text-text-primary">
-              {baseValue}
-            </span>
-            <span className="text-right font-mono text-text-primary">
-              {recipeValue}
-            </span>
-          </Fragment>
-        ))}
+      {baseline ? (
+        <div className="grid grid-cols-[1fr_96px_96px] gap-x-4 gap-y-1">
+          <span />
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Baseline
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Recipe
+          </span>
+          {compareRows.map(([label, baseValue, recipeValue]) => (
+            <Fragment key={label}>
+              <span className="text-text-muted">{label}</span>
+              <span className="text-right font-mono text-text-primary">
+                {baseValue}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                {recipeValue}
+              </span>
+            </Fragment>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          {singleRows.map(([label, value]) => (
+            <Fragment key={label}>
+              <span className="text-text-muted">{label}</span>
+              <span className="text-right font-mono text-text-primary">
+                {value}
+              </span>
+            </Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultsTable({ result }: { result: BenchmarkResult }) {
+  const standard = result.standardEval;
+  if (!standard || standard.baselineAccuracy !== null) return null;
+
+  return (
+    <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+      <h3 className="font-semibold text-text-muted uppercase tracking-wider mb-2">
+        Results
+      </h3>
+
+      <div className="overflow-x-auto">
+        <div className="grid min-w-[560px] grid-cols-[minmax(220px,1fr)_72px_56px_72px_72px] gap-x-4 gap-y-1">
+          <span className="text-text-muted uppercase tracking-wider">Task</span>
+          <span className="text-text-muted uppercase tracking-wider">
+            Metric
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            N-Shot
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Value
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Stderr
+          </span>
+
+          {standard.tasks.map((task) => {
+            const metric = metricForTask(task.task);
+            return (
+              <Fragment key={task.task}>
+                <span className="text-text-muted truncate" title={task.task}>
+                  {task.task}
+                </span>
+                <span className="font-mono text-text-primary">{metric}</span>
+                <span className="text-right font-mono text-text-primary">
+                  0
+                </span>
+                <span className="text-right font-mono text-text-primary">
+                  {formatMetricValue(task.recipeAccuracy)}
+                </span>
+                <span className="text-right font-mono text-text-primary">
+                  {formatStdErr(task.recipeAccuracy, task.sampleCount)}
+                </span>
+              </Fragment>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-function StandardEvalTable({ result }: { result: BenchmarkResult }) {
+function PairedCompareTable({ result }: { result: BenchmarkResult }) {
   const standard = result.standardEval;
-  if (!standard) return null;
-
-  const hasBaseline = standard.baselineAccuracy !== null;
+  if (!standard || standard.baselineAccuracy === null) return null;
 
   return (
     <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-text-muted uppercase tracking-wider">
-          Standard Eval
-        </h3>
-        <span className="font-mono text-text-primary">
-          {hasBaseline && standard.accuracyDelta !== null
-            ? `${formatPercent(standard.recipeAccuracy)} (${formatSignedPercent(
-                standard.accuracyDelta,
-              )})`
-            : formatPercent(standard.recipeAccuracy)}
-        </span>
-      </div>
+      <h3 className="font-semibold text-text-muted uppercase tracking-wider mb-2">
+        Paired Compare
+      </h3>
 
-      <div
-        className={`grid gap-x-4 gap-y-1 ${
-          hasBaseline
-            ? "grid-cols-[minmax(160px,1fr)_48px_72px_72px_72px_88px_88px]"
-            : "grid-cols-[minmax(160px,1fr)_48px_72px_88px]"
-        }`}
-      >
-        <span className="text-text-muted uppercase tracking-wider">Task</span>
-        <span className="text-right text-text-muted uppercase tracking-wider">
-          N
-        </span>
-        {hasBaseline && (
+      <div className="overflow-x-auto">
+        <div className="grid min-w-[1220px] grid-cols-[minmax(220px,1fr)_72px_56px_72px_72px_72px_160px_170px_96px_104px] gap-x-4 gap-y-1">
+          <span className="text-text-muted uppercase tracking-wider">Task</span>
+          <span className="text-text-muted uppercase tracking-wider">
+            Metric
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            N-Shot
+          </span>
           <span className="text-right text-text-muted uppercase tracking-wider">
             Base
           </span>
-        )}
-        <span className="text-right text-text-muted uppercase tracking-wider">
-          Recipe
-        </span>
-        {hasBaseline && (
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Recipe
+          </span>
           <span className="text-right text-text-muted uppercase tracking-wider">
             Delta
           </span>
-        )}
-        {hasBaseline && (
           <span className="text-right text-text-muted uppercase tracking-wider">
-            Flips
+            Lost Correct Answers
           </span>
-        )}
-        <span className="text-right text-text-muted uppercase tracking-wider">
-          Margin
-        </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Gained Correct Answers
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Base Stderr
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Recipe Stderr
+          </span>
 
-        {standard.tasks.map((task) => (
-          <Fragment key={task.task}>
-            <span className="text-text-muted truncate" title={task.task}>
-              {task.task}
-            </span>
-            <span className="text-right font-mono text-text-primary">
-              {task.sampleCount}
-            </span>
-            {hasBaseline && (
+          {standard.tasks.map((task) => (
+            <Fragment key={task.task}>
+              <span className="text-text-muted truncate" title={task.task}>
+                {task.task}
+              </span>
+              <span className="font-mono text-text-primary">
+                {metricForTask(task.task)}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                0
+              </span>
               <span className="text-right font-mono text-text-primary">
                 {task.baselineAccuracy === null
                   ? "-"
-                  : formatPercent(task.baselineAccuracy)}
+                  : formatMetricValue(task.baselineAccuracy)}
               </span>
-            )}
-            <span className="text-right font-mono text-text-primary">
-              {formatPercent(task.recipeAccuracy)}
-            </span>
-            {hasBaseline && (
               <span className="text-right font-mono text-text-primary">
-                {task.accuracyDelta === null
+                {formatMetricValue(task.recipeAccuracy)}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                {formatMetricDelta(task.accuracyDelta)}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                {task.correctToWrongCount}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                {task.wrongToCorrectCount}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                {task.baselineAccuracy === null
                   ? "-"
-                  : formatSignedPercent(task.accuracyDelta)}
+                  : formatStdErr(task.baselineAccuracy, task.sampleCount)}
               </span>
-            )}
-            {hasBaseline && (
-              <span
-                className="text-right font-mono text-text-primary"
-                title="correct-to-wrong / wrong-to-correct"
-              >
-                {task.correctToWrongCount}/{task.wrongToCorrectCount}
+              <span className="text-right font-mono text-text-primary">
+                {formatStdErr(task.recipeAccuracy, task.sampleCount)}
               </span>
-            )}
-            <span className="text-right font-mono text-text-primary">
-              {hasBaseline && task.marginDelta !== null
-                ? formatSignedNumber(task.marginDelta)
-                : task.recipeAvgMargin.toFixed(3)}
-            </span>
-          </Fragment>
-        ))}
-      </div>
+            </Fragment>
+          ))}
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 mt-3 pt-2 border-t border-border-default">
-        <span className="text-text-muted">Eval samples</span>
-        <span className="text-right font-mono text-text-primary">
-          {standard.sampleCount}
-        </span>
-        <span className="text-text-muted">Tasks</span>
-        <span className="text-right font-mono text-text-primary">
-          {standard.taskCount}
-        </span>
-        {hasBaseline && (
-          <>
-            <span className="text-text-muted">Correct to wrong</span>
-            <span className="text-right font-mono text-text-primary">
-              {standard.correctToWrongCount}
-            </span>
-            <span className="text-text-muted">Wrong to correct</span>
-            <span className="text-right font-mono text-text-primary">
-              {standard.wrongToCorrectCount}
-            </span>
-          </>
-        )}
+          <span className="text-text-primary font-semibold uppercase">
+            Total
+          </span>
+          <span className="font-mono text-text-primary">mixed</span>
+          <span className="text-right font-mono text-text-primary">0</span>
+          <span className="text-right font-mono text-text-primary">
+            {formatMetricValue(standard.baselineAccuracy)}
+          </span>
+          <span className="text-right font-mono text-text-primary">
+            {formatMetricValue(standard.recipeAccuracy)}
+          </span>
+          <span className="text-right font-mono text-text-primary">
+            {formatMetricDelta(standard.accuracyDelta)}
+          </span>
+          <span className="text-right font-mono text-text-primary">
+            {standard.correctToWrongCount}
+          </span>
+          <span className="text-right font-mono text-text-primary">
+            {standard.wrongToCorrectCount}
+          </span>
+          <span className="text-right font-mono text-text-primary">-</span>
+          <span className="text-right font-mono text-text-primary">-</span>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function StandardEvalSampleAudit({ result }: { result: BenchmarkResult }) {
+  const audits = result.standardEval?.sampleAudits ?? [];
+  if (audits.length === 0) return null;
+
+  return (
+    <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+      <details>
+        <summary className="cursor-pointer font-semibold text-text-muted uppercase tracking-wider">
+          Sample Audit ({audits.length})
+        </summary>
+        <div className="mt-3 space-y-4">
+          {audits.map((audit) => (
+            <div
+              key={`${audit.sampleIndex}-${audit.task}-${audit.docId}`}
+              className="border-t border-border-default pt-3 first:border-t-0 first:pt-0"
+            >
+              <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+                <span className="text-text-muted truncate">
+                  {audit.task} / {audit.docId}
+                </span>
+                <span className="font-mono text-text-primary uppercase">
+                  {audit.flipType.replaceAll("_", " ")}
+                </span>
+                <span className="text-text-muted">
+                  Gold {choiceLabel(audit.goldIndex)}
+                </span>
+                <span className="font-mono text-text-primary">
+                  {audit.baselinePredictionIndex !== null
+                    ? `Base ${choiceLabel(audit.baselinePredictionIndex)} / `
+                    : ""}
+                  Recipe {choiceLabel(audit.recipePredictionIndex)}
+                </span>
+              </div>
+
+              <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded border border-border-default bg-bg-base p-2 font-mono text-[11px] text-text-muted">
+                {audit.prompt}
+              </pre>
+
+              <div className="mt-2 grid grid-cols-[32px_minmax(120px,1fr)_72px_88px_88px_88px_88px] gap-x-3 gap-y-1">
+                <span className="text-text-muted uppercase">#</span>
+                <span className="text-text-muted uppercase">Continuation</span>
+                <span className="text-right text-text-muted uppercase">
+                  Denom
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Base NLL
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Base Score
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Recipe NLL
+                </span>
+                <span className="text-right text-text-muted uppercase">
+                  Recipe Score
+                </span>
+                {audit.choices.map((choice) => (
+                  <Fragment key={choice.index}>
+                    <span className="font-mono text-text-primary">
+                      {choiceLabel(choice.index)}
+                    </span>
+                    <span
+                      className="font-mono text-text-primary truncate"
+                      title={choice.continuation}
+                    >
+                      {JSON.stringify(choice.continuation)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.denominator.toFixed(0)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.baselineNll === null
+                        ? "-"
+                        : choice.baselineNll.toFixed(3)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.baselineScore === null
+                        ? "-"
+                        : choice.baselineScore.toFixed(3)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.recipeNll.toFixed(3)}
+                    </span>
+                    <span className="text-right font-mono text-text-primary">
+                      {choice.recipeScore.toFixed(3)}
+                    </span>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
@@ -293,14 +476,15 @@ export function TestResultsModal({
     result.copiedTensorCount > 0 ||
     result.convertedTensorCount > 0 ||
     result.convertedBytesBefore > 0 ||
-    result.convertedBytesAfter > 0;
+    result.convertedBytesAfter > 0 ||
+    result.requestedTargetCount > 0;
   const quality = result.qualityEval;
   const qualityHasBaseline =
     quality?.baselinePpl !== null && quality?.baselinePpl !== undefined;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-bg-surface border border-border-default rounded-lg shadow-2xl w-[720px] max-w-[92vw] max-h-[90vh] overflow-y-auto">
+      <div className="bg-bg-surface border border-border-default rounded-lg shadow-2xl w-[1080px] max-w-[92vw] max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h2 className="font-heading text-sm font-semibold text-text-primary uppercase tracking-wider">
             Benchmark Results
@@ -330,6 +514,9 @@ export function TestResultsModal({
 
         {hasTensorStats && (
           <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+            <h3 className="font-semibold text-text-muted uppercase tracking-wider mb-2">
+              Summary
+            </h3>
             <div className="grid grid-cols-2 gap-x-6 gap-y-1">
               <span className="text-text-muted">Copied tensors</span>
               <span className="text-right font-mono text-text-primary">
@@ -347,6 +534,14 @@ export function TestResultsModal({
               <span className="text-right font-mono text-text-primary">
                 {formatBytes(result.convertedBytesAfter)}
               </span>
+              {result.requestedTargetCount > 0 && (
+                <>
+                  <span className="text-text-muted">Verified targets</span>
+                  <span className="text-right font-mono text-text-primary">
+                    {result.verifiedTargetCount}/{result.requestedTargetCount}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -368,14 +563,25 @@ export function TestResultsModal({
                 <>
                   <span className="text-text-muted">Baseline PPL</span>
                   <span className="text-right font-mono text-text-primary">
-                    {quality.baselinePpl!.toFixed(3)}
+                    {formatPpl(
+                      quality.baselinePpl!,
+                      quality.baselinePplUncertainty,
+                    )}
                   </span>
                 </>
               )}
               <span className="text-text-muted">Recipe PPL</span>
               <span className="text-right font-mono text-text-primary">
-                {quality.recipePpl.toFixed(3)}
+                {formatPpl(quality.recipePpl, quality.recipePplUncertainty)}
               </span>
+              {qualityHasBaseline && (
+                <>
+                  <span className="text-text-muted">Baseline NLL</span>
+                  <span className="text-right font-mono text-text-primary">
+                    {quality.baselineNll!.toFixed(3)}
+                  </span>
+                </>
+              )}
               <span className="text-text-muted">Recipe NLL</span>
               <span className="text-right font-mono text-text-primary">
                 {quality.recipeNll.toFixed(3)}
@@ -392,7 +598,7 @@ export function TestResultsModal({
                   </span>
                 </>
               )}
-              <span className="text-text-muted">Eval tokens</span>
+              <span className="text-text-muted">llama.cpp PPL tokens</span>
               <span className="text-right font-mono text-text-primary">
                 {quality.evalTokenCount}
               </span>
@@ -404,16 +610,10 @@ export function TestResultsModal({
           </div>
         )}
 
-        <StandardEvalTable result={result} />
-
-        {result.baselineBenchmark ? (
-          <RuntimeComparison result={result} />
-        ) : (
-          <div className="p-4 grid grid-cols-2 gap-6">
-            <LatencyTable result={result} />
-            <VRAMChart result={result} />
-          </div>
-        )}
+        <ResultsTable result={result} />
+        <PairedCompareTable result={result} />
+        <StandardEvalSampleAudit result={result} />
+        <RuntimeSection result={result} />
 
         <div className="px-4 pb-4">
           <SaveOrDiscard

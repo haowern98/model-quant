@@ -7,6 +7,37 @@ import type {
 import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
+  const allowedTargetQuants: QuantType[] = [
+    "F32",
+    "BF16",
+    "F16",
+    "Q8_0",
+    "Q6_K",
+    "Q5_K",
+    "Q4_K",
+    "Q3_K",
+    "Q2_K",
+  ];
+  const bf16AllowedPreflight = {
+    canQuantize: true,
+    allowedTargetQuants: allowedTargetQuants.filter((q) => q !== "F32"),
+    blockedReason: null,
+  };
+  const q8AllowedPreflight = {
+    canQuantize: true,
+    allowedTargetQuants: ["Q8_0", "Q6_K", "Q5_K", "Q4_K", "Q3_K", "Q2_K"] satisfies QuantType[],
+    blockedReason: null,
+  };
+  const q8OnlyPreflight = {
+    canQuantize: true,
+    allowedTargetQuants: ["Q8_0"] satisfies QuantType[],
+    blockedReason: null,
+  };
+  const blockedNormPreflight = {
+    canQuantize: false,
+    allowedTargetQuants: [],
+    blockedReason: "1D tensors are not quantizable weight matrices",
+  };
   const mockModel: ModelInfo = {
     metadata: {
       name: "Mock-Llama-3-8B",
@@ -18,85 +49,104 @@ export function createMockBridge() {
       {
         name: "tok_embeddings.weight",
         shape: [128256, 4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 262_000_000,
         layerIndex: -1,
         layerGroup: "embedding",
+        quantPreflight: bf16AllowedPreflight,
       },
       {
         name: "layers.0.attention.wq.weight",
         shape: [4096, 4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "Q8_0",
         sizeBytes: 80_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: q8AllowedPreflight,
       },
       {
         name: "layers.0.attention.wk.weight",
         shape: [4096, 1024],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 20_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
       },
       {
         name: "layers.0.attention.wv.weight",
         shape: [4096, 1024],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 20_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
       },
       {
         name: "layers.0.attention.wo.weight",
         shape: [4096, 4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 80_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
+      },
+      {
+        name: "layers.0.attention.short.weight",
+        shape: [128, 4096],
+        currentQuant: "Q8_0",
+        sizeBytes: 2_000_000,
+        layerIndex: 0,
+        layerGroup: "attention",
+        quantPreflight: q8OnlyPreflight,
       },
       {
         name: "layers.0.feed_forward.w1.weight",
         shape: [14336, 4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 117_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
       },
       {
         name: "layers.0.feed_forward.w2.weight",
         shape: [4096, 14336],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 117_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
       },
       {
         name: "layers.0.feed_forward.w3.weight",
         shape: [14336, 4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 117_000_000,
         layerIndex: 0,
         layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
       },
       {
         name: "output_norm.weight",
         shape: [4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "F32",
         sizeBytes: 16_000,
         layerIndex: -1,
         layerGroup: "output_norm",
+        quantPreflight: blockedNormPreflight,
       },
       {
         name: "output.weight",
         shape: [128256, 4096],
-        currentQuant: "Q4_K_M",
+        currentQuant: "BF16",
         sizeBytes: 262_000_000,
         layerIndex: -1,
         layerGroup: "output",
+        quantPreflight: bf16AllowedPreflight,
       },
     ],
-    currentUniformQuant: "Q4_K_M",
+    currentUniformQuant: "BF16",
     totalSizeBytes: 4_920_000_000,
   };
 
@@ -180,6 +230,8 @@ export function createMockBridge() {
           convertedTensorCount: 2,
           convertedBytesBefore: 160_000_000,
           convertedBytesAfter: 80_000_000,
+          requestedTargetCount: 2,
+          verifiedTargetCount: 2,
           baselineBenchmark: isCompare
             ? {
                 promptEvalTps: 1180,
@@ -197,11 +249,13 @@ export function createMockBridge() {
           qualityEval: {
             baselineNll: isCompare ? 1.92 : null,
             baselinePpl: isCompare ? 6.82 : null,
+            baselinePplUncertainty: isCompare ? 0.08 : null,
             baselineEvalMs: isCompare ? 920 : null,
             baselineVramPeakMb: isCompare ? 7140 : null,
             baselineVramAllocatedMb: isCompare ? 7040 : null,
             recipeNll: 1.96,
             recipePpl: 7.1,
+            recipePplUncertainty: 0.09,
             recipeEvalMs: 860,
             recipeVramPeakMb: 5820,
             recipeVramAllocatedMb: 5760,

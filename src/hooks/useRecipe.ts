@@ -6,7 +6,7 @@ import { assignQuant as assignQuantCmd, assignAll as assignAllCmd, assignByPatte
 export function useRecipe() {
   const [recipe, setRecipe] = useState<RecipeState | null>(null);
 
-  const initRecipe = useCallback((modelPath: string, tensors: { name: string; currentQuant: string }[]) => {
+  const resetRecipeForModel = useCallback((modelPath: string, tensors: { name: string; currentQuant: string }[]) => {
     setRecipe({
       id: `${Date.now()}`,
       baseModel: modelPath,
@@ -49,5 +49,5 @@ export function useRecipe() {
     return map;
   }, [recipe]);
 
-  return { recipe, initRecipe, setRecipeState, assignQuant, assignAll, assignByPattern, setProfile, getAssignments };
+  return { recipe, resetRecipeForModel, setRecipeState, assignQuant, assignAll, assignByPattern, setProfile, getAssignments };
 }
