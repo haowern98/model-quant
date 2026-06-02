@@ -941,107 +941,86 @@ double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token 
     return log_sum_exp - static_cast<double>(logits[target]);
 }
 
-double score_continuation_nll(
-    ModelSession & session,
-    const char * prompt,
-    const char * continuation,
-    uint64_t * out_token_count) {
-    if (prompt == nullptr || prompt[0] == '\0') {
-        throw std::runtime_error("standard eval sample prompt is empty");
-    }
-    if (continuation == nullptr || continuation[0] == '\0') {
-        throw std::runtime_error("standard eval sample choice is empty");
+size_t find_common_token_prefix(const std::vector<std::vector<llama_token>> & sequences) {
+    if (sequences.empty()) {
+        return 0;
     }
 
+    size_t min_len = sequences.front().size();
+    for (const std::vector<llama_token> & sequence : sequences) {
+        min_len = std::min(min_len, sequence.size());
+    }
+
+    size_t prefix = 0;
+    for (; prefix < min_len; ++prefix) {
+        const llama_token token = sequences.front()[prefix];
+        bool all_same = true;
+        for (size_t i = 1; i < sequences.size(); ++i) {
+            if (sequences[i][prefix] != token) {
+                all_same = false;
+                break;
+            }
+        }
+        if (!all_same) {
+            break;
+        }
+    }
+
+    return prefix;
+}
+
+double llama_mcq_choice_score(double nll, uint64_t scored_token_count) {
+    if (scored_token_count == 0) {
+        throw std::runtime_error("standard eval choice produced no scored tokens");
+    }
+    return -nll / static_cast<double>(scored_token_count);
+}
+
+double score_sequence_suffix_nll(
+    ModelSession & session,
+    const std::vector<llama_token> & sequence,
+    size_t first_scored_token,
+    uint64_t * out_token_count) {
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t n_vocab = llama_vocab_n_tokens(vocab);
     if (n_vocab <= 0) {
         throw std::runtime_error("model vocabulary is empty");
     }
-
-    const int32_t prompt_len = static_cast<int32_t>(std::strlen(prompt));
-    int32_t prompt_token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
-    if (prompt_token_count == INT32_MIN) {
-        throw std::runtime_error("standard eval prompt tokenization overflowed");
+    if (sequence.size() < 2 || first_scored_token == 0 || first_scored_token >= sequence.size()) {
+        throw std::runtime_error("standard eval choice produced no scored tokens");
     }
-    if (prompt_token_count < 0) {
-        prompt_token_count = -prompt_token_count;
-    }
-    if (prompt_token_count <= 0) {
-        throw std::runtime_error("standard eval prompt produced no tokens");
-    }
-
-    std::vector<llama_token> prompt_tokens(static_cast<size_t>(prompt_token_count));
-    const int32_t actual_prompt_tokens = llama_tokenize(
-        vocab,
-        prompt,
-        prompt_len,
-        prompt_tokens.data(),
-        prompt_token_count,
-        true,
-        true);
-    if (actual_prompt_tokens <= 0) {
-        throw std::runtime_error("failed to tokenize standard eval prompt");
-    }
-    prompt_tokens.resize(static_cast<size_t>(actual_prompt_tokens));
-
-    const int32_t continuation_len = static_cast<int32_t>(std::strlen(continuation));
-    int32_t continuation_token_count = llama_tokenize(
-        vocab,
-        continuation,
-        continuation_len,
-        nullptr,
-        0,
-        false,
-        true);
-    if (continuation_token_count == INT32_MIN) {
-        throw std::runtime_error("standard eval choice tokenization overflowed");
-    }
-    if (continuation_token_count < 0) {
-        continuation_token_count = -continuation_token_count;
-    }
-    if (continuation_token_count <= 0) {
-        throw std::runtime_error("standard eval choice produced no tokens");
-    }
-
-    std::vector<llama_token> continuation_tokens(static_cast<size_t>(continuation_token_count));
-    const int32_t actual_continuation_tokens = llama_tokenize(
-        vocab,
-        continuation,
-        continuation_len,
-        continuation_tokens.data(),
-        continuation_token_count,
-        false,
-        true);
-    if (actual_continuation_tokens <= 0) {
-        throw std::runtime_error("failed to tokenize standard eval choice");
-    }
-    continuation_tokens.resize(static_cast<size_t>(actual_continuation_tokens));
 
     reset_session_context(session);
-    const int prompt_res = llama_decode(
+    const int prefix_res = llama_decode(
         session.ctx.get(),
-        llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size())));
-    if (prompt_res != 0) {
-        throw std::runtime_error("failed to decode standard eval prompt");
+        llama_batch_get_one(
+            const_cast<llama_token *>(sequence.data()),
+            static_cast<int32_t>(first_scored_token)));
+    if (prefix_res != 0) {
+        throw std::runtime_error("failed to decode standard eval common prefix");
     }
     llama_synchronize(session.ctx.get());
 
     double nll = 0.0;
-    for (llama_token token : continuation_tokens) {
+    uint64_t scored_tokens = 0;
+    for (size_t target_index = first_scored_token; target_index < sequence.size(); ++target_index) {
         const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
-        nll += token_nll_from_logits(logits, n_vocab, token);
+        nll += token_nll_from_logits(logits, n_vocab, sequence[target_index]);
+        scored_tokens += 1;
 
-        llama_batch batch = llama_batch_get_one(&token, 1);
-        const int decode_result = llama_decode(session.ctx.get(), batch);
-        if (decode_result != 0) {
-            throw std::runtime_error("failed to decode standard eval choice token");
+        if (target_index + 1 < sequence.size()) {
+            llama_token token = sequence[target_index];
+            llama_batch batch = llama_batch_get_one(&token, 1);
+            const int decode_result = llama_decode(session.ctx.get(), batch);
+            if (decode_result != 0) {
+                throw std::runtime_error("failed to decode standard eval choice token");
+            }
+            llama_synchronize(session.ctx.get());
         }
-        llama_synchronize(session.ctx.get());
     }
 
     if (out_token_count != nullptr) {
-        *out_token_count = static_cast<uint64_t>(continuation_tokens.size());
+        *out_token_count = scored_tokens;
     }
     session.vram.sample();
     return nll;
@@ -1078,23 +1057,39 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
         std::vector<double> choice_scores(static_cast<size_t>(sample.choice_count));
         std::vector<double> choice_nlls(static_cast<size_t>(sample.choice_count));
         std::vector<double> choice_denominators(static_cast<size_t>(sample.choice_count));
+        std::vector<std::vector<llama_token>> choice_token_sequences;
+        choice_token_sequences.reserve(static_cast<size_t>(sample.choice_count));
+
+        const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
+        for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
+            if (sample.choices[choice_index] == nullptr || sample.choices[choice_index][0] == '\0') {
+                throw std::runtime_error(std::string("standard eval sample choice is empty for task: ") + sample.task);
+            }
+            std::string candidate = sample.prompt;
+            candidate += sample.choices[choice_index];
+            std::vector<llama_token> tokens = tokenize_text(vocab, candidate.c_str());
+            if (tokens.size() < 2) {
+                throw std::runtime_error(std::string("standard eval sample choice produced too few tokens for task: ") + sample.task);
+            }
+            choice_token_sequences.push_back(std::move(tokens));
+        }
+
+        const size_t common_prefix = find_common_token_prefix(choice_token_sequences);
+        if (common_prefix == 0) {
+            throw std::runtime_error(std::string("standard eval choices share no prompt prefix for task: ") + sample.task);
+        }
+
         for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
             uint64_t token_count = 0;
-            const double nll = score_continuation_nll(
+            const double nll = score_sequence_suffix_nll(
                 session,
-                sample.prompt,
-                sample.choices[choice_index],
+                choice_token_sequences[static_cast<size_t>(choice_index)],
+                common_prefix,
                 &token_count);
-            const uint64_t choice_length = sample.choice_lengths[static_cast<size_t>(choice_index)];
-            if (sample.normalize_by_choice_length != 0 && choice_length == 0) {
-                throw std::runtime_error(std::string("standard eval choice length is zero for task: ") + sample.task);
-            }
-            const double denominator = sample.normalize_by_choice_length != 0
-                ? static_cast<double>(choice_length)
-                : 1.0;
+            const double denominator = static_cast<double>(token_count);
             choice_denominators[static_cast<size_t>(choice_index)] = denominator;
             choice_nlls[static_cast<size_t>(choice_index)] = nll;
-            choice_scores[static_cast<size_t>(choice_index)] = -nll / denominator;
+            choice_scores[static_cast<size_t>(choice_index)] = llama_mcq_choice_score(nll, token_count);
         }
 
         uint32_t best_index = 0;

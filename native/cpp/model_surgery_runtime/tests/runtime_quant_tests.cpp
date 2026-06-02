@@ -153,6 +153,22 @@ void test_llama_ppl_uncertainty_matches_upstream_formula() {
     assert(std::abs(estimate - expected) < 1e-12);
 }
 
+void test_llama_mcq_common_prefix_stops_at_first_different_token() {
+    const std::vector<std::vector<llama_token>> sequences = {
+        {1, 7, 9, 10},
+        {1, 7, 11, 12},
+        {1, 7, 9, 13},
+    };
+
+    assert(find_common_token_prefix(sequences) == 2);
+}
+
+void test_llama_mcq_score_uses_token_average_logprob() {
+    const double score = llama_mcq_choice_score(12.0, 3);
+
+    assert(std::abs(score - -4.0) < 1e-12);
+}
+
 }
 
 int main() {
@@ -163,6 +179,8 @@ int main() {
     test_llama_ppl_chunks_score_second_half_of_complete_512_token_chunks();
     test_llama_ppl_chunks_require_at_least_two_complete_contexts();
     test_llama_ppl_uncertainty_matches_upstream_formula();
+    test_llama_mcq_common_prefix_stops_at_first_different_token();
+    test_llama_mcq_score_uses_token_average_logprob();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;
 }

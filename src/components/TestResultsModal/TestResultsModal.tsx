@@ -73,10 +73,7 @@ function choiceLabel(index: number): string {
   return String.fromCharCode(65 + index);
 }
 
-function metricForTask(task: string): string {
-  if (task.startsWith("mmlu_") || task === "truthfulqa_mc1") {
-    return "acc";
-  }
+function metricForTask(_task: string): string {
   return "acc_norm";
 }
 
