@@ -841,8 +841,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
 
 std::vector<llama_token> tokenize_text(
     const llama_vocab * vocab,
-    const char * text,
-    uint32_t max_eval_tokens) {
+    const char * text) {
     const int32_t text_len = static_cast<int32_t>(std::strlen(text));
     int32_t token_count = llama_tokenize(vocab, text, text_len, nullptr, 0, true, true);
     if (token_count == INT32_MIN) {
@@ -869,10 +868,41 @@ std::vector<llama_token> tokenize_text(
     }
 
     tokens.resize(static_cast<size_t>(actual_tokens));
-    if (max_eval_tokens > 0 && tokens.size() > max_eval_tokens) {
-        tokens.resize(static_cast<size_t>(max_eval_tokens));
-    }
     return tokens;
+}
+
+struct RollingPplWindow {
+    size_t begin = 0;
+    size_t target_begin = 0;
+    size_t end = 0;
+};
+
+std::vector<RollingPplWindow> build_rolling_ppl_windows(size_t token_count, uint32_t context_tokens) {
+    std::vector<RollingPplWindow> windows;
+    if (token_count < 2) {
+        return windows;
+    }
+
+    const size_t context = std::max<size_t>(2, context_tokens == 0 ? 128 : context_tokens);
+    const size_t stride = std::max<size_t>(1, context / 2);
+
+    size_t target_begin = 1;
+    while (target_begin < token_count) {
+        const size_t target_end = target_begin == 1
+            ? std::min(token_count, context)
+            : std::min(token_count, target_begin + stride);
+        const size_t begin = target_end > context ? target_end - context : 0;
+
+        windows.push_back(RollingPplWindow {
+            begin,
+            target_begin,
+            target_end,
+        });
+
+        target_begin = target_end;
+    }
+
+    return windows;
 }
 
 double token_nll_from_logits(const float * logits, int32_t n_vocab, llama_token target) {
@@ -1316,25 +1346,36 @@ PerplexityScore score_session_perplexity(
             continue;
         }
 
-        std::vector<llama_token> tokens = tokenize_text(vocab, text, eval_limit);
+        std::vector<llama_token> tokens = tokenize_text(vocab, text);
         if (tokens.size() < 2) {
             score.skipped_count += 1;
             continue;
         }
 
-        reset_session_context(session);
-        for (size_t token_index = 0; token_index + 1 < tokens.size(); ++token_index) {
-            llama_token token = tokens[token_index];
-            llama_batch batch = llama_batch_get_one(&token, 1);
-            const int decode_result = llama_decode(session.ctx.get(), batch);
-            if (decode_result != 0) {
-                throw std::runtime_error("failed to decode eval token");
-            }
-            llama_synchronize(session.ctx.get());
+        const std::vector<RollingPplWindow> windows = build_rolling_ppl_windows(tokens.size(), eval_limit);
+        if (windows.empty()) {
+            score.skipped_count += 1;
+            continue;
+        }
 
-            const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
-            score.total_nll += token_nll_from_logits(logits, n_vocab, tokens[token_index + 1]);
-            score.token_count += 1;
+        for (const RollingPplWindow & window : windows) {
+            reset_session_context(session);
+            for (size_t token_index = window.begin; token_index + 1 < window.end; ++token_index) {
+                llama_token token = tokens[token_index];
+                llama_batch batch = llama_batch_get_one(&token, 1);
+                const int decode_result = llama_decode(session.ctx.get(), batch);
+                if (decode_result != 0) {
+                    throw std::runtime_error("failed to decode eval token");
+                }
+                llama_synchronize(session.ctx.get());
+
+                const size_t target_index = token_index + 1;
+                if (target_index >= window.target_begin) {
+                    const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
+                    score.total_nll += token_nll_from_logits(logits, n_vocab, tokens[target_index]);
+                    score.token_count += 1;
+                }
+            }
         }
 
         score.sample_count += 1;

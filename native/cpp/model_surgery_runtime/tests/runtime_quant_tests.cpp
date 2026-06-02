@@ -121,6 +121,35 @@ void test_recipe_target_verification_reports_mismatch() {
     assert(verification.first_mismatch.find("token_embd.weight expected Q5_K, loaded Q8_0") != std::string::npos);
 }
 
+void test_rolling_ppl_windows_score_each_target_token_once() {
+    const std::vector<RollingPplWindow> windows = build_rolling_ppl_windows(269, 128);
+
+    assert(windows.size() == 4);
+
+    assert(windows[0].begin == 0);
+    assert(windows[0].target_begin == 1);
+    assert(windows[0].end == 128);
+
+    assert(windows[1].begin == 64);
+    assert(windows[1].target_begin == 128);
+    assert(windows[1].end == 192);
+
+    assert(windows[2].begin == 128);
+    assert(windows[2].target_begin == 192);
+    assert(windows[2].end == 256);
+
+    assert(windows[3].begin == 141);
+    assert(windows[3].target_begin == 256);
+    assert(windows[3].end == 269);
+
+    uint64_t scored_tokens = 0;
+    for (const RollingPplWindow & window : windows) {
+        scored_tokens += static_cast<uint64_t>(window.end - window.target_begin);
+    }
+
+    assert(scored_tokens == 268);
+}
+
 }
 
 int main() {
@@ -128,6 +157,7 @@ int main() {
     test_quantized_source_rows_can_decode_to_f32();
     test_recipe_target_verification_counts_matching_changed_targets();
     test_recipe_target_verification_reports_mismatch();
+    test_rolling_ppl_windows_score_each_target_token_once();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;
 }

@@ -578,7 +578,7 @@ export function TestResultsModal({
                   </span>
                 </>
               )}
-              <span className="text-text-muted">Eval tokens</span>
+              <span className="text-text-muted">Rolling PPL tokens</span>
               <span className="text-right font-mono text-text-primary">
                 {quality.evalTokenCount}
               </span>

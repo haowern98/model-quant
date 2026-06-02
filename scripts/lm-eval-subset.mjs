@@ -15,6 +15,69 @@ const DEFAULT_PPL_TEXTS = [
   "Truthfulness evaluations test whether a model avoids common misconceptions and misleading claims. These tasks are useful for detecting whether compression changes a model's preference between true and false answers.",
 ];
 
+const DEFAULT_EXTRA_PPL_TEXTS = [
+  "A quantization workbench should test more than one kind of text. Short technical notes measure whether a model can follow precise vocabulary, while ordinary explanatory prose checks whether common sentence structure remains predictable after tensor conversions.",
+  "When a model file is edited, the tensor data and the metadata must continue to agree. A reader should be able to inspect the file, reconstruct the shape of each tensor, and verify that the stored type matches the recipe that produced it.",
+  "A software release process often starts with a small local smoke test. The smoke test is not meant to prove every behavior, but it should catch obvious failures before a slower benchmark or a manual review consumes more time.",
+  "In a layered neural network, early tensors may influence broad token representations, while later tensors can affect narrower task decisions. A useful editor should make those structures visible instead of forcing users to reason from a flat list of names.",
+  "The laboratory report described a simple experiment with water, heat, and measurement error. The student repeated the procedure several times, recorded the observations in a table, and compared the results against the original hypothesis.",
+  "A documentation page should explain the behavior of a command without assuming the reader already knows the implementation. Good examples show the input, the expected output, and the reason a particular option would be selected.",
+  "Resource measurements can disagree when they describe different parts of a run. Disk size reflects serialized weights, allocated memory reflects loaded buffers, and peak memory can include temporary workspace used during conversion or evaluation.",
+  "A medical training question often includes age, symptoms, medications, and a small number of relevant findings. The model must identify which details are important and avoid treating every phrase as equally diagnostic.",
+  "In graph theory, a path connects vertices through a sequence of edges. Some graph problems have efficient algorithms, but others require searching a large space of possibilities and become impractical as the graph grows.",
+  "A careful benchmark should report the number of samples. A change of one correct answer has a very different meaning when the test contains twenty examples than when it contains thousands of examples.",
+  "The operator adjusted the machine, waited for the pressure to stabilize, and then copied the readings into the maintenance log. The pattern suggested that the sensor was working, but the calibration date still needed to be checked.",
+  "When users compare two model recipes, they usually care about tradeoffs. A smaller file is useful only if the quality loss, load time, and runtime behavior are acceptable for the workload they intend to run.",
+  "The history lesson described a treaty, the political conditions that preceded it, and the changes that followed. Understanding the passage required connecting dates and causes rather than memorizing a single isolated fact.",
+  "A command-line tool can be powerful, but it is easy to lose track of a long list of per-tensor overrides. A graphical table can show the current type, target type, estimated size, and invalid choices in one place.",
+  "The physics problem involved a cart moving across a table. After the push ended, friction continued to act opposite the direction of motion, so the cart slowed down until it finally came to rest.",
+  "A recipe editor should treat unchanged tensors differently from converted tensors. Reporting both counts helps the user understand whether a run copied most of the model or actually transformed the selected weights.",
+  "In a database migration, the safest plan is usually incremental. Each step should be reversible or easy to verify, and the final state should be checked against the schema that the application expects.",
+  "Some questions are easy because the answer is a familiar fact. Other questions are hard because every answer choice sounds plausible, and the model must prefer the continuation that best follows the prompt.",
+  "A rolling perplexity calculation scores long text in pieces. The context window moves forward through the passage, and only the new target tokens are counted for each window so that tokens are not scored twice.",
+  "The user interface should not hide uncertainty. If a recipe gains a few correct answers and loses a few others, the result should show both directions rather than pretending the change is a simple win or loss.",
+  "A parser for binary model files must be strict about offsets and sizes. If the reader accepts malformed data silently, later stages may fail in ways that are harder to diagnose than the original format error.",
+  "The biology passage explained that organisms respond to environmental pressure over many generations. Traits that improve survival can become more common, while traits that reduce survival may become less common.",
+  "A scheduling policy can reduce average waiting time for some jobs while increasing it for others. Evaluating the policy requires looking at the aggregate metric and also the individual cases that changed.",
+  "Local model users often choose a quantization level by trial and error. A tool that shows expected memory use and then validates the recipe with the actual runtime can make that process less fragile.",
+  "A security review asks what happens when an attacker briefly gains elevated access. Even a short window may be enough to modify files, install persistence, or change settings that survive a reboot.",
+  "The weather forecast described a low-pressure system moving through the region overnight. By morning, the sky was cloudy and rain had begun, which matched the expected pattern for that system.",
+  "In a compiler, the lexer groups characters into tokens, the parser builds a structure from those tokens, and later stages analyze or transform that structure before producing output.",
+  "A good diagnostic report separates evidence from interpretation. Raw counts, margins, and timing numbers should be visible, while labels such as low drift or high drift should be treated as summaries.",
+  "The museum catalog described a restored instrument, the materials used to build it, and the evidence that connected it to a particular workshop. The curator noted which claims were certain and which were inferred.",
+  "A tensor can be valid for one quantization type and invalid for another. Shape, block size, source type, and tensor role all matter when deciding whether a conversion should be offered to the user.",
+  "An engineering notebook is useful because it preserves decisions in the order they were made. Later readers can see which assumptions were tested, which measurements supported the design, and which risks still need attention.",
+  "The teacher asked the class to compare two explanations for the same observation. One explanation matched the evidence from the experiment, while the other depended on a detail that had not been measured.",
+  "When a file format changes, compatibility checks should fail with specific messages. A vague error may be technically correct, but a precise error tells the user which field or tensor caused the problem.",
+  "A language model can answer a multiple choice question by ranking continuations. The model does not need to generate a long explanation; it only needs to assign the highest score to the continuation that matches the correct answer.",
+  "The financial report separated recurring revenue from one-time payments. That distinction mattered because a single large transaction could make a month look strong even when the underlying trend had not improved.",
+  "A recipe that saves memory can still be a poor choice if it slows down loading or damages important tasks. The best comparison is a table that puts size, speed, and quality next to each other.",
+  "In chemistry, a balanced equation preserves the number of atoms for each element. Changing a coefficient can fix one side of the equation while accidentally breaking another, so every element must be checked.",
+  "A model editor should preserve the original file unless the user explicitly exports a new version. Testing a recipe in memory is useful because experiments can be discarded without creating extra files.",
+  "The network administrator reviewed logs from several machines. Most entries were routine, but one repeated connection attempt from an unexpected address required further investigation.",
+  "A small benchmark can be stable enough for local iteration without pretending to replace a full evaluation suite. Its purpose is to catch obvious regressions and guide which recipe deserves deeper testing.",
+  "The transit map showed several routes that met at the central station. A passenger could reduce travel time by changing trains there, but only if the transfer schedule left enough margin.",
+  "When scoring text with a rolling context window, the evaluator must avoid double counting tokens. Each target token should contribute to the loss once, even though surrounding context may appear in more than one window.",
+  "A user may not know whether a tensor belongs to attention, feed-forward layers, embeddings, or normalization. Grouping tensors by role can make bulk operations clearer and reduce accidental edits.",
+  "The ecology passage described a food web in which producers, consumers, and decomposers exchanged energy. Removing one species could affect several others because the relationships were connected.",
+  "A test result with a positive accuracy delta is not automatically proof of improvement. It may represent a handful of borderline answers where small numerical changes moved the selected choice.",
+  "The manufacturing team inspected a batch of components and found that most dimensions were within tolerance. A few parts near the limit required additional checks before the batch could be approved.",
+  "A command that rewrites model tensors should validate the requested target types before doing expensive work. Early validation makes failures faster and protects the user from waiting for a doomed conversion.",
+  "The literature passage used a quiet scene to reveal a character's priorities. The important evidence was not a single sentence, but the contrast between what the character noticed and what they ignored.",
+  "In operating systems, virtual memory separates the address space a program sees from the physical memory installed in the machine. Pages can be moved, loaded, or evicted as execution proceeds.",
+  "A local benchmark should be reproducible. If the selected rows, prompt format, and scoring method are fixed, a user can compare two recipes without wondering whether the test itself changed.",
+  "The navigation system recalculated the route after a bridge closure. The new path was longer, but it avoided the blocked road and arrived sooner than waiting for the original route to clear.",
+  "A quantized model can have smaller tensors but still allocate temporary buffers during evaluation. That is why disk size, working set, and peak allocation are related but not identical measurements.",
+  "The mathematics explanation introduced a variable, defined the equation, and then substituted known values. Each step followed from the previous one, which made the final calculation easy to audit.",
+  "A preview panel should show enough information for a confident decision without overwhelming the user. Detailed audits can be collapsed by default, while summary numbers remain visible at the top.",
+  "The historian compared letters, shipping records, and newspaper notices to reconstruct the event. No single document was complete, but together they formed a more reliable account.",
+  "A model may be useful for one workload and weak for another. Recipes that preserve chat behavior may not preserve factual multiple choice scoring, and recipes that score well on small tests still need manual review.",
+  "The quality of an eval depends on both the examples and the scoring rule. If either one is unclear, users may overinterpret a small change or compare numbers that were produced by different procedures.",
+  "The technician replaced a worn connector and repeated the measurement. The signal became stable, which suggested that the original fault was mechanical rather than a software configuration issue.",
+  "A frozen subset should include provenance. Recording the generator, source datasets, selection rule, and formatting notes helps future maintainers understand why the rows look the way they do.",
+  "The recipe table is a workspace, not just a report. Users should be able to inspect a tensor, change its target type, test the effect, and return to the same point in the model structure.",
+];
+
 const PRESETS = {
   default: {
     outputPath: "evals/lm_eval_subset.generated.json",
@@ -41,6 +104,13 @@ const PRESETS = {
     },
   },
 };
+
+export function getPplTextsForPreset(presetName = "default") {
+  if (presetName === "quick") {
+    return DEFAULT_PPL_TEXTS;
+  }
+  return [...DEFAULT_PPL_TEXTS, ...DEFAULT_EXTRA_PPL_TEXTS];
+}
 
 const MMLU_SUBJECT_DESCRIPTIONS = {
   high_school_physics:
@@ -420,7 +490,7 @@ export async function buildSubset(presetName = "default") {
       sourceApi: DATASET_API,
       note: "Python-free fixed subset derived from Hugging Face dataset rows with prompts formatted from lm-eval task YAML/source behavior.",
     },
-    ppl: DEFAULT_PPL_TEXTS.map((text) => ({ text })),
+    ppl: getPplTextsForPreset(presetName).map((text) => ({ text })),
     tasks,
   };
 }

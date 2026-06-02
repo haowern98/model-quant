@@ -7,6 +7,7 @@ import {
   formatMmluSample,
   formatTruthfulQaMc1Sample,
   getPresetOutputPath,
+  getPplTextsForPreset,
   getTaskSpecsForPreset,
   isRetriableStatus,
   parseCliArgs,
@@ -181,6 +182,11 @@ test("quick preset writes a separate smaller official-row subset", () => {
     mmlu_professional_medicine: 5,
     truthfulqa_mc1: 10,
   });
+});
+
+test("default preset uses a larger rolling-PPL corpus than quick", () => {
+  assert.ok(getPplTextsForPreset("default").length > getPplTextsForPreset("quick").length);
+  assert.equal(getPplTextsForPreset("quick").length, 8);
 });
 
 test("CLI defaults to default output and can generate quick independently", () => {
