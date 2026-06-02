@@ -82,13 +82,13 @@ const PRESETS = {
   default: {
     outputPath: "evals/lm_eval_subset.generated.json",
     counts: {
-      arc_challenge: 100,
-      arc_easy: 100,
-      hellaswag: 150,
-      mmlu_high_school_physics: 50,
-      mmlu_college_computer_science: 50,
-      mmlu_professional_medicine: 50,
-      truthfulqa_mc1: 100,
+      arc_challenge: 70,
+      arc_easy: 70,
+      hellaswag: 70,
+      mmlu_high_school_physics: 35,
+      mmlu_college_computer_science: 35,
+      mmlu_professional_medicine: 35,
+      truthfulqa_mc1: 70,
     },
   },
   quick: {

@@ -940,14 +940,14 @@ mod tests {
         let subset = load_standard_eval_subset(StandardEvalPreset::Default).unwrap();
         let counts = task_counts(&subset);
 
-        assert_eq!(subset.samples.len(), 600);
-        assert_eq!(counts.get("arc_challenge"), Some(&100));
-        assert_eq!(counts.get("arc_easy"), Some(&100));
-        assert_eq!(counts.get("hellaswag"), Some(&150));
-        assert_eq!(counts.get("mmlu_high_school_physics"), Some(&50));
-        assert_eq!(counts.get("mmlu_college_computer_science"), Some(&50));
-        assert_eq!(counts.get("mmlu_professional_medicine"), Some(&50));
-        assert_eq!(counts.get("truthfulqa_mc1"), Some(&100));
+        assert_eq!(subset.samples.len(), 385);
+        assert_eq!(counts.get("arc_challenge"), Some(&70));
+        assert_eq!(counts.get("arc_easy"), Some(&70));
+        assert_eq!(counts.get("hellaswag"), Some(&70));
+        assert_eq!(counts.get("mmlu_high_school_physics"), Some(&35));
+        assert_eq!(counts.get("mmlu_college_computer_science"), Some(&35));
+        assert_eq!(counts.get("mmlu_professional_medicine"), Some(&35));
+        assert_eq!(counts.get("truthfulqa_mc1"), Some(&70));
         assert!(!counts.contains_key("gsm8k"));
         assert!(!counts.contains_key("mmlu_mixed"));
         assert!(!counts.contains_key("truthfulqa_mc"));
