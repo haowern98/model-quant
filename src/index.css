@@ -64,6 +64,96 @@ button {
   color: inherit;
 }
 
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+) {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+):hover {
+  scrollbar-color: rgba(121, 121, 121, 0.7) transparent;
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+)::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+):hover::-webkit-scrollbar-thumb {
+  background: rgba(121, 121, 121, 0.45);
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+)::-webkit-scrollbar-thumb:hover {
+  background: rgba(121, 121, 121, 0.7);
+}
+
+:where(
+  .explorer-section:first-of-type,
+  .tensor-editor-content,
+  .tensor-table-scroll,
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto
+)::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .app-root {
   width: 100vw;
   height: 100vh;
