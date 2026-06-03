@@ -95,21 +95,10 @@ export function EditorPane({
       </div>
 
       <section className="tensor-editor-surface">
-        <div className="editor-line-gutter" aria-hidden="true">
-          {Array.from({ length: Math.max(18, tensors.length + 3) }, (_, index) => (
-            <span key={index}>{index + 1}</span>
-          ))}
-        </div>
         <div className="tensor-editor-content">
           <div className="tensor-editor-title">
             <div>
               <h1>{activeTitle}</h1>
-              <p>{activeLayerIndex === null ? "Select a layer to view tensors" : `${tensors.length} tensors`}</p>
-            </div>
-            <div className="tensor-editor-status">
-              <span className="status-dot" />
-              <span>2 targets changed</span>
-              <span>Verified 2/2</span>
             </div>
           </div>
           <TensorTable

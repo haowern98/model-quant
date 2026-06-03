@@ -18,6 +18,7 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
       <table className="tensor-table">
         <thead>
           <tr>
+            <th className="row-number" aria-label="Row number"></th>
             <th>Tensor</th>
             <th>Shape</th>
             <th>Current Quant</th>
@@ -27,7 +28,7 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
           </tr>
         </thead>
         <tbody>
-          {tensors.map(t => {
+          {tensors.map((t, index) => {
             const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
             const currentSize = t.sizeBytes;
             const targetBits =
@@ -47,6 +48,7 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
             const changed = assignedQuant !== toTargetQuant(t.currentQuant);
             return (
               <tr key={t.name} className={changed ? "changed-row" : undefined}>
+                <td className="row-number">{index + 1}</td>
                 <td className="tensor-name" title={t.name}>
                   {formatTensorName(t.name)}
                 </td>

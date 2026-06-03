@@ -534,14 +534,10 @@ export function TestResultsModal({
               <span className="text-right font-mono text-text-primary">
                 {formatBytes(result.convertedBytesAfter)}
               </span>
-              {result.requestedTargetCount > 0 && (
-                <>
-                  <span className="text-text-muted">Verified targets</span>
-                  <span className="text-right font-mono text-text-primary">
-                    {result.verifiedTargetCount}/{result.requestedTargetCount}
-                  </span>
-                </>
-              )}
+              <span className="text-text-muted">Verified targets</span>
+              <span className="text-right font-mono text-text-primary">
+                {result.verifiedTargetCount}/{result.requestedTargetCount}
+              </span>
             </div>
           </div>
         )}

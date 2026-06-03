@@ -923,24 +923,7 @@ button {
   overflow: hidden;
   background: var(--vscode-editor);
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) 78px;
-}
-
-.editor-line-gutter {
-  background: var(--vscode-editor);
-  border-right: 1px solid var(--vscode-border-subtle);
-  color: #858585;
-  font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
-  font-size: 12px;
-  padding-top: 61px;
-  text-align: right;
-  user-select: none;
-}
-
-.editor-line-gutter span {
-  display: block;
-  height: 26px;
-  padding-right: 11px;
+  grid-template-columns: minmax(0, 1fr) 78px;
 }
 
 .tensor-editor-content {
@@ -1034,6 +1017,16 @@ button {
 
 .tensor-table .numeric {
   text-align: right;
+}
+
+.tensor-table .row-number {
+  width: 46px;
+  padding: 0 11px 0 0;
+  border-right: 1px solid var(--vscode-border-subtle);
+  color: #858585;
+  font-weight: 400;
+  text-align: right;
+  user-select: none;
 }
 
 .tensor-name {
