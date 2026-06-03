@@ -25,6 +25,7 @@ interface WorkbenchShellProps {
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
   onOpenLayer: (layerIndex: number) => void;
+  onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
   onCloseLayer: (layerIndex: number) => void;
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
@@ -51,6 +52,7 @@ export function WorkbenchShell({
   evalPreset,
   testMode,
   onOpenLayer,
+  onOpenModel,
   onToggleLayer,
   onCloseLayer,
   onAssignQuant,
@@ -72,6 +74,7 @@ export function WorkbenchShell({
         expandedLayers={expandedLayers}
         running={running}
         onOpenLayer={onOpenLayer}
+        onOpenModel={onOpenModel}
         onToggleLayer={onToggleLayer}
         onAssignByPattern={onAssignByPattern}
         onSaveRecipe={onSaveRecipe}

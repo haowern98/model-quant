@@ -23,6 +23,7 @@ interface ExplorerPanelProps {
   expandedLayers: Set<number>;
   running: boolean;
   onOpenLayer: (layerIndex: number) => void;
+  onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
   onAssignByPattern: (pattern: AssignPattern, quantType: QuantType) => void;
   onSaveRecipe: () => void;
@@ -31,7 +32,7 @@ interface ExplorerPanelProps {
 }
 
 function basename(path: string | null): string {
-  if (!path) return "Open from the command center";
+  if (!path) return "GGUF";
   return path.split(/[\\/]/).pop() ?? path;
 }
 
@@ -47,6 +48,7 @@ export function ExplorerPanel({
   expandedLayers,
   running,
   onOpenLayer,
+  onOpenModel,
   onToggleLayer,
   onAssignByPattern,
   onSaveRecipe,
@@ -58,7 +60,6 @@ export function ExplorerPanel({
     mmproj: false,
     lora: false,
   });
-  const [modelExpanded, setModelExpanded] = useState(true);
   const [actionsOpen, setActionsOpen] = useState(false);
 
   const groups = useMemo(() => {
@@ -89,48 +90,30 @@ export function ExplorerPanel({
       </div>
 
       <section className="explorer-section">
-        <button
-          type="button"
-          className="explorer-section-header"
-          aria-label="GGUF"
-          onClick={() => toggleSection("gguf")}
-        >
-          <span className={`tree-chevron ${sections.gguf ? "expanded" : ""}`} />
-          <span>GGUF</span>
-        </button>
+        <div className="explorer-section-header explorer-model-header">
+          <button
+            type="button"
+            className="explorer-section-toggle"
+            aria-label={basename(modelPath)}
+            onClick={() => toggleSection("gguf")}
+          >
+            <span className={`tree-chevron ${sections.gguf ? "expanded" : ""}`} />
+            <span>{basename(modelPath)}</span>
+          </button>
+          {modelPath && (
+            <button
+              type="button"
+              className="tree-action-button"
+              aria-label="Model actions"
+              onClick={() => setActionsOpen((value) => !value)}
+            >
+              ...
+            </button>
+          )}
+        </div>
 
         {sections.gguf && (
           <div className="explorer-section-body">
-            <div className="tree-row model-row">
-              <button
-                type="button"
-                className="tree-toggle-button"
-                aria-label={modelExpanded ? "Collapse model" : "Expand model"}
-                onClick={() => setModelExpanded((value) => !value)}
-                disabled={!modelPath}
-              >
-                <span className={`tree-chevron ${modelExpanded ? "expanded" : ""}`} />
-              </button>
-              <span className="tree-file-icon gguf" aria-hidden="true" />
-              <button
-                type="button"
-                className="tree-primary-label"
-                onClick={() => modelPath && setModelExpanded((value) => !value)}
-              >
-                {basename(modelPath)}
-              </button>
-              {modelPath && (
-                <button
-                  type="button"
-                  className="tree-action-button"
-                  aria-label="Model actions"
-                  onClick={() => setActionsOpen((value) => !value)}
-                >
-                  ...
-                </button>
-              )}
-            </div>
-
             {actionsOpen && modelPath && (
               <div className="model-actions-popover">
                 <div className="model-actions-header">Recipe Actions</div>
@@ -170,7 +153,15 @@ export function ExplorerPanel({
               </div>
             )}
 
-            {modelExpanded &&
+            {!modelPath && (
+              <div className="future-section-empty">
+                <button type="button" onClick={onOpenModel}>
+                  Add model GGUF...
+                </button>
+              </div>
+            )}
+
+            {modelPath &&
               groups.map(([layerIndex, layerTensors]) => {
                 const expanded = expandedLayers.has(layerIndex);
                 const active = activeLayerIndex === layerIndex;

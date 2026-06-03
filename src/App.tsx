@@ -246,6 +246,7 @@ function App() {
           evalPreset={recipeEvalPreset}
           testMode={recipeTestMode}
           onOpenLayer={handleOpenLayer}
+          onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
           onCloseLayer={handleCloseLayer}
           onAssignQuant={assignQuant}
