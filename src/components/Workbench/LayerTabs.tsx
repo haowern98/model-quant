@@ -34,9 +34,7 @@ export function LayerTabs({
               event.stopPropagation();
               onCloseLayer(layerIndex);
             }}
-          >
-            x
-          </span>
+          />
         </button>
       ))}
     </div>
