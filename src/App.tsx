@@ -1,10 +1,6 @@
 import { useCallback, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
-import { AppShell } from "./components/AppShell";
-import { Toolbar } from "./components/Toolbar/Toolbar";
-import { LayerBrowser } from "./components/LayerBrowser/LayerBrowser";
-import { BulkAssignPanel } from "./components/LayerBrowser/BulkAssignPanel";
-import { DetailPanel } from "./components/DetailPanel/DetailPanel";
+import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import { TestResultsModal } from "./components/TestResultsModal/TestResultsModal";
 import { useModel } from "./hooks/useModel";
 import { useRecipe } from "./hooks/useRecipe";
@@ -44,7 +40,6 @@ function App() {
     resetRecipeForModel,
     setRecipeState,
     assignQuant,
-    assignAll,
     assignByPattern,
     setProfile,
     getAssignments,
@@ -53,6 +48,10 @@ function App() {
 
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(
     null,
+  );
+  const [openLayers, setOpenLayers] = useState<number[]>([]);
+  const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
+    () => new Set(),
   );
   const [benchmarkResult, setBenchmarkResult] =
     useState<BenchmarkResult | null>(null);
@@ -71,12 +70,46 @@ function App() {
       }));
       resetRecipeForModel(path, tensors);
       setSelectedLayerIndex(null);
+      setOpenLayers([]);
+      setExpandedLayers(new Set());
       setBenchmarkResult(null);
       setShowResults(false);
       setAppError(null);
     },
     [resetRecipeForModel],
   );
+
+  const handleOpenLayer = useCallback((layerIndex: number) => {
+    setSelectedLayerIndex(layerIndex);
+    setOpenLayers((current) =>
+      current.includes(layerIndex) ? current : [...current, layerIndex],
+    );
+    setExpandedLayers((current) => {
+      const next = new Set(current);
+      next.add(layerIndex);
+      return next;
+    });
+  }, []);
+
+  const handleToggleLayer = useCallback((layerIndex: number) => {
+    setExpandedLayers((current) => {
+      const next = new Set(current);
+      if (next.has(layerIndex)) next.delete(layerIndex);
+      else next.add(layerIndex);
+      return next;
+    });
+  }, []);
+
+  const handleCloseLayer = useCallback((layerIndex: number) => {
+    setOpenLayers((current) => {
+      const next = current.filter((item) => item !== layerIndex);
+      setSelectedLayerIndex((selected) => {
+        if (selected !== layerIndex) return selected;
+        return next.length > 0 ? next[next.length - 1] : null;
+      });
+      return next;
+    });
+  }, []);
 
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
@@ -191,58 +224,38 @@ function App() {
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
 
   return (
-    <div className="h-screen min-h-0 overflow-hidden flex flex-col bg-bg-primary">
-      <TitleBar />
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <AppShell
-          toolbar={
-            <Toolbar
-              modelPath={modelPath}
-              hasModel={!!model}
-              running={running}
-              progress={progress}
-              onOpenModel={handleOpenModel}
-              onSetAll={assignAll}
-              onSaveRecipe={handleSaveRecipe}
-              onLoadRecipe={handleLoadRecipe}
-              onExport={handleExport}
-              testMode={recipeTestMode}
-              onTestModeChange={setRecipeTestMode}
-              evalPreset={recipeEvalPreset}
-              onEvalPresetChange={setRecipeEvalPreset}
-              onTest={handleTest}
-            />
-          }
-          sidebar={
-            <div className="flex flex-col h-full min-h-0">
-              <LayerBrowser
-                tensors={model?.tensors ?? []}
-                selectedLayerIndex={selectedLayerIndex}
-                onSelectLayer={setSelectedLayerIndex}
-              />
-              <BulkAssignPanel
-                onAssign={assignByPattern}
-                disabled={!model || running}
-              />
-            </div>
-          }
-          detail={
-            <div className="h-full min-h-0 flex flex-col">
-              {(modelError || appError) && (
-                <div className="shrink-0 border-b border-red-500/40 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-                  {modelError ?? appError}
-                </div>
-              )}
-              <div className="flex-1 min-h-0">
-                <DetailPanel
-                  tensors={selectedTensors}
-                  assignments={getAssignments}
-                  profile={recipe?.profile ?? null}
-                  onAssignQuant={assignQuant}
-                />
-              </div>
-            </div>
-          }
+    <div className="app-root">
+      <TitleBar modelPath={modelPath} onOpenModel={handleOpenModel} />
+      <div className="app-body">
+        {(modelError || appError) && (
+          <div className="app-error" role="alert">
+            {modelError ?? appError}
+          </div>
+        )}
+        <WorkbenchShell
+          modelPath={modelPath}
+          tensors={model?.tensors ?? []}
+          selectedTensors={selectedTensors}
+          assignments={getAssignments}
+          profile={recipe?.profile ?? null}
+          activeLayerIndex={selectedLayerIndex}
+          openLayers={openLayers}
+          expandedLayers={expandedLayers}
+          running={running}
+          progress={progress}
+          evalPreset={recipeEvalPreset}
+          testMode={recipeTestMode}
+          onOpenLayer={handleOpenLayer}
+          onToggleLayer={handleToggleLayer}
+          onCloseLayer={handleCloseLayer}
+          onAssignQuant={assignQuant}
+          onAssignByPattern={assignByPattern}
+          onEvalPresetChange={setRecipeEvalPreset}
+          onTestModeChange={setRecipeTestMode}
+          onTest={handleTest}
+          onSaveRecipe={handleSaveRecipe}
+          onLoadRecipe={handleLoadRecipe}
+          onExport={handleExport}
         />
       </div>
 
