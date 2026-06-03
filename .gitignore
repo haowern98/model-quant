@@ -22,6 +22,8 @@ native/cpp/build/
 .playwright-mcp/
 src/assets/
 test-results/
+.agents/
+mockup/
 
 # Local model downloads and Hugging Face cache
 models/
@@ -36,6 +38,7 @@ CLAUDE.md
 handoff.md
 2026-05-23-model-surgery-design.md
 docs/
+uihandoff.md
 
 # Editor directories and files
 .vscode/*
