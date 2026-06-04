@@ -1,3 +1,4 @@
+import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   AssignPattern,
   ProgressEvent,
@@ -10,6 +11,13 @@ import type {
 import { ActivityBar } from "./ActivityBar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
+
+const EXPLORER_DEFAULT_WIDTH = 365;
+const EXPLORER_MIN_WIDTH = 150;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
 interface WorkbenchShellProps {
   modelPath: string | null;
@@ -64,8 +72,41 @@ export function WorkbenchShell({
   onLoadRecipe,
   onExport,
 }: WorkbenchShellProps) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
+
+  const explorerMaxWidth = () => {
+    const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
+    return Math.max(EXPLORER_MIN_WIDTH, Math.floor(shellWidth * 0.5));
+  };
+
+  const startExplorerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = explorerWidth;
+    document.body.classList.add("resizing-explorer");
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setExplorerWidth(
+        clamp(startWidth + moveEvent.clientX - startX, EXPLORER_MIN_WIDTH, explorerMaxWidth()),
+      );
+    };
+    const stopResize = () => {
+      document.body.classList.remove("resizing-explorer");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stopResize);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stopResize);
+  };
+
   return (
-    <div className="workbench-shell">
+    <div
+      ref={shellRef}
+      className="workbench-shell"
+      style={{ "--explorer-width": `${explorerWidth}px` } as CSSProperties}
+    >
       <ActivityBar />
       <ExplorerPanel
         modelPath={modelPath}
@@ -80,6 +121,25 @@ export function WorkbenchShell({
         onSaveRecipe={onSaveRecipe}
         onLoadRecipe={onLoadRecipe}
         onExport={onExport}
+      />
+      <div
+        className="resize-handle explorer-resizer"
+        role="separator"
+        aria-label="Resize Explorer"
+        aria-orientation="vertical"
+        aria-valuemin={EXPLORER_MIN_WIDTH}
+        aria-valuemax={explorerMaxWidth()}
+        aria-valuenow={Math.round(explorerWidth)}
+        tabIndex={0}
+        onPointerDown={startExplorerResize}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const direction = event.key === "ArrowLeft" ? -1 : 1;
+          setExplorerWidth((width) =>
+            clamp(width + direction * 10, EXPLORER_MIN_WIDTH, explorerMaxWidth()),
+          );
+        }}
       />
       <EditorPane
         modelPath={modelPath}

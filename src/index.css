@@ -513,8 +513,63 @@ button {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 48px 365px minmax(0, 1fr);
+  grid-template-columns: 48px var(--explorer-width, 365px) 4px minmax(0, 1fr);
   background: var(--vscode-editor);
+}
+
+.resize-handle {
+  position: relative;
+  z-index: 10;
+  background: transparent;
+  outline: none;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+  transition: background 100ms ease;
+}
+
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after {
+  background: var(--vscode-blue);
+}
+
+body.resizing-explorer .explorer-resizer::after,
+body.resizing-bottom-panel .bottom-panel-resizer::after {
+  background: var(--vscode-blue);
+}
+
+.explorer-resizer {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.explorer-resizer::after {
+  inset: 0 1px;
+}
+
+.bottom-panel-resizer {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.bottom-panel-resizer::after {
+  inset: 1px 0;
+}
+
+body.resizing-explorer,
+body.resizing-explorer * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-bottom-panel,
+body.resizing-bottom-panel * {
+  cursor: row-resize !important;
+  user-select: none !important;
 }
 
 .activity-bar {
@@ -632,6 +687,7 @@ button {
 }
 
 .explorer-model-header {
+  min-width: 0;
   padding-right: 4px;
 }
 
@@ -743,14 +799,17 @@ button {
 }
 
 .tree-count {
+  min-width: max-content;
   color: var(--vscode-muted);
   font-size: 11px;
   padding-right: 4px;
+  white-space: nowrap;
 }
 
 .tree-action-button {
   width: 24px;
   height: 20px;
+  flex: 0 0 24px;
   padding: 0;
   color: #cccccc;
   border-radius: 3px;
@@ -802,6 +861,7 @@ button {
   height: 21px;
   display: flex;
   align-items: center;
+  min-width: 0;
   padding-left: 56px;
   border: 0;
   background: transparent;
@@ -810,6 +870,9 @@ button {
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tensor-child-row:hover {
@@ -887,7 +950,7 @@ button {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 35px 29px minmax(0, 1fr) 143px;
+  grid-template-rows: 35px 29px minmax(0, 1fr) 4px var(--bottom-panel-height, 143px);
   background: var(--vscode-editor);
 }
 
@@ -1358,7 +1421,7 @@ button {
 
 @media (max-width: 1100px) {
   .workbench-shell {
-    grid-template-columns: 48px 300px minmax(0, 1fr);
+    grid-template-columns: 48px var(--explorer-width, 300px) 4px minmax(0, 1fr);
   }
 
   .command-center {
