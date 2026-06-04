@@ -8,16 +8,16 @@ interface ActivityItem {
 
 const TOP_ITEMS: ActivityItem[] = [
   { id: "gguf", label: "Explorer view", icon: "files" },
-  { id: "chat", label: "Chat with model", icon: "search" },
-  { id: "server", label: "Server mode", icon: "play" },
+  { id: "chat", label: "Chat with model", icon: "comment-discussion" },
+  { id: "server", label: "Server mode", icon: "server-process" },
 ];
 
 const BOTTOM_ITEMS: ActivityItem[] = [
-  { id: "settings", label: "Settings", icon: "gear" },
+  { id: "settings", label: "Settings", icon: "settings-gear" },
 ];
 
 function ActivityIcon({ icon }: { icon: string }) {
-  return <span className={`activity-icon activity-icon-${icon}`} aria-hidden="true" />;
+  return <span className={`activity-icon codicon codicon-${icon}`} aria-hidden="true" />;
 }
 
 export function ActivityBar() {
