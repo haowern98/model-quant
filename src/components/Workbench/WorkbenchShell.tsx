@@ -88,6 +88,8 @@ export function WorkbenchShell({
 }: WorkbenchShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
+  const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
+  const explorerVisible = explorerWidth > 0;
 
   const explorerMaxWidth = () => {
     const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
@@ -101,9 +103,18 @@ export function WorkbenchShell({
     document.body.classList.add("resizing-explorer");
 
     const handleMove = (moveEvent: PointerEvent) => {
-      setExplorerWidth(
-        clamp(startWidth + moveEvent.clientX - startX, EXPLORER_MIN_WIDTH, explorerMaxWidth()),
-      );
+      const requestedWidth = startWidth + moveEvent.clientX - startX;
+      if (requestedWidth <= 0 || (startWidth > 0 && requestedWidth < EXPLORER_MIN_WIDTH)) {
+        if (startWidth > 0) {
+          lastExpandedExplorerWidth.current = EXPLORER_MIN_WIDTH;
+        }
+        setExplorerWidth(0);
+        return;
+      }
+
+      const nextWidth = clamp(requestedWidth, EXPLORER_MIN_WIDTH, explorerMaxWidth());
+      lastExpandedExplorerWidth.current = nextWidth;
+      setExplorerWidth(nextWidth);
     };
     const stopResize = () => {
       document.body.classList.remove("resizing-explorer");
@@ -115,13 +126,29 @@ export function WorkbenchShell({
     window.addEventListener("pointerup", stopResize);
   };
 
+  const toggleExplorer = () => {
+    if (explorerVisible) {
+      lastExpandedExplorerWidth.current = explorerWidth;
+      setExplorerWidth(0);
+      return;
+    }
+
+    const restoredWidth = clamp(
+      lastExpandedExplorerWidth.current,
+      EXPLORER_MIN_WIDTH,
+      explorerMaxWidth(),
+    );
+    lastExpandedExplorerWidth.current = restoredWidth;
+    setExplorerWidth(restoredWidth);
+  };
+
   return (
     <div
       ref={shellRef}
-      className="workbench-shell"
+      className={`workbench-shell ${explorerVisible ? "" : "explorer-collapsed"}`}
       style={{ "--explorer-width": `${explorerWidth}px` } as CSSProperties}
     >
-      <ActivityBar />
+      <ActivityBar explorerVisible={explorerVisible} onToggleExplorer={toggleExplorer} />
       <ExplorerPanel
         modelPath={modelPath}
         tensors={tensors}
@@ -141,7 +168,7 @@ export function WorkbenchShell({
         role="separator"
         aria-label="Resize Explorer"
         aria-orientation="vertical"
-        aria-valuemin={EXPLORER_MIN_WIDTH}
+        aria-valuemin={0}
         aria-valuemax={explorerMaxWidth()}
         aria-valuenow={Math.round(explorerWidth)}
         tabIndex={0}
@@ -149,10 +176,25 @@ export function WorkbenchShell({
         onKeyDown={(event) => {
           if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
           event.preventDefault();
+          if (event.key === "ArrowLeft" && explorerWidth <= EXPLORER_MIN_WIDTH) {
+            lastExpandedExplorerWidth.current = EXPLORER_MIN_WIDTH;
+            setExplorerWidth(0);
+            return;
+          }
+          if (event.key === "ArrowRight" && explorerWidth === 0) {
+            lastExpandedExplorerWidth.current = EXPLORER_MIN_WIDTH;
+            setExplorerWidth(EXPLORER_MIN_WIDTH);
+            return;
+          }
+
           const direction = event.key === "ArrowLeft" ? -1 : 1;
-          setExplorerWidth((width) =>
-            clamp(width + direction * 10, EXPLORER_MIN_WIDTH, explorerMaxWidth()),
+          const nextWidth = clamp(
+            explorerWidth + direction * 10,
+            EXPLORER_MIN_WIDTH,
+            explorerMaxWidth(),
           );
+          lastExpandedExplorerWidth.current = nextWidth;
+          setExplorerWidth(nextWidth);
         }}
       />
       <EditorPane

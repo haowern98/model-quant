@@ -525,6 +525,11 @@ button {
   background: var(--vscode-editor);
 }
 
+.workbench-shell.explorer-collapsed .explorer-panel {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .resize-handle {
   position: relative;
   z-index: 10;

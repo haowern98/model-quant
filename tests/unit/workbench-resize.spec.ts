@@ -37,6 +37,77 @@ test("resizes the Explorer while keeping counts and model actions visible", asyn
   await expect(filename).toHaveCSS("text-overflow", "ellipsis");
 });
 
+test("collapses Explorer past its minimum and restores it by dragging the divider", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const explorer = page.getByRole("complementary", { name: "Explorer" });
+  const handle = page.getByRole("separator", { name: "Resize Explorer" });
+  const handleBox = await handle.boundingBox();
+
+  expect(handleBox).not.toBeNull();
+
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(120, handleBox!.y + 120);
+  await page.mouse.up();
+
+  await expect(explorer).not.toBeVisible();
+  await expect(handle).toBeVisible();
+  await expect(handle).toHaveAttribute("aria-valuenow", "0");
+
+  const collapsedHandleBox = await handle.boundingBox();
+  expect(collapsedHandleBox).not.toBeNull();
+
+  await page.mouse.move(
+    collapsedHandleBox!.x + collapsedHandleBox!.width / 2,
+    collapsedHandleBox!.y + 120,
+  );
+  await page.mouse.down();
+  await page.mouse.move(collapsedHandleBox!.x + 40, collapsedHandleBox!.y + 120);
+  await page.mouse.up();
+
+  await expect(explorer).toBeVisible();
+  await expect(handle).toHaveAttribute("aria-valuenow", "150");
+});
+
+test("Explorer activity icon toggles the panel and restores its previous width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const explorer = page.getByRole("complementary", { name: "Explorer" });
+  const explorerButton = page.getByRole("button", { name: "Explorer view" });
+  const handle = page.getByRole("separator", { name: "Resize Explorer" });
+  const handleBox = await handle.boundingBox();
+
+  expect(handleBox).not.toBeNull();
+
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(280, handleBox!.y + 120);
+  await page.mouse.up();
+
+  const before = await explorer.boundingBox();
+
+  expect(before).not.toBeNull();
+
+  await explorerButton.click();
+  await expect(explorer).not.toBeVisible();
+  await expect(explorerButton).toHaveAttribute("aria-pressed", "false");
+
+  await explorerButton.click();
+  await expect(explorer).toBeVisible();
+  await expect(explorerButton).toHaveAttribute("aria-pressed", "true");
+
+  const restored = await explorer.boundingBox();
+  expect(restored).not.toBeNull();
+  expect(restored!.width).toBe(before!.width);
+});
+
 test("resizes the bottom panel vertically", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
