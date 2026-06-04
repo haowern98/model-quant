@@ -178,6 +178,21 @@ export interface BenchmarkResult {
   standardEval: StandardEvalReport | null;
 }
 
+export interface HardwareSnapshot {
+  cpuName: string;
+  cpuUsagePercent: number;
+  ramUsedBytes: number;
+  ramTotalBytes: number;
+  gpuName: string | null;
+  gpuUsagePercent: number | null;
+  vramUsedMb: number | null;
+  vramTotalMb: number | null;
+  gpuTemperatureC: number | null;
+  gpuPowerW: number | null;
+  cpuTemperatureC: number | null;
+  cpuPowerW: number | null;
+}
+
 export interface RecipeQualityEval {
   baselineNll: number | null;
   baselinePpl: number | null;

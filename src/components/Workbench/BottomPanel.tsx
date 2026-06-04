@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { QuantType, RecipeProfile, TensorInfo } from "../../types";
 import { QUANT_TYPES, toTargetQuant } from "../../types";
 import { estQuantSize, formatBytes } from "../../lib/format";
+import { HardwarePanel } from "./HardwarePanel";
 
 interface BottomPanelProps {
   tensors: TensorInfo[];
@@ -9,6 +11,7 @@ interface BottomPanelProps {
 }
 
 export function BottomPanel({ tensors, assignments, profile }: BottomPanelProps) {
+  const [activeTab, setActiveTab] = useState<"size" | "hardware">("size");
   const totalTargetBytes = tensors.reduce((sum, tensor) => {
     const quant = assignments[tensor.name] ?? toTargetQuant(tensor.currentQuant);
     const bits = QUANT_TYPES.find((item) => item.value === quant)?.bitsPerWeight ?? 4.5;
@@ -21,8 +24,26 @@ export function BottomPanel({ tensors, assignments, profile }: BottomPanelProps)
   return (
     <section className="bottom-panel" aria-label="Bottom panel">
       <div className="bottom-tabs" role="tablist">
-        <button type="button" role="tab" className="active" aria-label="SIZE PROFILE">
+        <button
+          type="button"
+          role="tab"
+          className={activeTab === "size" ? "active" : ""}
+          aria-label="SIZE PROFILE"
+          aria-selected={activeTab === "size"}
+          onClick={() => setActiveTab("size")}
+        >
           SIZE PROFILE
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={activeTab === "hardware" ? "active" : ""}
+          aria-label="HARDWARE"
+          aria-selected={activeTab === "hardware"}
+          onClick={() => setActiveTab("hardware")}
+        >
+          <span className="codicon codicon-pulse" aria-hidden="true" />
+          HARDWARE
         </button>
         <button type="button" role="tab" aria-label="EVAL RESULTS">
           EVAL RESULTS
@@ -34,17 +55,21 @@ export function BottomPanel({ tensors, assignments, profile }: BottomPanelProps)
           OUTPUT
         </button>
       </div>
-      <div className="bottom-content">
-        <Metric label="FP16" value={formatBytes(f16Size)} />
-        <Metric label="Q8_0" value={formatBytes(q8Size)} />
-        <Metric label="Recipe" value={formatBytes(totalTargetBytes)} accent />
-        <Metric label="Q4_K_M" value={formatBytes(q4Size)} />
-        <div className="bottom-note">
-          {profile
-            ? `Profiled VRAM estimate ${formatBytes(profile.vramEstimate * 1024 * 1024)}.`
-            : "Ready. Quick/Default and Single/Compare are run configuration controls for the current recipe."}
+      {activeTab === "hardware" ? (
+        <HardwarePanel />
+      ) : (
+        <div className="bottom-content">
+          <Metric label="FP16" value={formatBytes(f16Size)} />
+          <Metric label="Q8_0" value={formatBytes(q8Size)} />
+          <Metric label="Recipe" value={formatBytes(totalTargetBytes)} accent />
+          <Metric label="Q4_K_M" value={formatBytes(q4Size)} />
+          <div className="bottom-note">
+            {profile
+              ? `Profiled VRAM estimate ${formatBytes(profile.vramEstimate * 1024 * 1024)}.`
+              : "Ready. Quick/Default and Single/Compare are run configuration controls for the current recipe."}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }

@@ -338,6 +338,20 @@ export function createMockBridge() {
       cancel_recipe_test: () => {
         cancelRequested = true;
       },
+      get_hardware_snapshot: () => ({
+        cpuName: "Mock Ryzen CPU",
+        cpuUsagePercent: 24,
+        ramUsedBytes: 12.6 * 1024 * 1024 * 1024,
+        ramTotalBytes: 64 * 1024 * 1024 * 1024,
+        gpuName: "Mock NVIDIA GPU",
+        gpuUsagePercent: 72,
+        vramUsedMb: 8192,
+        vramTotalMb: 24576,
+        gpuTemperatureC: 62,
+        gpuPowerW: 286,
+        cpuTemperatureC: null,
+        cpuPowerW: null,
+      }),
       save_recipe: () => {
         recipe.status = "saved";
       },

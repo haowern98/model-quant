@@ -8,6 +8,7 @@ import type {
   RecipeSummary,
   RecipeTestMode,
   RecipeEvalPreset,
+  HardwareSnapshot,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -80,6 +81,10 @@ export async function testRecipe(
 
 export async function cancelRecipeTest(): Promise<void> {
   return invoke<void>("cancel_recipe_test");
+}
+
+export async function getHardwareSnapshot(): Promise<HardwareSnapshot> {
+  return invoke<HardwareSnapshot>("get_hardware_snapshot");
 }
 
 export async function saveRecipe(
