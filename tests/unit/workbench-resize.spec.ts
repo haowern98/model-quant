@@ -37,6 +37,33 @@ test("resizes the Explorer while keeping counts and model actions visible", asyn
   await expect(filename).toHaveCSS("text-overflow", "ellipsis");
 });
 
+test("overlays the Explorer resize handle without reserving a layout gap", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+
+  const explorer = page.getByRole("complementary", { name: "Explorer" });
+  const handle = page.getByRole("separator", { name: "Resize Explorer" });
+  const editor = page.locator(".editor-pane");
+  const explorerBox = await explorer.boundingBox();
+  const handleBox = await handle.boundingBox();
+  const editorBox = await editor.boundingBox();
+  const indicatorWidth = await handle.evaluate(
+    (element) => getComputedStyle(element, "::after").width,
+  );
+
+  expect(explorerBox).not.toBeNull();
+  expect(handleBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+
+  const explorerRight = explorerBox!.x + explorerBox!.width;
+  const handleCenter = handleBox!.x + handleBox!.width / 2;
+
+  expect(editorBox!.x).toBe(explorerRight);
+  expect(handleBox!.width).toBe(4);
+  expect(handleCenter).toBe(explorerRight);
+  expect(indicatorWidth).toBe("2px");
+});
+
 test("collapses Explorer past its minimum and restores it by dragging the divider", async ({
   page,
 }) => {

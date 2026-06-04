@@ -521,8 +521,9 @@ button {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 48px var(--explorer-width, 365px) 4px minmax(0, 1fr);
+  grid-template-columns: 48px var(--explorer-width, 365px) minmax(0, 1fr);
   background: var(--vscode-editor);
+  position: relative;
 }
 
 .workbench-shell.explorer-collapsed .explorer-panel {
@@ -556,7 +557,12 @@ body.resizing-bottom-panel .bottom-panel-resizer::after {
 }
 
 .explorer-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(48px + var(--explorer-width, 365px));
   width: 4px;
+  transform: translateX(-2px);
   cursor: col-resize;
 }
 
@@ -1512,7 +1518,7 @@ body.resizing-bottom-panel * {
 
 @media (max-width: 1100px) {
   .workbench-shell {
-    grid-template-columns: 48px var(--explorer-width, 300px) 4px minmax(0, 1fr);
+    grid-template-columns: 48px var(--explorer-width, 300px) minmax(0, 1fr);
   }
 
   .command-center {
