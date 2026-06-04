@@ -2,8 +2,8 @@ import { Fragment } from "react";
 import { SaveOrDiscard } from "./SaveOrDiscard";
 import type { BenchmarkResult, RuntimeBenchmark } from "../../types";
 
-interface TestResultsModalProps {
-  result: BenchmarkResult | null;
+interface EvalResultsViewProps {
+  result: BenchmarkResult;
   onSave: () => void;
   onExport: () => void;
   onDiscard: () => void;
@@ -73,7 +73,7 @@ function choiceLabel(index: number): string {
   return String.fromCharCode(65 + index);
 }
 
-function metricForTask(_task: string): string {
+function metricForTask(): string {
   return "acc_norm";
 }
 
@@ -231,7 +231,7 @@ function ResultsTable({ result }: { result: BenchmarkResult }) {
           </span>
 
           {standard.tasks.map((task) => {
-            const metric = metricForTask(task.task);
+            const metric = metricForTask();
             return (
               <Fragment key={task.task}>
                 <span className="text-text-muted truncate" title={task.task}>
@@ -303,7 +303,7 @@ function PairedCompareTable({ result }: { result: BenchmarkResult }) {
                 {task.task}
               </span>
               <span className="font-mono text-text-primary">
-                {metricForTask(task.task)}
+                {metricForTask()}
               </span>
               <span className="text-right font-mono text-text-primary">
                 0
@@ -461,30 +461,22 @@ function StandardEvalSampleAudit({ result }: { result: BenchmarkResult }) {
   );
 }
 
-export function TestResultsModal({
+export function EvalResultsView({
   result,
   onSave,
   onExport,
   onDiscard,
-}: TestResultsModalProps) {
-  if (!result) return null;
-
+}: EvalResultsViewProps) {
   const isNativeSmoke = result.testMode === "native_runtime_smoke";
   const isNativeBaseline = result.testMode === "native_baseline";
   const passed = isNativeSmoke || isNativeBaseline || result.tokenGenTps > 0;
-  const hasTensorStats =
-    result.copiedTensorCount > 0 ||
-    result.convertedTensorCount > 0 ||
-    result.convertedBytesBefore > 0 ||
-    result.convertedBytesAfter > 0 ||
-    result.requestedTargetCount > 0;
   const quality = result.qualityEval;
   const qualityHasBaseline =
     quality?.baselinePpl !== null && quality?.baselinePpl !== undefined;
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-bg-surface border border-border-default rounded-lg shadow-2xl w-[1080px] max-w-[92vw] max-h-[90vh] overflow-y-auto">
+    <section className="eval-results-editor" aria-label="Eval Results">
+      <div className="eval-results-content">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <h2 className="font-heading text-sm font-semibold text-text-primary uppercase tracking-wider">
             Benchmark Results
@@ -512,35 +504,33 @@ export function TestResultsModal({
           )}
         </div>
 
-        {hasTensorStats && (
-          <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
-            <h3 className="font-semibold text-text-muted uppercase tracking-wider mb-2">
-              Summary
-            </h3>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-              <span className="text-text-muted">Copied tensors</span>
-              <span className="text-right font-mono text-text-primary">
-                {result.copiedTensorCount}
-              </span>
-              <span className="text-text-muted">Converted tensors</span>
-              <span className="text-right font-mono text-text-primary">
-                {result.convertedTensorCount}
-              </span>
-              <span className="text-text-muted">Converted from</span>
-              <span className="text-right font-mono text-text-primary">
-                {formatBytes(result.convertedBytesBefore)}
-              </span>
-              <span className="text-text-muted">Converted to</span>
-              <span className="text-right font-mono text-text-primary">
-                {formatBytes(result.convertedBytesAfter)}
-              </span>
-              <span className="text-text-muted">Verified targets</span>
-              <span className="text-right font-mono text-text-primary">
-                {result.verifiedTargetCount}/{result.requestedTargetCount}
-              </span>
-            </div>
+        <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
+          <h3 className="font-semibold text-text-muted uppercase tracking-wider mb-2">
+            Summary
+          </h3>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <span className="text-text-muted">Copied tensors</span>
+            <span className="text-right font-mono text-text-primary">
+              {result.copiedTensorCount}
+            </span>
+            <span className="text-text-muted">Converted tensors</span>
+            <span className="text-right font-mono text-text-primary">
+              {result.convertedTensorCount}
+            </span>
+            <span className="text-text-muted">Converted from</span>
+            <span className="text-right font-mono text-text-primary">
+              {formatBytes(result.convertedBytesBefore)}
+            </span>
+            <span className="text-text-muted">Converted to</span>
+            <span className="text-right font-mono text-text-primary">
+              {formatBytes(result.convertedBytesAfter)}
+            </span>
+            <span className="text-text-muted">Verified targets</span>
+            <span className="text-right font-mono text-text-primary">
+              {result.verifiedTargetCount}/{result.requestedTargetCount}
+            </span>
           </div>
-        )}
+        </div>
 
         {quality && (
           <div className="mx-4 mt-4 pt-3 border-t border-border-default text-xs">
@@ -619,6 +609,6 @@ export function TestResultsModal({
           />
         </div>
       </div>
-    </div>
+    </section>
   );
 }

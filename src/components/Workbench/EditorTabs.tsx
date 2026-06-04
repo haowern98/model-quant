@@ -1,18 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from "react";
+import { editorTabLabel, type EditorTab } from "./editorTabModel";
 
-interface LayerTabsProps {
-  openLayers: number[];
-  activeLayerIndex: number | null;
-  onSelectLayer: (layerIndex: number) => void;
-  onCloseLayer: (layerIndex: number) => void;
+interface EditorTabsProps {
+  openEditors: EditorTab[];
+  activeEditorId: string | null;
+  onSelectEditor: (editorId: string) => void;
+  onCloseEditor: (editorId: string) => void;
 }
 
-export function LayerTabs({
-  openLayers,
-  activeLayerIndex,
-  onSelectLayer,
-  onCloseLayer,
-}: LayerTabsProps) {
+export function EditorTabs({
+  openEditors,
+  activeEditorId,
+  onSelectEditor,
+  onCloseEditor,
+}: EditorTabsProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
   const hoveringRef = useRef(false);
@@ -22,9 +23,6 @@ export function LayerTabs({
     width: 0,
     left: 0,
   });
-
-  const labelFor = (layerIndex: number) =>
-    layerIndex < 0 ? "Global tensors" : `Layer ${layerIndex}`;
 
   const updateScrollbar = () => {
     const element = scrollRef.current;
@@ -75,7 +73,7 @@ export function LayerTabs({
       observer.disconnect();
       if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
     };
-  }, [openLayers]);
+  }, [openEditors]);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -86,7 +84,7 @@ export function LayerTabs({
     activeTab.scrollIntoView({ block: "nearest", inline: "nearest" });
     updateScrollbar();
     if (element.scrollLeft !== before) showScrollbar(true);
-  }, [activeLayerIndex, openLayers]);
+  }, [activeEditorId, openEditors]);
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     const element = scrollRef.current;
@@ -119,23 +117,23 @@ export function LayerTabs({
           showScrollbar(true);
         }}
       >
-        {openLayers.map((layerIndex) => (
+        {openEditors.map((editor) => (
           <button
-            key={layerIndex}
+            key={editor.id}
             type="button"
             role="tab"
-            aria-label={labelFor(layerIndex)}
-            aria-selected={activeLayerIndex === layerIndex}
-            className={`layer-tab ${activeLayerIndex === layerIndex ? "active" : ""}`}
-            onClick={() => onSelectLayer(layerIndex)}
+            aria-label={editorTabLabel(editor)}
+            aria-selected={activeEditorId === editor.id}
+            className={`layer-tab ${activeEditorId === editor.id ? "active" : ""}`}
+            onClick={() => onSelectEditor(editor.id)}
           >
-            <span className="tab-name">{labelFor(layerIndex)}</span>
+            <span className="tab-name">{editorTabLabel(editor)}</span>
             <span
               className="tab-close"
               aria-hidden="true"
               onClick={(event) => {
                 event.stopPropagation();
-                onCloseLayer(layerIndex);
+                onCloseEditor(editor.id);
               }}
             />
           </button>

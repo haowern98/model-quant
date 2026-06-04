@@ -224,6 +224,12 @@ export function createMockBridge() {
         const isCompare = args?.testMode === "compare_baseline";
         const isDefault = args?.evalPreset !== "quick";
         const standardSampleCount = isDefault ? 300 : 36;
+        const changedTargetCount = recipe.assignments.filter((assignment) => {
+          const tensor = mockModel.tensors.find(
+            (candidate) => candidate.name === assignment.tensorName,
+          );
+          return tensor?.currentQuant !== assignment.quantType;
+        }).length;
         return {
           promptEvalTps: 1247,
           tokenGenTps: 88.3,
@@ -244,12 +250,14 @@ export function createMockBridge() {
           nativeRuntime: null,
           modelTensorCount: mockModel.tensors.length,
           modelMetadataCount: 32,
-          copiedTensorCount: 8,
-          convertedTensorCount: 2,
-          convertedBytesBefore: 160_000_000,
-          convertedBytesAfter: 80_000_000,
-          requestedTargetCount: 2,
-          verifiedTargetCount: 2,
+          copiedTensorCount: changedTargetCount > 0 ? 8 : 0,
+          convertedTensorCount: changedTargetCount,
+          convertedBytesBefore:
+            changedTargetCount > 0 ? changedTargetCount * 80_000_000 : 0,
+          convertedBytesAfter:
+            changedTargetCount > 0 ? changedTargetCount * 40_000_000 : 0,
+          requestedTargetCount: changedTargetCount,
+          verifiedTargetCount: changedTargetCount,
           baselineBenchmark: isCompare
             ? {
                 promptEvalTps: 1180,

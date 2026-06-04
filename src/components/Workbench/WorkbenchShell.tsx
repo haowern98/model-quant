@@ -1,6 +1,7 @@
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   AssignPattern,
+  BenchmarkResult,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -11,6 +12,7 @@ import type {
 import { ActivityBar } from "./ActivityBar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
+import type { EditorTab } from "./editorTabModel";
 
 const EXPLORER_DEFAULT_WIDTH = 365;
 const EXPLORER_MIN_WIDTH = 150;
@@ -26,7 +28,9 @@ interface WorkbenchShellProps {
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
   activeLayerIndex: number | null;
-  openLayers: number[];
+  openEditors: EditorTab[];
+  activeEditorId: string | null;
+  benchmarkResult: BenchmarkResult | null;
   expandedLayers: Set<number>;
   running: boolean;
   progress: ProgressEvent | null;
@@ -35,7 +39,8 @@ interface WorkbenchShellProps {
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
-  onCloseLayer: (layerIndex: number) => void;
+  onSelectEditor: (editorId: string) => void;
+  onCloseEditor: (editorId: string) => void;
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
   onAssignByPattern: (pattern: AssignPattern, quantType: QuantType) => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
@@ -44,6 +49,7 @@ interface WorkbenchShellProps {
   onSaveRecipe: () => void;
   onLoadRecipe: () => void;
   onExport: () => void;
+  onDiscardResults: () => void;
 }
 
 export function WorkbenchShell({
@@ -53,7 +59,9 @@ export function WorkbenchShell({
   assignments,
   profile,
   activeLayerIndex,
-  openLayers,
+  openEditors,
+  activeEditorId,
+  benchmarkResult,
   expandedLayers,
   running,
   progress,
@@ -62,7 +70,8 @@ export function WorkbenchShell({
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
-  onCloseLayer,
+  onSelectEditor,
+  onCloseEditor,
   onAssignQuant,
   onAssignByPattern,
   onEvalPresetChange,
@@ -71,6 +80,7 @@ export function WorkbenchShell({
   onSaveRecipe,
   onLoadRecipe,
   onExport,
+  onDiscardResults,
 }: WorkbenchShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
@@ -146,19 +156,23 @@ export function WorkbenchShell({
         hasModel={tensors.length > 0}
         running={running}
         progress={progress}
-        openLayers={openLayers}
-        activeLayerIndex={activeLayerIndex}
+        openEditors={openEditors}
+        activeEditorId={activeEditorId}
+        benchmarkResult={benchmarkResult}
         tensors={selectedTensors}
         assignments={assignments}
         profile={profile}
         evalPreset={evalPreset}
         testMode={testMode}
-        onSelectLayer={onOpenLayer}
-        onCloseLayer={onCloseLayer}
+        onSelectEditor={onSelectEditor}
+        onCloseEditor={onCloseEditor}
         onAssignQuant={onAssignQuant}
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}
         onTest={onTest}
+        onSaveRecipe={onSaveRecipe}
+        onExport={onExport}
+        onDiscardResults={onDiscardResults}
       />
     </div>
   );

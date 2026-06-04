@@ -1,7 +1,11 @@
 import { useCallback, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
-import { TestResultsModal } from "./components/TestResultsModal/TestResultsModal";
+import {
+  EVAL_RESULTS_TAB_ID,
+  layerEditorTab,
+  type EditorTab,
+} from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
 import { useRecipe } from "./hooks/useRecipe";
 import { useProgress } from "./hooks/useProgress";
@@ -46,16 +50,13 @@ function App() {
   } = useRecipe();
   const { progress, running, startOperation, endOperation } = useProgress();
 
-  const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(
-    null,
-  );
-  const [openLayers, setOpenLayers] = useState<number[]>([]);
+  const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
+  const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
     () => new Set(),
   );
   const [benchmarkResult, setBenchmarkResult] =
     useState<BenchmarkResult | null>(null);
-  const [showResults, setShowResults] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
@@ -69,20 +70,20 @@ function App() {
         currentQuant: t.currentQuant,
       }));
       resetRecipeForModel(path, tensors);
-      setSelectedLayerIndex(null);
-      setOpenLayers([]);
+      setOpenEditors([]);
+      setActiveEditorId(null);
       setExpandedLayers(new Set());
       setBenchmarkResult(null);
-      setShowResults(false);
       setAppError(null);
     },
     [resetRecipeForModel],
   );
 
   const handleOpenLayer = useCallback((layerIndex: number) => {
-    setSelectedLayerIndex(layerIndex);
-    setOpenLayers((current) =>
-      current.includes(layerIndex) ? current : [...current, layerIndex],
+    const tab = layerEditorTab(layerIndex);
+    setActiveEditorId(tab.id);
+    setOpenEditors((current) =>
+      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
     );
     setExpandedLayers((current) => {
       const next = new Set(current);
@@ -100,16 +101,21 @@ function App() {
     });
   }, []);
 
-  const handleCloseLayer = useCallback((layerIndex: number) => {
-    setOpenLayers((current) => {
-      const next = current.filter((item) => item !== layerIndex);
-      setSelectedLayerIndex((selected) => {
-        if (selected !== layerIndex) return selected;
-        return next.length > 0 ? next[next.length - 1] : null;
+  const handleCloseEditor = useCallback((editorId: string) => {
+    setOpenEditors((current) => {
+      const next = current.filter((editor) => editor.id !== editorId);
+      setActiveEditorId((active) => {
+        if (active !== editorId) return active;
+        return next.length > 0 ? next[next.length - 1].id : null;
       });
       return next;
     });
   }, []);
+
+  const handleDiscardResults = useCallback(() => {
+    setBenchmarkResult(null);
+    handleCloseEditor(EVAL_RESULTS_TAB_ID);
+  }, [handleCloseEditor]);
 
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
@@ -160,7 +166,12 @@ function App() {
         recipeEvalPreset,
       );
       setBenchmarkResult(result);
-      setShowResults(true);
+      setOpenEditors((current) =>
+        current.some((editor) => editor.id === EVAL_RESULTS_TAB_ID)
+          ? current
+          : [...current, { id: EVAL_RESULTS_TAB_ID, kind: "eval-results" }],
+      );
+      setActiveEditorId(EVAL_RESULTS_TAB_ID);
       setAppError(null);
       setProfile({ vramEstimate: result.vramAllocatedMb, sizeSavedVsQ8: 0 });
     } catch (e) {
@@ -220,6 +231,10 @@ function App() {
     }
   }, [setRecipeState]);
 
+  const activeEditor =
+    openEditors.find((editor) => editor.id === activeEditorId) ?? null;
+  const selectedLayerIndex =
+    activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
 
@@ -239,7 +254,9 @@ function App() {
           assignments={getAssignments}
           profile={recipe?.profile ?? null}
           activeLayerIndex={selectedLayerIndex}
-          openLayers={openLayers}
+          openEditors={openEditors}
+          activeEditorId={activeEditorId}
+          benchmarkResult={benchmarkResult}
           expandedLayers={expandedLayers}
           running={running}
           progress={progress}
@@ -248,7 +265,8 @@ function App() {
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
-          onCloseLayer={handleCloseLayer}
+          onSelectEditor={setActiveEditorId}
+          onCloseEditor={handleCloseEditor}
           onAssignQuant={assignQuant}
           onAssignByPattern={assignByPattern}
           onEvalPresetChange={setRecipeEvalPreset}
@@ -257,17 +275,9 @@ function App() {
           onSaveRecipe={handleSaveRecipe}
           onLoadRecipe={handleLoadRecipe}
           onExport={handleExport}
+          onDiscardResults={handleDiscardResults}
         />
       </div>
-
-      {showResults && (
-        <TestResultsModal
-          result={benchmarkResult}
-          onSave={handleSaveRecipe}
-          onExport={handleExport}
-          onDiscard={() => setShowResults(false)}
-        />
-      )}
     </div>
   );
 }

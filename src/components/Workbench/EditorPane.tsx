@@ -1,6 +1,7 @@
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { TensorTable } from "../DetailPanel/TensorTable";
 import type {
+  BenchmarkResult,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -8,9 +9,11 @@ import type {
   RecipeTestMode,
   TensorInfo,
 } from "../../types";
+import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
-import { LayerTabs } from "./LayerTabs";
+import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
+import { editorTabLabel, type EditorTab } from "./editorTabModel";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
@@ -24,19 +27,23 @@ interface EditorPaneProps {
   hasModel: boolean;
   running: boolean;
   progress: ProgressEvent | null;
-  openLayers: number[];
-  activeLayerIndex: number | null;
+  openEditors: EditorTab[];
+  activeEditorId: string | null;
+  benchmarkResult: BenchmarkResult | null;
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
-  onSelectLayer: (layerIndex: number) => void;
-  onCloseLayer: (layerIndex: number) => void;
+  onSelectEditor: (editorId: string) => void;
+  onCloseEditor: (editorId: string) => void;
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onTest: () => void;
+  onSaveRecipe: () => void;
+  onExport: () => void;
+  onDiscardResults: () => void;
 }
 
 function basename(path: string | null): string {
@@ -55,25 +62,36 @@ export function EditorPane({
   hasModel,
   running,
   progress,
-  openLayers,
-  activeLayerIndex,
+  openEditors,
+  activeEditorId,
+  benchmarkResult,
   tensors,
   assignments,
   profile,
   evalPreset,
   testMode,
-  onSelectLayer,
-  onCloseLayer,
+  onSelectEditor,
+  onCloseEditor,
   onAssignQuant,
   onEvalPresetChange,
   onTestModeChange,
   onTest,
+  onSaveRecipe,
+  onExport,
+  onDiscardResults,
 }: EditorPaneProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
-  const activeTitle = layerTitle(activeLayerIndex);
-  const activeBreadcrumb =
-    activeLayerIndex === null ? "workspace" : activeTitle;
+  const activeEditor =
+    openEditors.find((editor) => editor.id === activeEditorId) ?? null;
+  const activeLayerIndex =
+    activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
+  const activeTitle =
+    activeEditor?.kind === "eval-results"
+      ? "Eval Results"
+      : layerTitle(activeLayerIndex);
+  const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
+  const showingResults = activeEditor?.kind === "eval-results" && benchmarkResult;
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -108,11 +126,11 @@ export function EditorPane({
       style={{ "--bottom-panel-height": `${bottomPanelHeight}px` } as CSSProperties}
     >
       <div className="editor-tabs-bar">
-        <LayerTabs
-          openLayers={openLayers}
-          activeLayerIndex={activeLayerIndex}
-          onSelectLayer={onSelectLayer}
-          onCloseLayer={onCloseLayer}
+        <EditorTabs
+          openEditors={openEditors}
+          activeEditorId={activeEditorId}
+          onSelectEditor={onSelectEditor}
+          onCloseEditor={onCloseEditor}
         />
         <RunControls
           hasModel={hasModel}
@@ -131,33 +149,42 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>tensors</span>
+        <span>{showingResults ? "benchmark" : "tensors"}</span>
       </div>
 
-      <section className="tensor-editor-surface">
-        <div className="tensor-editor-content">
-          <div className="tensor-editor-title">
-            <div>
-              <h1>{activeTitle}</h1>
+      {showingResults ? (
+        <EvalResultsView
+          result={benchmarkResult}
+          onSave={onSaveRecipe}
+          onExport={onExport}
+          onDiscard={onDiscardResults}
+        />
+      ) : (
+        <section className="tensor-editor-surface">
+          <div className="tensor-editor-content">
+            <div className="tensor-editor-title">
+              <div>
+                <h1>{activeTitle}</h1>
+              </div>
             </div>
-          </div>
-          <TensorTable
-            tensors={tensors}
-            assignments={assignments}
-            onAssignQuant={onAssignQuant}
-          />
-        </div>
-        <div className="editor-minimap" aria-hidden="true">
-          {Array.from({ length: 24 }, (_, index) => (
-            <span
-              key={index}
-              className={
-                index % 5 === 0 ? "blue" : index % 7 === 0 ? "amber" : ""
-              }
+            <TensorTable
+              tensors={tensors}
+              assignments={assignments}
+              onAssignQuant={onAssignQuant}
             />
-          ))}
-        </div>
-      </section>
+          </div>
+          <div className="editor-minimap" aria-hidden="true">
+            {Array.from({ length: 24 }, (_, index) => (
+              <span
+                key={index}
+                className={
+                  index % 5 === 0 ? "blue" : index % 7 === 0 ? "amber" : ""
+                }
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div
         className="resize-handle bottom-panel-resizer"

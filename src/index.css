@@ -66,6 +66,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -78,6 +79,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -89,6 +91,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -101,6 +104,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -112,6 +116,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -123,6 +128,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -134,6 +140,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -145,6 +152,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .eval-results-editor,
   .tensor-editor-content,
   .tensor-table-scroll,
   .overflow-auto,
@@ -1152,6 +1160,19 @@ body.resizing-bottom-panel * {
   background: var(--vscode-editor);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 78px;
+}
+
+.eval-results-editor {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--vscode-editor);
+}
+
+.eval-results-content {
+  min-width: 0;
+  padding-bottom: 16px;
 }
 
 .tensor-editor-content {
