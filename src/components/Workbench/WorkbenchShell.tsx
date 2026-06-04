@@ -33,6 +33,7 @@ interface WorkbenchShellProps {
   benchmarkResult: BenchmarkResult | null;
   expandedLayers: Set<number>;
   running: boolean;
+  cancelling: boolean;
   progress: ProgressEvent | null;
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
@@ -46,6 +47,7 @@ interface WorkbenchShellProps {
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onTest: () => void;
+  onCancelTest: () => void;
   onSaveRecipe: () => void;
   onLoadRecipe: () => void;
   onExport: () => void;
@@ -64,6 +66,7 @@ export function WorkbenchShell({
   benchmarkResult,
   expandedLayers,
   running,
+  cancelling,
   progress,
   evalPreset,
   testMode,
@@ -77,6 +80,7 @@ export function WorkbenchShell({
   onEvalPresetChange,
   onTestModeChange,
   onTest,
+  onCancelTest,
   onSaveRecipe,
   onLoadRecipe,
   onExport,
@@ -155,6 +159,7 @@ export function WorkbenchShell({
         modelPath={modelPath}
         hasModel={tensors.length > 0}
         running={running}
+        cancelling={cancelling}
         progress={progress}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
@@ -170,6 +175,7 @@ export function WorkbenchShell({
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}
         onTest={onTest}
+        onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}
         onExport={onExport}
         onDiscardResults={onDiscardResults}

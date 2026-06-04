@@ -190,38 +190,42 @@ pub async fn test_recipe(
     state: State<'_, RecipeStore>,
 ) -> Result<BenchmarkResult, String> {
     let progress = ProgressEmitter::new(app.clone());
+    crate::ffi::runtime_bindings::reset_recipe_test_cancel();
+    let test_result = (|| {
+        let source = PathBuf::from(&recipe.base_model);
+        if !source.exists() {
+            return Err(format!("Source model not found: {}", recipe.base_model));
+        }
 
-    let source = PathBuf::from(&recipe.base_model);
-    if !source.exists() {
-        return Err(format!("Source model not found: {}", recipe.base_model));
-    }
+        let targets = recipe_targets(&recipe);
+        let analysis =
+            crate::ffi::runtime_bindings::analyze_recipe(&source.to_string_lossy(), &targets)?;
+        validate_recipe_analysis(&analysis)?;
 
-    let targets = recipe_targets(&recipe);
-    let analysis =
-        crate::ffi::runtime_bindings::analyze_recipe(&source.to_string_lossy(), &targets)?;
-    validate_recipe_analysis(&analysis)?;
-
-    progress.requantizing(1.0, "skipped");
-    progress.writing(1.0, "no temporary GGUF written");
-    let eval_preset =
-        crate::profile::benchmark::parse_standard_eval_preset(eval_preset.as_deref())?;
-    let result = match test_mode.as_deref().unwrap_or("compare_baseline") {
-        "single" => run_native_recipe_single_benchmark(
-            &source,
-            &targets,
-            prompt_tokens,
-            eval_preset,
-            &progress,
-        )?,
-        "compare_baseline" => run_native_recipe_compare_benchmark(
-            &source,
-            &targets,
-            prompt_tokens,
-            eval_preset,
-            &progress,
-        )?,
-        mode => return Err(format!("Unknown test recipe mode: {}", mode)),
-    };
+        progress.requantizing(1.0, "skipped");
+        progress.writing(1.0, "no temporary GGUF written");
+        let eval_preset =
+            crate::profile::benchmark::parse_standard_eval_preset(eval_preset.as_deref())?;
+        match test_mode.as_deref().unwrap_or("compare_baseline") {
+            "single" => run_native_recipe_single_benchmark(
+                &source,
+                &targets,
+                prompt_tokens,
+                eval_preset,
+                &progress,
+            ),
+            "compare_baseline" => run_native_recipe_compare_benchmark(
+                &source,
+                &targets,
+                prompt_tokens,
+                eval_preset,
+                &progress,
+            ),
+            mode => Err(format!("Unknown test recipe mode: {}", mode)),
+        }
+    })();
+    crate::ffi::runtime_bindings::reset_recipe_test_cancel();
+    let result = test_result?;
 
     {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -235,6 +239,11 @@ pub async fn test_recipe(
     }
 
     Ok(result)
+}
+
+#[tauri::command]
+pub fn cancel_recipe_test() {
+    crate::ffi::runtime_bindings::cancel_recipe_test();
 }
 
 fn recipe_targets(recipe: &RecipeState) -> Vec<(String, String)> {

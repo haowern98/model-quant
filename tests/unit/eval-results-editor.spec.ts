@@ -10,6 +10,36 @@ async function loadModel(page: import("@playwright/test").Page) {
 }
 
 test.describe("Eval Results editor", () => {
+  test("turns the run button into a pulsing cancel control while testing", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await loadModel(page);
+
+    const runButton = page.getByRole("button", { name: "Run recipe test" });
+    await expect(runButton).toBeEnabled();
+    await runButton.click();
+
+    const cancelButton = page.getByRole("button", { name: "Cancel recipe test" });
+    await expect(cancelButton).toBeVisible();
+    await expect(cancelButton).toHaveClass(/cancelling-ready/);
+    await expect(cancelButton.locator(".run-cancel-icon")).toHaveCSS(
+      "animation-name",
+      "run-cancel-pulse",
+    );
+
+    await cancelButton.click();
+    await expect(page.getByText("Cancelling test...")).toBeVisible();
+    await expect(cancelButton).toBeDisabled();
+
+    await expect(runButton).toBeVisible();
+    await expect(
+      page.getByRole("tablist", { name: "Open layers" }).getByRole("tab", {
+        name: "Eval Results",
+      }),
+    ).toHaveCount(0);
+  });
+
   test("opens completed test results in one reusable editor tab", async ({ page }) => {
     await page.goto("/");
     await loadModel(page);

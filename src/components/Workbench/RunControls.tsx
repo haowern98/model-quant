@@ -3,23 +3,27 @@ import type { ProgressEvent, RecipeEvalPreset, RecipeTestMode } from "../../type
 interface RunControlsProps {
   hasModel: boolean;
   running: boolean;
+  cancelling: boolean;
   progress: ProgressEvent | null;
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onTest: () => void;
+  onCancelTest: () => void;
 }
 
 export function RunControls({
   hasModel,
   running,
+  cancelling,
   progress,
   evalPreset,
   testMode,
   onEvalPresetChange,
   onTestModeChange,
   onTest,
+  onCancelTest,
 }: RunControlsProps) {
   return (
     <div className="editor-run-controls">
@@ -44,13 +48,24 @@ export function RunControls({
       </select>
       <button
         type="button"
-        className="editor-run-button"
-        aria-label="Run recipe test"
-        disabled={!hasModel || running}
-        onClick={onTest}
-        title={testMode === "compare_baseline" ? "Compare Recipe" : "Test Recipe"}
+        className={`editor-run-button ${running ? "cancelling-ready" : ""}`}
+        aria-label={running ? "Cancel recipe test" : "Run recipe test"}
+        disabled={!hasModel || cancelling}
+        onClick={running ? onCancelTest : onTest}
+        title={
+          running
+            ? cancelling
+              ? "Cancelling test"
+              : "Cancel test"
+            : testMode === "compare_baseline"
+              ? "Compare Recipe"
+              : "Test Recipe"
+        }
       >
-        <span aria-hidden="true" />
+        <span
+          className={running ? "run-cancel-icon" : "run-play-icon"}
+          aria-hidden="true"
+        />
       </button>
     </div>
   );

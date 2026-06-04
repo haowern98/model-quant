@@ -152,6 +152,8 @@ extern "C" {
     fn ms_runtime_version() -> *const c_char;
     fn ms_runtime_llama_system_info() -> *const c_char;
     fn ms_runtime_last_error() -> *const c_char;
+    fn ms_runtime_reset_recipe_test_cancel();
+    fn ms_runtime_cancel_recipe_test();
     fn ms_runtime_inspect_gguf(path: *const c_char, out_summary: *mut MsGgufSummary) -> c_int;
     fn ms_runtime_analyze_recipe(
         path: *const c_char,
@@ -251,6 +253,14 @@ pub fn runtime_version() -> String {
 
 pub fn llama_system_info() -> String {
     unsafe { c_string(ms_runtime_llama_system_info()) }
+}
+
+pub fn reset_recipe_test_cancel() {
+    unsafe { ms_runtime_reset_recipe_test_cancel() }
+}
+
+pub fn cancel_recipe_test() {
+    unsafe { ms_runtime_cancel_recipe_test() }
 }
 
 pub fn inspect_gguf(path: &str) -> Result<MsGgufSummary, String> {

@@ -12,6 +12,7 @@ import { useProgress } from "./hooks/useProgress";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   testRecipe,
+  cancelRecipeTest,
   saveRecipe,
   loadRecipe,
   exportGguf,
@@ -48,7 +49,14 @@ function App() {
     setProfile,
     getAssignments,
   } = useRecipe();
-  const { progress, running, startOperation, endOperation } = useProgress();
+  const {
+    progress,
+    running,
+    cancelling,
+    startOperation,
+    requestCancellation,
+    endOperation,
+  } = useProgress();
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
@@ -175,7 +183,8 @@ function App() {
       setAppError(null);
       setProfile({ vramEstimate: result.vramAllocatedMb, sizeSavedVsQ8: 0 });
     } catch (e) {
-      setAppError((e as Error).message);
+      const message = (e as Error).message;
+      if (!message.toLowerCase().includes("cancelled")) setAppError(message);
     } finally {
       endOperation();
     }
@@ -188,6 +197,16 @@ function App() {
     endOperation,
     setProfile,
   ]);
+
+  const handleCancelTest = useCallback(async () => {
+    if (!running || cancelling) return;
+    requestCancellation();
+    try {
+      await cancelRecipeTest();
+    } catch (e) {
+      setAppError((e as Error).message);
+    }
+  }, [running, cancelling, requestCancellation]);
 
   const handleSaveRecipe = useCallback(async () => {
     if (!recipe) return;
@@ -259,6 +278,7 @@ function App() {
           benchmarkResult={benchmarkResult}
           expandedLayers={expandedLayers}
           running={running}
+          cancelling={cancelling}
           progress={progress}
           evalPreset={recipeEvalPreset}
           testMode={recipeTestMode}
@@ -272,6 +292,7 @@ function App() {
           onEvalPresetChange={setRecipeEvalPreset}
           onTestModeChange={setRecipeTestMode}
           onTest={handleTest}
+          onCancelTest={handleCancelTest}
           onSaveRecipe={handleSaveRecipe}
           onLoadRecipe={handleLoadRecipe}
           onExport={handleExport}

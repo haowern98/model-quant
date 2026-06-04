@@ -1120,12 +1120,42 @@ body.resizing-bottom-panel * {
   background: #37373d;
 }
 
-.editor-run-button span {
+.editor-run-button .run-play-icon {
   width: 0;
   height: 0;
   border-left: 10px solid var(--vscode-success);
   border-top: 6px solid transparent;
   border-bottom: 6px solid transparent;
+}
+
+.editor-run-button.cancelling-ready {
+  color: #f48771;
+}
+
+.editor-run-button .run-cancel-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #f14c4c;
+  box-shadow: 0 0 0 0 rgba(241, 76, 76, 0.55);
+  animation: run-cancel-pulse 1.15s ease-out infinite;
+}
+
+.editor-run-button:disabled .run-cancel-icon {
+  animation: none;
+  opacity: 0.75;
+}
+
+@keyframes run-cancel-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(241, 76, 76, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(241, 76, 76, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(241, 76, 76, 0);
+  }
 }
 
 .run-progress {

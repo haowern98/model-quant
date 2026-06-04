@@ -26,6 +26,7 @@ interface EditorPaneProps {
   modelPath: string | null;
   hasModel: boolean;
   running: boolean;
+  cancelling: boolean;
   progress: ProgressEvent | null;
   openEditors: EditorTab[];
   activeEditorId: string | null;
@@ -41,6 +42,7 @@ interface EditorPaneProps {
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onTest: () => void;
+  onCancelTest: () => void;
   onSaveRecipe: () => void;
   onExport: () => void;
   onDiscardResults: () => void;
@@ -61,6 +63,7 @@ export function EditorPane({
   modelPath,
   hasModel,
   running,
+  cancelling,
   progress,
   openEditors,
   activeEditorId,
@@ -76,6 +79,7 @@ export function EditorPane({
   onEvalPresetChange,
   onTestModeChange,
   onTest,
+  onCancelTest,
   onSaveRecipe,
   onExport,
   onDiscardResults,
@@ -135,12 +139,14 @@ export function EditorPane({
         <RunControls
           hasModel={hasModel}
           running={running}
+          cancelling={cancelling}
           progress={progress}
           evalPreset={evalPreset}
           testMode={testMode}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
           onTest={onTest}
+          onCancelTest={onCancelTest}
         />
       </div>
 

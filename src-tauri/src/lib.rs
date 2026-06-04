@@ -28,6 +28,7 @@ pub fn run() {
             commands::export::load_recipe,
             commands::export::list_recipes,
             commands::export::test_recipe,
+            commands::export::cancel_recipe_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

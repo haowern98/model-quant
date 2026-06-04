@@ -5,6 +5,7 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -28,6 +29,21 @@
 namespace {
 
 thread_local std::string last_error;
+std::atomic<bool> recipe_test_cancel_flag{false};
+
+bool recipe_test_cancel_requested() {
+    return recipe_test_cancel_flag.load(std::memory_order_relaxed);
+}
+
+void throw_if_recipe_test_cancelled() {
+    if (recipe_test_cancel_requested()) {
+        throw std::runtime_error("Recipe test cancelled");
+    }
+}
+
+bool recipe_test_load_progress(float, void *) {
+    return !recipe_test_cancel_requested();
+}
 
 void null_log_callback(ggml_log_level, const char *, void *) {
 }
@@ -410,6 +426,7 @@ uint32_t session_context_tokens(uint32_t max_eval_tokens) {
 }
 
 void open_session_context(ModelSession & session, uint32_t context_tokens) {
+    throw_if_recipe_test_cancelled();
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = context_tokens;
     ctx_params.n_batch = std::min<uint32_t>(512, context_tokens);
@@ -422,6 +439,7 @@ void open_session_context(ModelSession & session, uint32_t context_tokens) {
     if (session.ctx == nullptr) {
         throw std::runtime_error("failed to create llama context for model session");
     }
+    throw_if_recipe_test_cancelled();
     session.vram.sample();
 }
 
@@ -433,19 +451,23 @@ void reset_session_context(ModelSession & session) {
 }
 
 std::unique_ptr<ModelSession> open_baseline_session(const char * path, uint32_t context_tokens) {
+    throw_if_recipe_test_cancelled();
     VramTracker vram_tracker = {};
     vram_tracker.reset();
 
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = -1;
     model_params.use_mmap = true;
+    model_params.progress_callback = recipe_test_load_progress;
 
     const auto load_start = std::chrono::steady_clock::now();
     llama_model * model = llama_model_load_from_file(path, model_params);
     const auto load_end = std::chrono::steady_clock::now();
     if (model == nullptr) {
+        throw_if_recipe_test_cancelled();
         throw std::runtime_error(std::string("failed to load model: ") + path);
     }
+    throw_if_recipe_test_cancelled();
     vram_tracker.sample();
 
     auto session = std::make_unique<ModelSession>(model, elapsed_ms(load_start, load_end), vram_tracker);
@@ -577,6 +599,7 @@ std::unique_ptr<ModelSession> open_recipe_session(
     const char * path,
     std::unordered_map<std::string, ggml_type> target_types,
     uint32_t context_tokens) {
+    throw_if_recipe_test_cancelled();
     gguf_init_params gguf_params = {};
     gguf_params.no_alloc = true;
     gguf_params.ctx = nullptr;
@@ -618,6 +641,7 @@ std::unique_ptr<ModelSession> open_recipe_session(
     llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = -1;
     model_params.use_mmap = false;
+    model_params.progress_callback = recipe_test_load_progress;
 
     const auto load_start = std::chrono::steady_clock::now();
     llama_model * model = llama_model_init_from_user(
@@ -627,8 +651,10 @@ std::unique_ptr<ModelSession> open_recipe_session(
         model_params);
     const auto load_end = std::chrono::steady_clock::now();
     if (model == nullptr) {
+        throw_if_recipe_test_cancelled();
         throw std::runtime_error(std::string("failed to load recipe model: ") + path);
     }
+    throw_if_recipe_test_cancelled();
     vram_tracker.sample();
 
     const RecipeTargetVerification verification = verify_recipe_tensor_target_types(
@@ -744,6 +770,7 @@ void convert_source_tensor_to_quant(
 
     const size_t source_offset = reader->data_offset + gguf_get_tensor_offset(reader->source_metadata, tensor_id);
     for (int64_t row = 0; row < nrows; ++row) {
+        throw_if_recipe_test_cancelled();
         read_exact_at(
             reader,
             source_offset + static_cast<size_t>(row) * source_row_size,
@@ -785,6 +812,7 @@ void convert_source_tensor_to_quant(
 }
 
 void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
+    throw_if_recipe_test_cancelled();
     auto * reader = static_cast<UserCopyTensorReader *>(userdata);
     if (reader == nullptr || reader->source_metadata == nullptr) {
         throw std::runtime_error("user tensor copy reader is not initialized");
@@ -831,6 +859,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata) {
 
     size_t copied = 0;
     while (copied < expected_size) {
+        throw_if_recipe_test_cancelled();
         const size_t chunk_size = (expected_size - copied) < reader->buffer.size()
             ? (expected_size - copied)
             : reader->buffer.size();
@@ -1004,6 +1033,7 @@ double score_sequence_suffix_nll(
     double nll = 0.0;
     uint64_t scored_tokens = 0;
     for (size_t target_index = first_scored_token; target_index < sequence.size(); ++target_index) {
+        throw_if_recipe_test_cancelled();
         const float * logits = llama_get_logits_ith(session.ctx.get(), -1);
         nll += token_nll_from_logits(logits, n_vocab, sequence[target_index]);
         scored_tokens += 1;
@@ -1037,6 +1067,7 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
     scores.reserve(static_cast<size_t>(sample_count));
 
     for (uint64_t sample_index = 0; sample_index < sample_count; ++sample_index) {
+        throw_if_recipe_test_cancelled();
         const ms_standard_eval_sample & sample = samples[sample_index];
         if (sample.task == nullptr || sample.task[0] == '\0') {
             throw std::runtime_error("standard eval sample task is empty");
@@ -1062,6 +1093,7 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
 
         const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
         for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
+            throw_if_recipe_test_cancelled();
             if (sample.choices[choice_index] == nullptr || sample.choices[choice_index][0] == '\0') {
                 throw std::runtime_error(std::string("standard eval sample choice is empty for task: ") + sample.task);
             }
@@ -1080,6 +1112,7 @@ std::vector<StandardEvalSampleScore> score_standard_eval_samples(
         }
 
         for (uint64_t choice_index = 0; choice_index < sample.choice_count; ++choice_index) {
+            throw_if_recipe_test_cancelled();
             uint64_t token_count = 0;
             const double nll = score_sequence_suffix_nll(
                 session,
@@ -1377,8 +1410,10 @@ PerplexityScore score_session_perplexity(
 
     const auto eval_start = std::chrono::steady_clock::now();
     for (const LlamaPplChunk & chunk : chunks) {
+        throw_if_recipe_test_cancelled();
         reset_session_context(session);
         for (size_t token_index = chunk.begin; token_index + 1 < chunk.end; ++token_index) {
+            throw_if_recipe_test_cancelled();
             llama_token token = tokens[token_index];
             if (add_bos && token_index == chunk.begin) {
                 token = bos_token;
@@ -1473,6 +1508,7 @@ int32_t run_session_benchmark(
     uint32_t generated = 0;
     const auto generation_start = std::chrono::steady_clock::now();
     for (uint32_t i = 0; i < max_tokens; ++i) {
+        throw_if_recipe_test_cancelled();
         llama_token token = llama_sampler_sample(sampler.get(), session.ctx.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) {
             break;
@@ -1530,6 +1566,14 @@ const char * ms_runtime_llama_system_info(void) {
 
 const char * ms_runtime_last_error(void) {
     return last_error.c_str();
+}
+
+void ms_runtime_reset_recipe_test_cancel(void) {
+    recipe_test_cancel_flag.store(false, std::memory_order_relaxed);
+}
+
+void ms_runtime_cancel_recipe_test(void) {
+    recipe_test_cancel_flag.store(true, std::memory_order_relaxed);
 }
 
 int32_t ms_runtime_inspect_gguf(const char * path, ms_gguf_summary * out_summary) {
@@ -1601,10 +1645,12 @@ int32_t ms_runtime_analyze_recipe(
         analysis.tensor_count = target_count;
 
         for (int64_t i = 0; i < gguf_get_n_tensors(ctx); ++i) {
+            throw_if_recipe_test_cancelled();
             analysis.current_size_bytes += static_cast<uint64_t>(gguf_get_tensor_size(ctx, i));
         }
 
         for (uint64_t i = 0; i < target_count; ++i) {
+            throw_if_recipe_test_cancelled();
             const ms_recipe_tensor_target & target = targets[i];
             if (target.name == nullptr || target.name[0] == '\0') {
                 analysis.missing_count += 1;

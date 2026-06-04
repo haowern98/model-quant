@@ -169,6 +169,17 @@ void test_llama_mcq_score_uses_token_average_logprob() {
     assert(std::abs(score - -4.0) < 1e-12);
 }
 
+void test_recipe_test_cancellation_flag_can_reset_and_cancel() {
+    ms_runtime_reset_recipe_test_cancel();
+    assert(!recipe_test_cancel_requested());
+
+    ms_runtime_cancel_recipe_test();
+    assert(recipe_test_cancel_requested());
+
+    ms_runtime_reset_recipe_test_cancel();
+    assert(!recipe_test_cancel_requested());
+}
+
 }
 
 int main() {
@@ -181,6 +192,7 @@ int main() {
     test_llama_ppl_uncertainty_matches_upstream_formula();
     test_llama_mcq_common_prefix_stops_at_first_different_token();
     test_llama_mcq_score_uses_token_average_logprob();
+    test_recipe_test_cancellation_flag_can_reset_and_cancel();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;
 }

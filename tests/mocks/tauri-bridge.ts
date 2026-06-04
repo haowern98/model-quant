@@ -7,6 +7,7 @@ import type {
 import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
+  let cancelRequested = false;
   const allowedTargetQuants: QuantType[] = [
     "F32",
     "BF16",
@@ -220,7 +221,12 @@ export function createMockBridge() {
         recipe.status = "draft";
         return recipe;
       },
-      test_recipe: (args) => {
+      test_recipe: async (args) => {
+        cancelRequested = false;
+        for (let interval = 0; interval < 4; interval += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          if (cancelRequested) throw new Error("Recipe test cancelled");
+        }
         const isCompare = args?.testMode === "compare_baseline";
         const isDefault = args?.evalPreset !== "quick";
         const standardSampleCount = isDefault ? 300 : 36;
@@ -328,6 +334,9 @@ export function createMockBridge() {
             })),
           },
         };
+      },
+      cancel_recipe_test: () => {
+        cancelRequested = true;
       },
       save_recipe: () => {
         recipe.status = "saved";

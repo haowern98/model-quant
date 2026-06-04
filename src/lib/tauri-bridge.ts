@@ -78,6 +78,10 @@ export async function testRecipe(
   });
 }
 
+export async function cancelRecipeTest(): Promise<void> {
+  return invoke<void>("cancel_recipe_test");
+}
+
 export async function saveRecipe(
   path: string,
   recipe: RecipeState,
