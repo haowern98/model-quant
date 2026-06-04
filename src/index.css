@@ -962,14 +962,49 @@ body.resizing-bottom-panel * {
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
 }
 
-.layer-tabs {
+.layer-tabs-shell {
   flex: 1;
   min-width: 0;
-  display: flex;
+  height: 35px;
+  position: relative;
   overflow: hidden;
 }
 
+.layer-tabs {
+  width: 100%;
+  height: 35px;
+  min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.layer-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.layer-tabs-scroll-thumb {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(121, 121, 121, 0.68);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    transform 60ms linear,
+    width 60ms linear;
+  z-index: 4;
+}
+
+.layer-tabs-scroll-thumb.visible {
+  opacity: 1;
+}
+
 .layer-tab {
+  flex: 0 0 132px;
   min-width: 132px;
   max-width: 180px;
   height: 35px;
