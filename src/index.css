@@ -184,14 +184,34 @@ button {
 }
 
 .titlebar {
-  display: flex;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   height: 35px;
+  position: relative;
   background: var(--vscode-title);
   color: #d4d4d4;
   border-bottom: 1px solid var(--vscode-border-soft);
   user-select: none;
+}
+
+.titlebar-left,
+.titlebar-right {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.titlebar-left {
+  overflow: hidden;
+}
+
+.titlebar-right {
+  justify-content: flex-end;
 }
 
 .app-mark {
@@ -235,7 +255,9 @@ button {
   display: flex;
   align-items: center;
   height: 100%;
-  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
 }
 
 .menu button,
@@ -260,7 +282,6 @@ button {
 }
 
 .nav-buttons {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -274,37 +295,101 @@ button {
   border-radius: 4px;
 }
 
-.command-center {
-  height: 28px;
-  min-width: 420px;
-  max-width: 560px;
-  flex: 0 1 46vw;
+.command-center-group {
+  position: relative;
+  width: min(46vw, 840px);
+  min-width: 0;
+  max-width: 840px;
+  height: 24px;
+  display: flex;
+  z-index: 2;
+}
+
+.command-center,
+.command-center-dropdown {
+  height: 24px;
   border: 1px solid #5a5a5a;
-  border-radius: 5px;
   background: #454545;
   color: #bdbdbd;
+  cursor: pointer;
+}
+
+.command-center {
+  min-width: 0;
+  flex: 1 1 auto;
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
   display: flex;
   align-items: center;
   padding: 0 16px;
-  cursor: pointer;
+  text-align: left;
+}
+
+.command-center-dropdown {
+  width: 34px;
+  flex: 0 0 34px;
+  border-radius: 0 6px 6px 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-left-color: rgba(255, 255, 255, 0.1);
+}
+
+.command-center-group {
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.025),
     0 1px 0 rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
 }
 
-.command-center:hover {
+.command-center:hover,
+.command-center-dropdown:hover {
   background: #4a4a4a;
 }
 
-.command-center:focus {
+.command-center-group:focus-within {
   outline: 1px solid var(--vscode-blue);
-  outline-offset: -1px;
+  outline-offset: 0;
 }
 
 .command-title {
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.command-center-dropdown .codicon {
+  font-size: 14px;
+}
+
+.command-center-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  width: 220px;
+  padding: 4px;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  background: #252526;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.command-center-menu button {
+  width: 100%;
+  height: 26px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: #cccccc;
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-center-menu button:hover {
+  background: #04395e;
+  color: #ffffff;
 }
 
 .title-drag-fill {
@@ -1277,7 +1362,11 @@ button {
   }
 
   .command-center {
-    min-width: 220px;
+    min-width: 0;
+  }
+
+  .command-center-group {
+    width: min(42vw, 460px);
   }
 
   .menu button:nth-last-child(-n + 3) {
