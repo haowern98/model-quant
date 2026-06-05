@@ -22,7 +22,7 @@ export function TitleBar({ modelPath, onOpenModel }: TitleBarProps) {
     <header className="titlebar">
       <div className="titlebar-left">
         <div className="app-mark" aria-label="Model Surgery">
-          <span className="vscode-mark" aria-hidden="true" />
+          <img src="/app-icon.png" alt="" aria-hidden="true" />
         </div>
 
         <div className="nav-buttons" aria-label="Navigation">

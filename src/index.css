@@ -234,36 +234,13 @@ button {
   height: 35px;
   display: grid;
   place-items: center;
-  color: #23a7f2;
   flex: 0 0 44px;
 }
 
-.vscode-mark {
-  width: 19px;
-  height: 19px;
-  position: relative;
+.app-mark img {
+  width: 22px;
+  height: 22px;
   display: block;
-}
-
-.vscode-mark::before,
-.vscode-mark::after {
-  content: "";
-  position: absolute;
-  background: currentColor;
-  clip-path: polygon(0 12%, 42% 0, 100% 20%, 100% 80%, 42% 100%, 0 88%, 46% 50%);
-}
-
-.vscode-mark::before {
-  inset: 1px;
-  opacity: 0.92;
-}
-
-.vscode-mark::after {
-  width: 9px;
-  height: 17px;
-  right: 1px;
-  top: 1px;
-  opacity: 0.62;
 }
 
 .menu {

@@ -1,4 +1,8 @@
 fn main() {
+    println!("cargo:rerun-if-changed=icons/icon.ico");
+    println!("cargo:rerun-if-changed=icons/32x32.png");
+    println!("cargo:rerun-if-changed=icons/128x128.png");
+
     // Compile C++ CUDA profiler (only if CUDA toolkit is present)
     let cuda_path = std::env::var("CUDA_PATH")
         .unwrap_or_else(|_| "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.5".to_string());
