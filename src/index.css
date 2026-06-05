@@ -1034,6 +1034,7 @@ body.resizing-bottom-panel * {
   min-width: 132px;
   max-width: 180px;
   height: 35px;
+  position: relative;
   border: 0;
   border-right: 1px solid var(--vscode-border-subtle);
   background: var(--vscode-tab);
@@ -1049,7 +1050,16 @@ body.resizing-bottom-panel * {
 .layer-tab.active {
   background: var(--vscode-editor);
   color: #ffffff;
-  box-shadow: inset 0 1px 0 var(--vscode-editor);
+}
+
+.layer-tab.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--vscode-blue);
 }
 
 .layer-tab .tab-name {
