@@ -4,6 +4,7 @@ import type { ProgressEvent } from '../types';
 export function useProgress() {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [running, setRunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -24,8 +25,31 @@ export function useProgress() {
     return () => { unlisten?.(); };
   }, []);
 
-  const startOperation = () => { setRunning(true); setProgress(null); };
-  const endOperation = () => { setRunning(false); setProgress(null); };
+  const startOperation = () => {
+    setRunning(true);
+    setCancelling(false);
+    setProgress(null);
+  };
+  const requestCancellation = () => {
+    setCancelling(true);
+    setProgress({
+      stage: "benchmarking",
+      percent: 0,
+      message: "Cancelling test...",
+    });
+  };
+  const endOperation = () => {
+    setRunning(false);
+    setCancelling(false);
+    setProgress(null);
+  };
 
-  return { progress, running, startOperation, endOperation };
+  return {
+    progress,
+    running,
+    cancelling,
+    startOperation,
+    requestCancellation,
+    endOperation,
+  };
 }

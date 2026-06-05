@@ -1,17 +1,18 @@
 import { useCallback, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
-import { AppShell } from "./components/AppShell";
-import { Toolbar } from "./components/Toolbar/Toolbar";
-import { LayerBrowser } from "./components/LayerBrowser/LayerBrowser";
-import { BulkAssignPanel } from "./components/LayerBrowser/BulkAssignPanel";
-import { DetailPanel } from "./components/DetailPanel/DetailPanel";
-import { TestResultsModal } from "./components/TestResultsModal/TestResultsModal";
+import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
+import {
+  EVAL_RESULTS_TAB_ID,
+  layerEditorTab,
+  type EditorTab,
+} from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
 import { useRecipe } from "./hooks/useRecipe";
 import { useProgress } from "./hooks/useProgress";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   testRecipe,
+  cancelRecipeTest,
   saveRecipe,
   loadRecipe,
   exportGguf,
@@ -44,19 +45,26 @@ function App() {
     resetRecipeForModel,
     setRecipeState,
     assignQuant,
-    assignAll,
     assignByPattern,
     setProfile,
     getAssignments,
   } = useRecipe();
-  const { progress, running, startOperation, endOperation } = useProgress();
+  const {
+    progress,
+    running,
+    cancelling,
+    startOperation,
+    requestCancellation,
+    endOperation,
+  } = useProgress();
 
-  const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(
-    null,
+  const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
+  const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
+  const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
+    () => new Set(),
   );
   const [benchmarkResult, setBenchmarkResult] =
     useState<BenchmarkResult | null>(null);
-  const [showResults, setShowResults] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
@@ -70,13 +78,70 @@ function App() {
         currentQuant: t.currentQuant,
       }));
       resetRecipeForModel(path, tensors);
-      setSelectedLayerIndex(null);
+      setOpenEditors([]);
+      setActiveEditorId(null);
+      setExpandedLayers(new Set());
       setBenchmarkResult(null);
-      setShowResults(false);
       setAppError(null);
     },
     [resetRecipeForModel],
   );
+
+  const handleOpenLayer = useCallback((layerIndex: number) => {
+    const tab = layerEditorTab(layerIndex);
+    setActiveEditorId(tab.id);
+    setOpenEditors((current) =>
+      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
+    );
+    setExpandedLayers((current) => {
+      const next = new Set(current);
+      next.add(layerIndex);
+      return next;
+    });
+  }, []);
+
+  const handleToggleLayer = useCallback((layerIndex: number) => {
+    setExpandedLayers((current) => {
+      const next = new Set(current);
+      if (next.has(layerIndex)) next.delete(layerIndex);
+      else next.add(layerIndex);
+      return next;
+    });
+  }, []);
+
+  const handleCloseEditor = useCallback((editorId: string) => {
+    setOpenEditors((current) => {
+      const next = current.filter((editor) => editor.id !== editorId);
+      setActiveEditorId((active) => {
+        if (active !== editorId) return active;
+        return next.length > 0 ? next[next.length - 1].id : null;
+      });
+      return next;
+    });
+  }, []);
+
+  const handleReorderEditor = useCallback((editorId: string, beforeEditorId: string | null) => {
+    setOpenEditors((current) => {
+      const moving = current.find((editor) => editor.id === editorId);
+      if (!moving) return current;
+
+      const remaining = current.filter((editor) => editor.id !== editorId);
+      const insertIndex =
+        beforeEditorId === null
+          ? remaining.length
+          : remaining.findIndex((editor) => editor.id === beforeEditorId);
+      if (insertIndex < 0) return current;
+
+      const next = [...remaining];
+      next.splice(insertIndex, 0, moving);
+      return next;
+    });
+  }, []);
+
+  const handleDiscardResults = useCallback(() => {
+    setBenchmarkResult(null);
+    handleCloseEditor(EVAL_RESULTS_TAB_ID);
+  }, [handleCloseEditor]);
 
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
@@ -127,11 +192,17 @@ function App() {
         recipeEvalPreset,
       );
       setBenchmarkResult(result);
-      setShowResults(true);
+      setOpenEditors((current) =>
+        current.some((editor) => editor.id === EVAL_RESULTS_TAB_ID)
+          ? current
+          : [...current, { id: EVAL_RESULTS_TAB_ID, kind: "eval-results" }],
+      );
+      setActiveEditorId(EVAL_RESULTS_TAB_ID);
       setAppError(null);
       setProfile({ vramEstimate: result.vramAllocatedMb, sizeSavedVsQ8: 0 });
     } catch (e) {
-      setAppError((e as Error).message);
+      const message = (e as Error).message;
+      if (!message.toLowerCase().includes("cancelled")) setAppError(message);
     } finally {
       endOperation();
     }
@@ -144,6 +215,16 @@ function App() {
     endOperation,
     setProfile,
   ]);
+
+  const handleCancelTest = useCallback(async () => {
+    if (!running || cancelling) return;
+    requestCancellation();
+    try {
+      await cancelRecipeTest();
+    } catch (e) {
+      setAppError((e as Error).message);
+    }
+  }, [running, cancelling, requestCancellation]);
 
   const handleSaveRecipe = useCallback(async () => {
     if (!recipe) return;
@@ -187,73 +268,56 @@ function App() {
     }
   }, [setRecipeState]);
 
+  const activeEditor =
+    openEditors.find((editor) => editor.id === activeEditorId) ?? null;
+  const selectedLayerIndex =
+    activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
 
   return (
-    <div className="h-screen min-h-0 overflow-hidden flex flex-col bg-bg-primary">
-      <TitleBar />
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <AppShell
-          toolbar={
-            <Toolbar
-              modelPath={modelPath}
-              hasModel={!!model}
-              running={running}
-              progress={progress}
-              onOpenModel={handleOpenModel}
-              onSetAll={assignAll}
-              onSaveRecipe={handleSaveRecipe}
-              onLoadRecipe={handleLoadRecipe}
-              onExport={handleExport}
-              testMode={recipeTestMode}
-              onTestModeChange={setRecipeTestMode}
-              evalPreset={recipeEvalPreset}
-              onEvalPresetChange={setRecipeEvalPreset}
-              onTest={handleTest}
-            />
-          }
-          sidebar={
-            <div className="flex flex-col h-full min-h-0">
-              <LayerBrowser
-                tensors={model?.tensors ?? []}
-                selectedLayerIndex={selectedLayerIndex}
-                onSelectLayer={setSelectedLayerIndex}
-              />
-              <BulkAssignPanel
-                onAssign={assignByPattern}
-                disabled={!model || running}
-              />
-            </div>
-          }
-          detail={
-            <div className="h-full min-h-0 flex flex-col">
-              {(modelError || appError) && (
-                <div className="shrink-0 border-b border-red-500/40 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-                  {modelError ?? appError}
-                </div>
-              )}
-              <div className="flex-1 min-h-0">
-                <DetailPanel
-                  tensors={selectedTensors}
-                  assignments={getAssignments}
-                  profile={recipe?.profile ?? null}
-                  onAssignQuant={assignQuant}
-                />
-              </div>
-            </div>
-          }
+    <div className="app-root">
+      <TitleBar modelPath={modelPath} onOpenModel={handleOpenModel} />
+      <div className="app-body">
+        {(modelError || appError) && (
+          <div className="app-error" role="alert">
+            {modelError ?? appError}
+          </div>
+        )}
+        <WorkbenchShell
+          modelPath={modelPath}
+          tensors={model?.tensors ?? []}
+          selectedTensors={selectedTensors}
+          assignments={getAssignments}
+          profile={recipe?.profile ?? null}
+          activeLayerIndex={selectedLayerIndex}
+          openEditors={openEditors}
+          activeEditorId={activeEditorId}
+          benchmarkResult={benchmarkResult}
+          expandedLayers={expandedLayers}
+          running={running}
+          cancelling={cancelling}
+          progress={progress}
+          evalPreset={recipeEvalPreset}
+          testMode={recipeTestMode}
+          onOpenLayer={handleOpenLayer}
+          onOpenModel={handleOpenModel}
+          onToggleLayer={handleToggleLayer}
+          onSelectEditor={setActiveEditorId}
+          onCloseEditor={handleCloseEditor}
+          onReorderEditor={handleReorderEditor}
+          onAssignQuant={assignQuant}
+          onAssignByPattern={assignByPattern}
+          onEvalPresetChange={setRecipeEvalPreset}
+          onTestModeChange={setRecipeTestMode}
+          onTest={handleTest}
+          onCancelTest={handleCancelTest}
+          onSaveRecipe={handleSaveRecipe}
+          onLoadRecipe={handleLoadRecipe}
+          onExport={handleExport}
+          onDiscardResults={handleDiscardResults}
         />
       </div>
-
-      {showResults && (
-        <TestResultsModal
-          result={benchmarkResult}
-          onSave={handleSaveRecipe}
-          onExport={handleExport}
-          onDiscard={() => setShowResults(false)}
-        />
-      )}
     </div>
   );
 }

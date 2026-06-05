@@ -7,6 +7,7 @@ import type {
 import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
+  let cancelRequested = false;
   const allowedTargetQuants: QuantType[] = [
     "F32",
     "BF16",
@@ -128,6 +129,24 @@ export function createMockBridge() {
         quantPreflight: bf16AllowedPreflight,
       },
       {
+        name: "layers.1.attention.wq.weight",
+        shape: [4096, 4096],
+        currentQuant: "Q8_0",
+        sizeBytes: 80_000_000,
+        layerIndex: 1,
+        layerGroup: "attention",
+        quantPreflight: q8AllowedPreflight,
+      },
+      {
+        name: "layers.1.attention.wk.weight",
+        shape: [4096, 1024],
+        currentQuant: "BF16",
+        sizeBytes: 20_000_000,
+        layerIndex: 1,
+        layerGroup: "attention",
+        quantPreflight: bf16AllowedPreflight,
+      },
+      {
         name: "output_norm.weight",
         shape: [4096],
         currentQuant: "F32",
@@ -202,10 +221,21 @@ export function createMockBridge() {
         recipe.status = "draft";
         return recipe;
       },
-      test_recipe: (args) => {
+      test_recipe: async (args) => {
+        cancelRequested = false;
+        for (let interval = 0; interval < 4; interval += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          if (cancelRequested) throw new Error("Recipe test cancelled");
+        }
         const isCompare = args?.testMode === "compare_baseline";
         const isDefault = args?.evalPreset !== "quick";
         const standardSampleCount = isDefault ? 300 : 36;
+        const changedTargetCount = recipe.assignments.filter((assignment) => {
+          const tensor = mockModel.tensors.find(
+            (candidate) => candidate.name === assignment.tensorName,
+          );
+          return tensor?.currentQuant !== assignment.quantType;
+        }).length;
         return {
           promptEvalTps: 1247,
           tokenGenTps: 88.3,
@@ -226,12 +256,14 @@ export function createMockBridge() {
           nativeRuntime: null,
           modelTensorCount: mockModel.tensors.length,
           modelMetadataCount: 32,
-          copiedTensorCount: 8,
-          convertedTensorCount: 2,
-          convertedBytesBefore: 160_000_000,
-          convertedBytesAfter: 80_000_000,
-          requestedTargetCount: 2,
-          verifiedTargetCount: 2,
+          copiedTensorCount: changedTargetCount > 0 ? 8 : 0,
+          convertedTensorCount: changedTargetCount,
+          convertedBytesBefore:
+            changedTargetCount > 0 ? changedTargetCount * 80_000_000 : 0,
+          convertedBytesAfter:
+            changedTargetCount > 0 ? changedTargetCount * 40_000_000 : 0,
+          requestedTargetCount: changedTargetCount,
+          verifiedTargetCount: changedTargetCount,
           baselineBenchmark: isCompare
             ? {
                 promptEvalTps: 1180,
@@ -303,6 +335,23 @@ export function createMockBridge() {
           },
         };
       },
+      cancel_recipe_test: () => {
+        cancelRequested = true;
+      },
+      get_hardware_snapshot: () => ({
+        cpuName: "Mock Ryzen CPU",
+        cpuUsagePercent: 24,
+        ramUsedBytes: 12.6 * 1024 * 1024 * 1024,
+        ramTotalBytes: 64 * 1024 * 1024 * 1024,
+        gpuName: "Mock NVIDIA GPU",
+        gpuUsagePercent: 72,
+        vramUsedMb: 8192,
+        vramTotalMb: 24576,
+        gpuTemperatureC: 62,
+        gpuPowerW: 286,
+        cpuTemperatureC: null,
+        cpuPowerW: null,
+      }),
       save_recipe: () => {
         recipe.status = "saved";
       },

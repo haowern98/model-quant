@@ -10,27 +10,30 @@ interface TensorTableProps {
 
 export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTableProps) {
   if (tensors.length === 0) {
-    return <div className="text-text-muted text-sm p-4">Select a layer to view tensors</div>;
+    return <div className="tensor-empty-state">Select a layer to view tensors</div>;
   }
 
   return (
-    <div className="min-w-full overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 z-10 bg-bg-primary">
-          <tr className="border-b border-border-default text-text-muted text-xs uppercase tracking-wider">
-            <th className="text-left px-4 py-2 font-medium">Tensor</th>
-            <th className="text-left px-4 py-2 font-medium">Shape</th>
-            <th className="text-left px-4 py-2 font-medium">Current Quant</th>
-            <th className="text-left px-4 py-2 font-medium">Target Quant</th>
-            <th className="text-right px-4 py-2 font-medium">Current</th>
-            <th className="text-right px-4 py-2 font-medium">Target</th>
+    <div className="tensor-table-scroll">
+      <table className="tensor-table">
+        <thead>
+          <tr>
+            <th className="row-number" aria-label="Row number"></th>
+            <th>Tensor</th>
+            <th>Shape</th>
+            <th>Current Quant</th>
+            <th>Target Quant</th>
+            <th className="numeric">Current</th>
+            <th className="numeric">Target</th>
           </tr>
         </thead>
         <tbody>
-          {tensors.map(t => {
+          {tensors.map((t, index) => {
             const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
             const currentSize = t.sizeBytes;
-            const targetSize = estQuantSize(t.shape, QUANT_TYPES.find(q => q.value === assignedQuant)!.bitsPerWeight);
+            const targetBits =
+              QUANT_TYPES.find(q => q.value === assignedQuant)?.bitsPerWeight ?? 4.5;
+            const targetSize = estQuantSize(t.shape, targetBits);
             const canAssignTarget = t.quantPreflight?.canQuantize ?? true;
             const disabledReason = t.quantPreflight?.blockedReason ?? 'Tensor cannot be quantized';
             const allowedTargetQuants = t.quantPreflight?.allowedTargetQuants;
@@ -42,29 +45,31 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
             const targetDisabledReason = !canAssignTarget
               ? disabledReason
               : 'No compatible smaller target quant is available';
+            const changed = assignedQuant !== toTargetQuant(t.currentQuant);
             return (
-              <tr key={t.name} className="border-b border-border-default/50 hover:bg-bg-surface-alt/50">
-                <td className="px-4 py-2 font-mono text-text-primary text-xs" title={t.name}>
+              <tr key={t.name} className={changed ? "changed-row" : undefined}>
+                <td className="row-number">{index + 1}</td>
+                <td className="tensor-name" title={t.name}>
                   {formatTensorName(t.name)}
                 </td>
-                <td className="px-4 py-2 font-mono text-text-muted text-xs">[{t.shape.join(', ')}]</td>
-                <td className="px-4 py-2 font-mono text-text-muted text-xs">{t.currentQuant}</td>
-                <td className="px-4 py-2">
+                <td className="shape">[{t.shape.join(', ')}]</td>
+                <td className="quant">{t.currentQuant}</td>
+                <td>
                   <select
                     value={assignedQuant}
                     onChange={e => onAssignQuant(t.name, e.target.value as QuantType)}
                     disabled={targetDisabled}
                     title={targetDisabled ? targetDisabledReason : undefined}
-                    className="bg-bg-surface-alt border border-border-default rounded px-1 py-0.5 text-xs text-text-primary
-                               focus:outline-none focus:border-accent-copper disabled:opacity-40 font-mono"
+                    className="target-control"
                   >
                     {quantOptions.map(q => (
                       <option key={q.value} value={q.value}>{q.label}</option>
                     ))}
                   </select>
+                  {targetDisabled && <span className="lock" aria-hidden="true" />}
                 </td>
-                <td className="px-4 py-2 text-right font-mono text-text-muted text-xs">{formatBytes(currentSize)}</td>
-                <td className="px-4 py-2 text-right font-mono text-xs text-accent-solder">{formatBytes(targetSize)}</td>
+                <td className="numeric">{formatBytes(currentSize)}</td>
+                <td className="numeric">{formatBytes(targetSize)}</td>
               </tr>
             );
           })}

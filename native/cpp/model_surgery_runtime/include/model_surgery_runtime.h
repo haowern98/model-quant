@@ -137,6 +137,8 @@ typedef struct ms_standard_eval_sample_audit {
 MS_RUNTIME_API const char * ms_runtime_version(void);
 MS_RUNTIME_API const char * ms_runtime_llama_system_info(void);
 MS_RUNTIME_API const char * ms_runtime_last_error(void);
+MS_RUNTIME_API void ms_runtime_reset_recipe_test_cancel(void);
+MS_RUNTIME_API void ms_runtime_cancel_recipe_test(void);
 MS_RUNTIME_API int32_t ms_runtime_inspect_gguf(const char * path, ms_gguf_summary * out_summary);
 MS_RUNTIME_API int32_t ms_runtime_analyze_recipe(
     const char * path,
