@@ -56,3 +56,33 @@ test("automatically reveals a selected hidden layer tab", async ({ page }) => {
   await expect.poll(() => tabs.evaluate((element) => element.scrollLeft)).toBeLessThan(before);
   await expect(page.getByRole("tab", { name: "Global tensors" })).toBeInViewport();
 });
+
+test("reorders editor tabs by dragging them horizontally", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.goto("/");
+  await loadModel(page);
+
+  await page.getByRole("button", { name: /^Global tensors / }).click();
+  await page.getByRole("button", { name: /^Layer 0 / }).click();
+  await page.getByRole("button", { name: /^Layer 1 / }).click();
+
+  const tabNames = () =>
+    page
+      .getByRole("tablist", { name: "Open layers" })
+      .getByRole("tab")
+      .evaluateAll((tabs) => tabs.map((tab) => tab.textContent?.trim() ?? ""));
+
+  await expect.poll(tabNames).toEqual(["Global tensors", "Layer 0", "Layer 1"]);
+
+  const source = await page.getByRole("tab", { name: "Layer 1" }).boundingBox();
+  const target = await page.getByRole("tab", { name: "Global tensors" }).boundingBox();
+  expect(source).not.toBeNull();
+  expect(target).not.toBeNull();
+
+  await page.mouse.move(source!.x + source!.width / 2, source!.y + source!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + 4, target!.y + target!.height / 2);
+  await page.mouse.up();
+
+  await expect.poll(tabNames).toEqual(["Layer 1", "Global tensors", "Layer 0"]);
+});

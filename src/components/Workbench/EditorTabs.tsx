@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent,
+} from "react";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
 
 interface EditorTabsProps {
@@ -6,6 +13,7 @@ interface EditorTabsProps {
   activeEditorId: string | null;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
+  onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
 }
 
 export function EditorTabs({
@@ -13,10 +21,18 @@ export function EditorTabs({
   activeEditorId,
   onSelectEditor,
   onCloseEditor,
+  onReorderEditor,
 }: EditorTabsProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
   const hoveringRef = useRef(false);
+  const dragRef = useRef<{
+    editorId: string;
+    lastBeforeEditorId: string | null;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef<string | null>(null);
+  const [draggingEditorId, setDraggingEditorId] = useState<string | null>(null);
   const [scrollbar, setScrollbar] = useState({
     overflow: false,
     visible: false,
@@ -94,6 +110,72 @@ export function EditorTabs({
     showScrollbar(true);
   };
 
+  const getBeforeEditorId = (clientX: number, draggedEditorId: string) => {
+    const element = scrollRef.current;
+    if (!element) return null;
+
+    const tabs = Array.from(element.querySelectorAll<HTMLElement>(".layer-tab[data-editor-id]"));
+    for (const tab of tabs) {
+      const editorId = tab.dataset.editorId;
+      if (!editorId || editorId === draggedEditorId) continue;
+
+      const rect = tab.getBoundingClientRect();
+      if (clientX < rect.left + rect.width / 2) return editorId;
+    }
+
+    return null;
+  };
+
+  const scrollNearEdge = (clientX: number) => {
+    const element = scrollRef.current;
+    if (!element || element.scrollWidth <= element.clientWidth) return;
+
+    const rect = element.getBoundingClientRect();
+    const edge = 32;
+    if (clientX < rect.left + edge) element.scrollLeft -= 16;
+    else if (clientX > rect.right - edge) element.scrollLeft += 16;
+  };
+
+  const handleTabPointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    editorId: string,
+  ) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      editorId,
+      lastBeforeEditorId: getBeforeEditorId(event.clientX, editorId),
+      moved: false,
+    };
+    setDraggingEditorId(editorId);
+  };
+
+  const handleTabPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    scrollNearEdge(event.clientX);
+    const beforeEditorId = getBeforeEditorId(event.clientX, drag.editorId);
+    if (beforeEditorId === drag.lastBeforeEditorId) return;
+
+    drag.lastBeforeEditorId = beforeEditorId;
+    drag.moved = true;
+    onReorderEditor(drag.editorId, beforeEditorId);
+    showScrollbar(true);
+  };
+
+  const handleTabPointerUp = () => {
+    const drag = dragRef.current;
+    if (drag?.moved) {
+      suppressClickRef.current = drag.editorId;
+      window.setTimeout(() => {
+        if (suppressClickRef.current === drag.editorId) suppressClickRef.current = null;
+      }, 0);
+    }
+    dragRef.current = null;
+    setDraggingEditorId(null);
+  };
+
   return (
     <div
       className="layer-tabs-shell"
@@ -112,6 +194,9 @@ export function EditorTabs({
         role="tablist"
         aria-label="Open layers"
         onWheel={handleWheel}
+        onPointerMove={handleTabPointerMove}
+        onPointerUp={handleTabPointerUp}
+        onPointerCancel={handleTabPointerUp}
         onScroll={() => {
           updateScrollbar();
           showScrollbar(true);
@@ -124,13 +209,25 @@ export function EditorTabs({
             role="tab"
             aria-label={editorTabLabel(editor)}
             aria-selected={activeEditorId === editor.id}
-            className={`layer-tab ${activeEditorId === editor.id ? "active" : ""}`}
-            onClick={() => onSelectEditor(editor.id)}
+            data-editor-id={editor.id}
+            className={`layer-tab ${activeEditorId === editor.id ? "active" : ""} ${
+              draggingEditorId === editor.id ? "dragging" : ""
+            }`}
+            onPointerDown={(event) => handleTabPointerDown(event, editor.id)}
+            onClick={(event) => {
+              if (suppressClickRef.current === editor.id) {
+                suppressClickRef.current = null;
+                event.preventDefault();
+                return;
+              }
+              onSelectEditor(editor.id);
+            }}
           >
             <span className="tab-name">{editorTabLabel(editor)}</span>
             <span
               className="tab-close"
               aria-hidden="true"
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
                 onCloseEditor(editor.id);

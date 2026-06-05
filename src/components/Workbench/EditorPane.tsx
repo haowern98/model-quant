@@ -38,6 +38,7 @@ interface EditorPaneProps {
   testMode: RecipeTestMode;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
+  onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
@@ -75,6 +76,7 @@ export function EditorPane({
   testMode,
   onSelectEditor,
   onCloseEditor,
+  onReorderEditor,
   onAssignQuant,
   onEvalPresetChange,
   onTestModeChange,
@@ -135,6 +137,7 @@ export function EditorPane({
           activeEditorId={activeEditorId}
           onSelectEditor={onSelectEditor}
           onCloseEditor={onCloseEditor}
+          onReorderEditor={onReorderEditor}
         />
         <RunControls
           hasModel={hasModel}

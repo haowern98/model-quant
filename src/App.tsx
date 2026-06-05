@@ -120,6 +120,24 @@ function App() {
     });
   }, []);
 
+  const handleReorderEditor = useCallback((editorId: string, beforeEditorId: string | null) => {
+    setOpenEditors((current) => {
+      const moving = current.find((editor) => editor.id === editorId);
+      if (!moving) return current;
+
+      const remaining = current.filter((editor) => editor.id !== editorId);
+      const insertIndex =
+        beforeEditorId === null
+          ? remaining.length
+          : remaining.findIndex((editor) => editor.id === beforeEditorId);
+      if (insertIndex < 0) return current;
+
+      const next = [...remaining];
+      next.splice(insertIndex, 0, moving);
+      return next;
+    });
+  }, []);
+
   const handleDiscardResults = useCallback(() => {
     setBenchmarkResult(null);
     handleCloseEditor(EVAL_RESULTS_TAB_ID);
@@ -287,6 +305,7 @@ function App() {
           onToggleLayer={handleToggleLayer}
           onSelectEditor={setActiveEditorId}
           onCloseEditor={handleCloseEditor}
+          onReorderEditor={handleReorderEditor}
           onAssignQuant={assignQuant}
           onAssignByPattern={assignByPattern}
           onEvalPresetChange={setRecipeEvalPreset}

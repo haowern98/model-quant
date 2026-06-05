@@ -42,6 +42,7 @@ interface WorkbenchShellProps {
   onToggleLayer: (layerIndex: number) => void;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
+  onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
   onAssignByPattern: (pattern: AssignPattern, quantType: QuantType) => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
@@ -75,6 +76,7 @@ export function WorkbenchShell({
   onToggleLayer,
   onSelectEditor,
   onCloseEditor,
+  onReorderEditor,
   onAssignQuant,
   onAssignByPattern,
   onEvalPresetChange,
@@ -213,6 +215,7 @@ export function WorkbenchShell({
         testMode={testMode}
         onSelectEditor={onSelectEditor}
         onCloseEditor={onCloseEditor}
+        onReorderEditor={onReorderEditor}
         onAssignQuant={onAssignQuant}
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}

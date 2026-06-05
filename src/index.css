@@ -1047,6 +1047,10 @@ body.resizing-bottom-panel * {
   cursor: pointer;
 }
 
+.layer-tab.dragging {
+  cursor: grabbing;
+}
+
 .layer-tab.active {
   background: var(--vscode-editor);
   color: #ffffff;
