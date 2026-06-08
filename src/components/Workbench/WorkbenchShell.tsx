@@ -9,10 +9,11 @@ import type {
   RecipeTestMode,
   TensorInfo,
 } from "../../types";
-import { ActivityBar } from "./ActivityBar";
+import { ActivityBar, type ActivityId } from "./ActivityBar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
 import type { EditorTab } from "./editorTabModel";
+import { TestingPanel } from "./TestingPanel";
 
 const EXPLORER_DEFAULT_WIDTH = 365;
 const EXPLORER_MIN_WIDTH = 150;
@@ -90,8 +91,9 @@ export function WorkbenchShell({
 }: WorkbenchShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
+  const [activeActivity, setActiveActivity] = useState<ActivityId>("gguf");
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
-  const explorerVisible = explorerWidth > 0;
+  const sidePanelVisible = explorerWidth > 0;
 
   const explorerMaxWidth = () => {
     const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
@@ -128,8 +130,8 @@ export function WorkbenchShell({
     window.addEventListener("pointerup", stopResize);
   };
 
-  const toggleExplorer = () => {
-    if (explorerVisible) {
+  const toggleSidePanel = () => {
+    if (sidePanelVisible) {
       lastExpandedExplorerWidth.current = explorerWidth;
       setExplorerWidth(0);
       return;
@@ -144,31 +146,67 @@ export function WorkbenchShell({
     setExplorerWidth(restoredWidth);
   };
 
+  const selectActivity = (activity: ActivityId) => {
+    if (activity !== "gguf" && activity !== "testing") return;
+    if (activity === activeActivity) {
+      toggleSidePanel();
+      return;
+    }
+
+    setActiveActivity(activity);
+    if (!sidePanelVisible) {
+      const restoredWidth = clamp(
+        lastExpandedExplorerWidth.current,
+        EXPLORER_MIN_WIDTH,
+        explorerMaxWidth(),
+      );
+      lastExpandedExplorerWidth.current = restoredWidth;
+      setExplorerWidth(restoredWidth);
+    }
+  };
+
   return (
     <div
       ref={shellRef}
-      className={`workbench-shell ${explorerVisible ? "" : "explorer-collapsed"}`}
+      className={`workbench-shell ${sidePanelVisible ? "" : "explorer-collapsed"}`}
       style={{ "--explorer-width": `${explorerWidth}px` } as CSSProperties}
     >
-      <ActivityBar explorerVisible={explorerVisible} onToggleExplorer={toggleExplorer} />
-      <ExplorerPanel
-        modelPath={modelPath}
-        tensors={tensors}
-        activeLayerIndex={activeLayerIndex}
-        expandedLayers={expandedLayers}
-        running={running}
-        onOpenLayer={onOpenLayer}
-        onOpenModel={onOpenModel}
-        onToggleLayer={onToggleLayer}
-        onAssignByPattern={onAssignByPattern}
-        onSaveRecipe={onSaveRecipe}
-        onLoadRecipe={onLoadRecipe}
-        onExport={onExport}
+      <ActivityBar
+        activeActivity={activeActivity}
+        panelVisible={sidePanelVisible}
+        onSelectActivity={selectActivity}
       />
+      {activeActivity === "testing" ? (
+        <TestingPanel
+          modelPath={modelPath}
+          assignments={assignments}
+          benchmarkResult={benchmarkResult}
+          running={running}
+          cancelling={cancelling}
+          progress={progress}
+          evalPreset={evalPreset}
+          testMode={testMode}
+        />
+      ) : (
+        <ExplorerPanel
+          modelPath={modelPath}
+          tensors={tensors}
+          activeLayerIndex={activeLayerIndex}
+          expandedLayers={expandedLayers}
+          running={running}
+          onOpenLayer={onOpenLayer}
+          onOpenModel={onOpenModel}
+          onToggleLayer={onToggleLayer}
+          onAssignByPattern={onAssignByPattern}
+          onSaveRecipe={onSaveRecipe}
+          onLoadRecipe={onLoadRecipe}
+          onExport={onExport}
+        />
+      )}
       <div
         className="resize-handle explorer-resizer"
         role="separator"
-        aria-label="Resize Explorer"
+        aria-label={activeActivity === "testing" ? "Resize Testing" : "Resize Explorer"}
         aria-orientation="vertical"
         aria-valuemin={0}
         aria-valuemax={explorerMaxWidth()}

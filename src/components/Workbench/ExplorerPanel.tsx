@@ -6,6 +6,7 @@ import {
   type TensorInfo,
 } from "../../types";
 import { formatTensorName } from "../../lib/format";
+import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 
 type ExplorerSectionId = "gguf" | "mmproj" | "lora";
 
@@ -85,22 +86,18 @@ export function ExplorerPanel({
   return (
     <aside className="explorer-panel" aria-label="Explorer">
       <div className="explorer-title">
-        <span>EXPLORER</span>
+        <span>MODEL EXPLORER</span>
         <button type="button" aria-label="Explorer actions">...</button>
       </div>
 
       <section className="explorer-section">
-        <div className="explorer-section-header explorer-model-header">
-          <button
-            type="button"
-            className="explorer-section-toggle"
-            aria-label={basename(modelPath)}
-            onClick={() => toggleSection("gguf")}
-          >
-            <span className={`tree-chevron ${sections.gguf ? "expanded" : ""}`} />
-            <span>{basename(modelPath)}</span>
-          </button>
-          {modelPath && (
+        <ExplorerSectionHeader
+          label={basename(modelPath)}
+          ariaLabel={basename(modelPath)}
+          expanded={sections.gguf}
+          onClick={() => toggleSection("gguf")}
+          action={
+            modelPath ? (
             <button
               type="button"
               className="tree-action-button"
@@ -109,8 +106,9 @@ export function ExplorerPanel({
             >
               ...
             </button>
-          )}
-        </div>
+            ) : undefined
+          }
+        />
 
         {sections.gguf && (
           <div className="explorer-section-body">
@@ -167,23 +165,15 @@ export function ExplorerPanel({
                 const active = activeLayerIndex === layerIndex;
                 return (
                   <div key={layerIndex}>
-                    <button
-                      type="button"
-                      className={`tree-row layer-row ${active ? "active" : ""}`}
+                    <ExplorerTreeRow
+                      label={sectionLabel(layerIndex)}
+                      right={layerTensors.length}
+                      expanded={expanded}
+                      active={active}
                       aria-label={`${sectionLabel(layerIndex)} ${layerTensors.length}`}
                       onClick={() => onOpenLayer(layerIndex)}
-                    >
-                      <span
-                        className={`tree-chevron ${expanded ? "expanded" : ""}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onToggleLayer(layerIndex);
-                        }}
-                      />
-                      <span className="tree-folder-icon" aria-hidden="true" />
-                      <span className="tree-label">{sectionLabel(layerIndex)}</span>
-                      <span className="tree-count">{layerTensors.length}</span>
-                    </button>
+                      onToggle={() => onToggleLayer(layerIndex)}
+                    />
                     {expanded &&
                       layerTensors.map((tensor) => (
                         <button
