@@ -1,7 +1,11 @@
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   AssignPattern,
+  BenchmarkRunId,
   BenchmarkResult,
+  BenchmarkOutputLine,
+  GpqaDiamondStatus,
+  GpqaShotMode,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -36,8 +40,12 @@ interface WorkbenchShellProps {
   running: boolean;
   cancelling: boolean;
   progress: ProgressEvent | null;
+  outputLines: BenchmarkOutputLine[];
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
+  selectedRunIds: BenchmarkRunId[];
+  gpqaStatus: GpqaDiamondStatus;
+  gpqaShotMode: GpqaShotMode;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -48,6 +56,13 @@ interface WorkbenchShellProps {
   onAssignByPattern: (pattern: AssignPattern, quantType: QuantType) => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
+  onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onGpqaShotModeChange: (mode: GpqaShotMode) => void;
+  onInstallGpqaHarness: () => void;
+  onDownloadGpqaDataset: () => void;
+  onRefreshGpqaStatus: () => void;
+  onOpenGpqaDetails: () => void;
+  onOpenGpqaDataset: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -70,8 +85,12 @@ export function WorkbenchShell({
   running,
   cancelling,
   progress,
+  outputLines,
   evalPreset,
   testMode,
+  selectedRunIds,
+  gpqaStatus,
+  gpqaShotMode,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -82,6 +101,13 @@ export function WorkbenchShell({
   onAssignByPattern,
   onEvalPresetChange,
   onTestModeChange,
+  onToggleRunTarget,
+  onGpqaShotModeChange,
+  onInstallGpqaHarness,
+  onDownloadGpqaDataset,
+  onRefreshGpqaStatus,
+  onOpenGpqaDetails,
+  onOpenGpqaDataset,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -186,6 +212,12 @@ export function WorkbenchShell({
           progress={progress}
           evalPreset={evalPreset}
           testMode={testMode}
+          selectedRunIds={selectedRunIds}
+          gpqaStatus={gpqaStatus}
+          onToggleRunTarget={onToggleRunTarget}
+          onInstallGpqaHarness={onInstallGpqaHarness}
+          onOpenGpqaDetails={onOpenGpqaDetails}
+          onOpenGpqaDataset={onOpenGpqaDataset}
         />
       ) : (
         <ExplorerPanel
@@ -243,6 +275,7 @@ export function WorkbenchShell({
         running={running}
         cancelling={cancelling}
         progress={progress}
+        outputLines={outputLines}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
         benchmarkResult={benchmarkResult}
@@ -251,12 +284,20 @@ export function WorkbenchShell({
         profile={profile}
         evalPreset={evalPreset}
         testMode={testMode}
+        selectedRunIds={selectedRunIds}
+        gpqaStatus={gpqaStatus}
+        gpqaShotMode={gpqaShotMode}
+        onInstallGpqaHarness={onInstallGpqaHarness}
+        onDownloadGpqaDataset={onDownloadGpqaDataset}
+        onRefreshGpqaStatus={onRefreshGpqaStatus}
         onSelectEditor={onSelectEditor}
         onCloseEditor={onCloseEditor}
         onReorderEditor={onReorderEditor}
         onAssignQuant={onAssignQuant}
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}
+        onToggleRunTarget={onToggleRunTarget}
+        onGpqaShotModeChange={onGpqaShotModeChange}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}

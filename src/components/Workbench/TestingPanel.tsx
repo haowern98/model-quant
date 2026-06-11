@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type {
+  BenchmarkRunId,
   BenchmarkResult,
+  GpqaDiamondStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -17,9 +19,16 @@ interface TestingPanelProps {
   progress: ProgressEvent | null;
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
+  selectedRunIds: BenchmarkRunId[];
+  gpqaStatus: GpqaDiamondStatus;
+  onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onInstallGpqaHarness: () => void;
+  onOpenGpqaDetails: () => void;
+  onOpenGpqaDataset: () => void;
 }
 
 type TestingSectionId = "localChecks" | "benchmarks" | "environment" | "latestRuns";
+type TestingBenchmarkId = "gpqaDiamond";
 
 function modeLabel(mode: RecipeTestMode): string {
   return mode === "compare_baseline" ? "Compare" : "Single";
@@ -38,18 +47,27 @@ function statusLabel({
 }
 
 export function TestingPanel({
+  modelPath,
   assignments,
   benchmarkResult,
   running,
   cancelling,
   progress,
   testMode,
+  selectedRunIds,
+  gpqaStatus,
+  onToggleRunTarget,
+  onOpenGpqaDetails,
+  onOpenGpqaDataset,
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
     localChecks: true,
     benchmarks: true,
     environment: true,
     latestRuns: true,
+  });
+  const [benchmarks, setBenchmarks] = useState<Record<TestingBenchmarkId, boolean>>({
+    gpqaDiamond: true,
   });
 
   const changedTargetCount = Object.keys(assignments).length;
@@ -61,6 +79,10 @@ export function TestingPanel({
 
   const toggleSection = (section: TestingSectionId) => {
     setSections((current) => ({ ...current, [section]: !current[section] }));
+  };
+
+  const toggleBenchmark = (benchmark: TestingBenchmarkId) => {
+    setBenchmarks((current) => ({ ...current, [benchmark]: !current[benchmark] }));
   };
 
   return (
@@ -82,11 +104,19 @@ export function TestingPanel({
           <div className="explorer-section-body">
             <ExplorerTreeRow
               label="PPL Check"
-              right="Ready"
+              right={modelPath ? "Ready" : "Open model"}
               expanded={false}
               active
-              ariaLabel="PPL Check Ready"
+              ariaLabel={`PPL Check ${modelPath ? "Ready" : "Open model"}`}
             />
+            <button
+              type="button"
+              className="testing-detail-action"
+              disabled={!modelPath || running}
+              onClick={() => onToggleRunTarget("ppl_check")}
+            >
+              {selectedRunIds.includes("ppl_check") ? "Selected" : "Select"}
+            </button>
             <TestingDetailRow label="Mode" value={modeLabel(testMode)} />
             <TestingDetailRow label="Changed targets" value={changedTargetCount} />
             <TestingDetailRow label="Verified targets" value={verifiedTargets} />
@@ -102,15 +132,21 @@ export function TestingPanel({
         />
         {sections.benchmarks && (
           <div className="explorer-section-body">
-            <ExplorerTreeRow label="GPQA Diamond" right="Ready" expanded ariaLabel="GPQA Diamond Ready" />
-            <TestingDetailRow label="Samples" value="198" />
-            <TestingDetailRow label="Harness" value="Inspect" />
-            <TestingDetailRow label="Mode" value="5-shot" />
-            <button type="button" className="testing-detail-action">
-              Open details
-            </button>
+            <ExplorerTreeRow
+              label="GPQA Diamond"
+              right={gpqaStatus.statusLabel}
+              expanded={benchmarks.gpqaDiamond}
+              onToggle={() => toggleBenchmark("gpqaDiamond")}
+              ariaLabel={`GPQA Diamond ${gpqaStatus.statusLabel}`}
+            />
+            {benchmarks.gpqaDiamond && (
+              <>
+                <TestingNavRow label="Details" ariaLabel="GPQA Diamond Details" onClick={onOpenGpqaDetails} />
+                <TestingNavRow label="Dataset" ariaLabel="GPQA Diamond Dataset" onClick={onOpenGpqaDataset} />
+              </>
+            )}
             <ExplorerTreeRow label="MMLU-Pro" right="Download" ariaLabel="MMLU-Pro Download" />
-            <ExplorerTreeRow label="MMLU-Redux" right="Ready" ariaLabel="MMLU-Redux Ready" />
+            <ExplorerTreeRow label="MMLU-Redux" right="Frozen" ariaLabel="MMLU-Redux Frozen" />
             <ExplorerTreeRow label="SuperGPQA" right="Download" ariaLabel="SuperGPQA Download" />
             <ExplorerTreeRow label="Claw-Eval" right="Needs harness" ariaLabel="Claw-Eval Needs harness" />
           </div>
@@ -125,8 +161,8 @@ export function TestingPanel({
         />
         {sections.environment && (
           <div className="explorer-section-body">
-            <TestingDetailRow label="Python" value="3.11.8" />
-            <TestingDetailRow label="Inspect" value="Installed" />
+            <TestingDetailRow label="Python" value={gpqaStatus.python ?? "Unavailable"} />
+            <TestingDetailRow label="EvalScope" value={gpqaStatus.evalscope ?? "Unavailable"} />
             <TestingDetailRow label="Dataset cache" value="Open" />
           </div>
         )}
@@ -159,5 +195,26 @@ function TestingDetailRow({ label, value }: { label: string; value: string | num
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function TestingNavRow({
+  label,
+  ariaLabel,
+  onClick,
+}: {
+  label: string;
+  ariaLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="tensor-child-row testing-nav-row"
+      aria-label={ariaLabel}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+    </button>
   );
 }

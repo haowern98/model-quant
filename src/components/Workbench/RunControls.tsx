@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProgressEvent, RecipeEvalPreset, RecipeTestMode } from "../../types";
+import type {
+  BenchmarkRunId,
+  GpqaDiamondStatus,
+  ProgressEvent,
+  RecipeEvalPreset,
+  RecipeTestMode,
+} from "../../types";
 
 interface RunControlsProps {
   hasModel: boolean;
@@ -8,8 +14,11 @@ interface RunControlsProps {
   progress: ProgressEvent | null;
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
+  selectedRunIds: BenchmarkRunId[];
+  gpqaStatus: GpqaDiamondStatus;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
+  onToggleRunTarget: (target: BenchmarkRunId) => void;
   onTest: () => void;
   onCancelTest: () => void;
 }
@@ -21,8 +30,11 @@ export function RunControls({
   progress,
   evalPreset,
   testMode,
+  selectedRunIds,
+  gpqaStatus,
   onEvalPresetChange,
   onTestModeChange,
+  onToggleRunTarget,
   onTest,
   onCancelTest,
 }: RunControlsProps) {
@@ -60,10 +72,15 @@ export function RunControls({
     : testMode === "compare_baseline"
       ? "Compare Recipe"
       : "Test Recipe";
+  const hasSelectedRun = selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond");
+  const hasSelectedGpqa = selectedRunIds.includes("gpqa_diamond");
+  const runDisabled = cancelling || (!hasModel && !hasSelectedGpqa);
+  const progressMessage =
+    progress?.message.toLowerCase().includes("gpqa") ? "GPQA running" : progress?.message;
 
   return (
     <div className="editor-run-controls">
-      {progress && <span className="run-progress">{progress.message}</span>}
+      {progressMessage && <span className="run-progress">{progressMessage}</span>}
       <select
         aria-label="Eval preset"
         value={evalPreset}
@@ -92,11 +109,13 @@ export function RunControls({
           type="button"
           className="run-split-primary"
           aria-label={runLabel}
-          disabled={!hasModel || cancelling}
+          disabled={runDisabled}
           onClick={() => {
             setMenuOpen(false);
             if (running) {
               onCancelTest();
+            } else if (!hasSelectedRun) {
+              setMenuOpen(true);
             } else {
               onTest();
             }
@@ -126,16 +145,29 @@ export function RunControls({
             aria-label="Test run options"
           >
             <div className="run-menu-section-label">LOCAL CHECKS</div>
-            <RunMenuCheckbox label="PPL Check" status="Ready" checked />
+            <RunMenuCheckbox
+              label="PPL Check"
+              status={hasModel ? "Ready" : "Open model"}
+              checked={selectedRunIds.includes("ppl_check")}
+              disabled={running}
+              onClick={() => onToggleRunTarget("ppl_check")}
+            />
             <div className="run-menu-separator" role="separator" />
             <div className="run-menu-section-label">OFFICIAL BENCHMARKS</div>
-            <RunMenuCheckbox label="GPQA Diamond" status="Ready" />
-            <RunMenuCheckbox label="MMLU-Pro" status="Download" />
-            <RunMenuCheckbox label="MMLU-Redux" status="Ready" />
-            <RunMenuCheckbox label="SuperGPQA" status="Download" />
+            <RunMenuCheckbox
+              label="GPQA Diamond"
+              status={gpqaStatus.statusLabel}
+              checked={selectedRunIds.includes("gpqa_diamond")}
+              disabled={running}
+              onClick={() => onToggleRunTarget("gpqa_diamond")}
+            />
+            <RunMenuCheckbox label="MMLU-Pro" status="Download" disabled muted />
+            <RunMenuCheckbox label="MMLU-Redux" status="Frozen" disabled muted />
+            <RunMenuCheckbox label="SuperGPQA" status="Download" disabled muted />
             <RunMenuCheckbox
               label="Claw-Eval"
               status="Needs harness"
+              disabled
               muted
             />
           </div>
@@ -150,6 +182,8 @@ interface RunMenuCheckboxProps {
   status: string;
   checked?: boolean;
   muted?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
 }
 
 function RunMenuCheckbox({
@@ -157,6 +191,8 @@ function RunMenuCheckbox({
   status,
   checked = false,
   muted = false,
+  disabled = false,
+  onClick,
 }: RunMenuCheckboxProps) {
   return (
     <button
@@ -164,6 +200,8 @@ function RunMenuCheckbox({
       className={`run-menu-item ${muted ? "muted" : ""}`}
       role="menuitemcheckbox"
       aria-checked={checked}
+      disabled={disabled}
+      onClick={onClick}
     >
       <span className="run-menu-check" aria-hidden="true">
         {checked && <span className="codicon codicon-check" />}
