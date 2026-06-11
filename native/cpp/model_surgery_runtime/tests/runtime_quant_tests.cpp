@@ -3,9 +3,15 @@
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 
 namespace {
+
+void collect_runtime_log(const char * message, void * user_data) {
+    auto * logs = static_cast<std::vector<std::string> *>(user_data);
+    logs->emplace_back(message == nullptr ? "" : message);
+}
 
 void test_k_quant_recipe_targets_are_supported() {
     assert(supports_recipe_conversion(
@@ -180,6 +186,115 @@ void test_recipe_test_cancellation_flag_can_reset_and_cancel() {
     assert(!recipe_test_cancel_requested());
 }
 
+void test_generation_context_allows_official_eval_prompts() {
+    assert(session_context_tokens_for_generation(1024) >= 4096);
+}
+
+void test_chat_template_formats_openai_messages() {
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", "Answer carefully."},
+        {"user", "What is GPQA?"},
+    };
+    const std::string prompt = format_chat_prompt_with_template(
+        "{{ bos_token }}{% for message in messages %}<|im_start|>{{ message['role'] }}\n{{ message['content'] }}<|im_end|>\n{% endfor %}<|im_start|>assistant\n",
+        messages,
+        true);
+
+    assert(prompt.find("<|im_start|>system") != std::string::npos);
+    assert(prompt.find("<|im_start|>user") != std::string::npos);
+    assert(prompt.rfind("<|im_start|>assistant") != std::string::npos);
+    assert(prompt.find("system: Answer carefully.") == std::string::npos);
+}
+
+void test_persistent_chat_session_loads_once_and_resets_context_per_completion() {
+    const std::filesystem::path fixture =
+        std::filesystem::path("models") / "test-subjects" / "Qwen_Qwen3-1.7B-bf16.gguf";
+    if (!std::filesystem::exists(fixture)) {
+        std::cout << "skipping persistent chat session counter test; fixture not found: "
+                  << fixture.string()
+                  << "\n";
+        return;
+    }
+
+    gguf_init_params params = {};
+    params.no_alloc = true;
+    params.ctx = nullptr;
+    std::unique_ptr<gguf_context, decltype(&gguf_free)> metadata(
+        gguf_init_from_file(fixture.string().c_str(), params),
+        gguf_free);
+    assert(metadata != nullptr);
+
+    std::vector<std::string> names;
+    std::vector<std::string> quants;
+    const int64_t tensor_count = gguf_get_n_tensors(metadata.get());
+    names.reserve(static_cast<size_t>(tensor_count));
+    quants.reserve(static_cast<size_t>(tensor_count));
+    for (int64_t i = 0; i < tensor_count; ++i) {
+        names.emplace_back(gguf_get_tensor_name(metadata.get(), i));
+        quants.emplace_back(display_quant_type(gguf_get_tensor_type(metadata.get(), i)));
+    }
+
+    std::vector<ms_recipe_tensor_target> targets;
+    targets.reserve(names.size());
+    for (size_t i = 0; i < names.size(); ++i) {
+        targets.push_back({names[i].c_str(), quants[i].c_str()});
+    }
+
+    std::vector<std::string> logs;
+    ms_runtime_chat_session * session = nullptr;
+    assert(ms_runtime_open_recipe_chat_session_with_progress(
+        fixture.string().c_str(),
+        targets.data(),
+        targets.size(),
+        1024,
+        collect_runtime_log,
+        &logs,
+        &session) == 0);
+    assert(session != nullptr);
+    assert(std::find(
+        logs.begin(),
+        logs.end(),
+        "Native runtime: loading model weights into memory") != logs.end());
+    assert(std::find(
+        logs.begin(),
+        logs.end(),
+        "Native runtime: model weights loaded") != logs.end());
+    assert(std::find(
+        logs.begin(),
+        logs.end(),
+        "Native runtime: chat context ready") != logs.end());
+
+    const ms_chat_message messages[] = {
+        {"user", "Reply with exactly one short word."},
+    };
+    char output[4096] = {};
+    ms_baseline_benchmark benchmark = {};
+    assert(ms_runtime_generate_recipe_chat_session(
+        session,
+        messages,
+        1,
+        4,
+        output,
+        sizeof(output),
+        &benchmark) == 0);
+    assert(ms_runtime_generate_recipe_chat_session(
+        session,
+        messages,
+        1,
+        4,
+        output,
+        sizeof(output),
+        &benchmark) == 0);
+
+    ms_runtime_chat_session_counters counters = {};
+    assert(ms_runtime_get_recipe_chat_session_counters(session, &counters) == 0);
+    assert(counters.model_load_count == 1);
+    assert(counters.context_reset_count == 2);
+    assert(counters.completion_count == 2);
+
+    ms_runtime_close_recipe_chat_session(session);
+}
+
 }
 
 int main() {
@@ -193,6 +308,9 @@ int main() {
     test_llama_mcq_common_prefix_stops_at_first_different_token();
     test_llama_mcq_score_uses_token_average_logprob();
     test_recipe_test_cancellation_flag_can_reset_and_cancel();
+    test_generation_context_allows_official_eval_prompts();
+    test_chat_template_formats_openai_messages();
+    test_persistent_chat_session_loads_once_and_resets_context_per_completion();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;
 }

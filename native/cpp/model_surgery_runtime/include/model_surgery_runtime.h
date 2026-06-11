@@ -48,6 +48,21 @@ typedef struct ms_recipe_tensor_target {
     const char * target_quant;
 } ms_recipe_tensor_target;
 
+typedef struct ms_chat_message {
+    const char * role;
+    const char * content;
+} ms_chat_message;
+
+typedef struct ms_runtime_chat_session ms_runtime_chat_session;
+
+typedef void (*ms_runtime_log_callback)(const char * message, void * user_data);
+
+typedef struct ms_runtime_chat_session_counters {
+    uint64_t model_load_count;
+    uint64_t context_reset_count;
+    uint64_t completion_count;
+} ms_runtime_chat_session_counters;
+
 typedef struct ms_recipe_analysis {
     uint64_t tensor_count;
     uint64_t changed_count;
@@ -162,6 +177,51 @@ MS_RUNTIME_API int32_t ms_runtime_benchmark_recipe(
     const char * prompt,
     uint32_t max_tokens,
     ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t max_tokens,
+    ms_runtime_chat_session ** out_session);
+MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session_with_progress(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t max_tokens,
+    ms_runtime_log_callback log_callback,
+    void * log_user_data,
+    ms_runtime_chat_session ** out_session);
+MS_RUNTIME_API void ms_runtime_close_recipe_chat_session(ms_runtime_chat_session * session);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_get_recipe_chat_session_counters(
+    const ms_runtime_chat_session * session,
+    ms_runtime_chat_session_counters * out_counters);
 MS_RUNTIME_API int32_t ms_runtime_eval_recipe(
     const char * path,
     const ms_recipe_tensor_target * targets,
