@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_void};
+use std::ptr::NonNull;
 
 const STANDARD_EVAL_AUDIT_MAX_CHOICES: usize = 32;
 
@@ -41,6 +42,28 @@ pub struct MsBaselineBenchmark {
 struct MsRecipeTensorTarget {
     name: *const c_char,
     target_quant: *const c_char,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct MsChatMessage {
+    role: *const c_char,
+    content: *const c_char,
+}
+
+#[repr(C)]
+struct MsRuntimeChatSession {
+    _private: [u8; 0],
+}
+
+type MsRuntimeLogCallback = Option<unsafe extern "C" fn(*const c_char, *mut c_void)>;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MsRuntimeChatSessionCounters {
+    pub model_load_count: u64,
+    pub context_reset_count: u64,
+    pub completion_count: u64,
 }
 
 #[repr(C)]
@@ -180,6 +203,57 @@ extern "C" {
         prompt: *const c_char,
         max_tokens: u32,
         out_benchmark: *mut MsBaselineBenchmark,
+    ) -> c_int;
+    fn ms_runtime_generate_recipe(
+        path: *const c_char,
+        targets: *const MsRecipeTensorTarget,
+        target_count: u64,
+        prompt: *const c_char,
+        max_tokens: u32,
+        out_text: *mut c_char,
+        out_text_capacity: u64,
+        out_benchmark: *mut MsBaselineBenchmark,
+    ) -> c_int;
+    fn ms_runtime_generate_recipe_chat(
+        path: *const c_char,
+        targets: *const MsRecipeTensorTarget,
+        target_count: u64,
+        messages: *const MsChatMessage,
+        message_count: u64,
+        max_tokens: u32,
+        out_text: *mut c_char,
+        out_text_capacity: u64,
+        out_benchmark: *mut MsBaselineBenchmark,
+    ) -> c_int;
+    fn ms_runtime_open_recipe_chat_session(
+        path: *const c_char,
+        targets: *const MsRecipeTensorTarget,
+        target_count: u64,
+        max_tokens: u32,
+        out_session: *mut *mut MsRuntimeChatSession,
+    ) -> c_int;
+    fn ms_runtime_open_recipe_chat_session_with_progress(
+        path: *const c_char,
+        targets: *const MsRecipeTensorTarget,
+        target_count: u64,
+        max_tokens: u32,
+        log_callback: MsRuntimeLogCallback,
+        log_user_data: *mut c_void,
+        out_session: *mut *mut MsRuntimeChatSession,
+    ) -> c_int;
+    fn ms_runtime_close_recipe_chat_session(session: *mut MsRuntimeChatSession);
+    fn ms_runtime_generate_recipe_chat_session(
+        session: *mut MsRuntimeChatSession,
+        messages: *const MsChatMessage,
+        message_count: u64,
+        max_tokens: u32,
+        out_text: *mut c_char,
+        out_text_capacity: u64,
+        out_benchmark: *mut MsBaselineBenchmark,
+    ) -> c_int;
+    fn ms_runtime_get_recipe_chat_session_counters(
+        session: *const MsRuntimeChatSession,
+        out_counters: *mut MsRuntimeChatSessionCounters,
     ) -> c_int;
     fn ms_runtime_eval_recipe(
         path: *const c_char,
@@ -484,6 +558,368 @@ pub fn benchmark_recipe(
     };
     if result == 0 {
         Ok(benchmark)
+    } else {
+        Err(unsafe { c_string(ms_runtime_last_error()) })
+    }
+}
+
+pub fn generate_recipe(
+    path: &str,
+    targets: &[(String, String)],
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<(String, MsBaselineBenchmark), String> {
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_prompt = CString::new(prompt)
+        .map_err(|_| "generation prompt contains an interior NUL byte".to_string())?;
+    let c_names = targets
+        .iter()
+        .map(|(name, _)| {
+            CString::new(name.as_str())
+                .map_err(|_| format!("tensor name contains an interior NUL byte: {}", name))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let c_quants = targets
+        .iter()
+        .map(|(_, quant)| {
+            CString::new(quant.as_str())
+                .map_err(|_| format!("quant type contains an interior NUL byte: {}", quant))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let native_targets = c_names
+        .iter()
+        .zip(c_quants.iter())
+        .map(|(name, quant)| MsRecipeTensorTarget {
+            name: name.as_ptr(),
+            target_quant: quant.as_ptr(),
+        })
+        .collect::<Vec<_>>();
+    let mut text_buffer = vec![0 as c_char; 131_072];
+    let mut benchmark = MsBaselineBenchmark {
+        load_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
+        prompt_eval_tps: 0.0,
+        token_gen_tps: 0.0,
+        ttft_ms: 0.0,
+        vram_peak_mb: 0.0,
+        vram_allocated_mb: 0.0,
+        prompt_tokens: 0,
+        generated_tokens: 0,
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
+    };
+
+    let result = unsafe {
+        ms_runtime_generate_recipe(
+            c_path.as_ptr(),
+            native_targets.as_ptr(),
+            native_targets.len() as u64,
+            c_prompt.as_ptr(),
+            max_tokens,
+            text_buffer.as_mut_ptr(),
+            text_buffer.len() as u64,
+            &mut benchmark,
+        )
+    };
+    if result == 0 {
+        let text = unsafe { CStr::from_ptr(text_buffer.as_ptr()) }
+            .to_string_lossy()
+            .to_string();
+        Ok((text, benchmark))
+    } else {
+        Err(unsafe { c_string(ms_runtime_last_error()) })
+    }
+}
+
+pub fn generate_recipe_chat(
+    path: &str,
+    targets: &[(String, String)],
+    messages: &[(String, String)],
+    max_tokens: u32,
+) -> Result<(String, MsBaselineBenchmark), String> {
+    let c_path =
+        CString::new(path).map_err(|_| format!("path contains an interior NUL byte: {}", path))?;
+    let c_names = targets
+        .iter()
+        .map(|(name, _)| {
+            CString::new(name.as_str())
+                .map_err(|_| format!("tensor name contains an interior NUL byte: {}", name))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let c_quants = targets
+        .iter()
+        .map(|(_, quant)| {
+            CString::new(quant.as_str())
+                .map_err(|_| format!("quant type contains an interior NUL byte: {}", quant))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let native_targets = c_names
+        .iter()
+        .zip(c_quants.iter())
+        .map(|(name, quant)| MsRecipeTensorTarget {
+            name: name.as_ptr(),
+            target_quant: quant.as_ptr(),
+        })
+        .collect::<Vec<_>>();
+    let c_roles = messages
+        .iter()
+        .map(|(role, _)| {
+            CString::new(role.as_str())
+                .map_err(|_| format!("chat role contains an interior NUL byte: {}", role))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let c_contents = messages
+        .iter()
+        .map(|(_, content)| {
+            CString::new(content.as_str())
+                .map_err(|_| "chat message content contains an interior NUL byte".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let native_messages = c_roles
+        .iter()
+        .zip(c_contents.iter())
+        .map(|(role, content)| MsChatMessage {
+            role: role.as_ptr(),
+            content: content.as_ptr(),
+        })
+        .collect::<Vec<_>>();
+    let mut text_buffer = vec![0 as c_char; 131_072];
+    let mut benchmark = MsBaselineBenchmark {
+        load_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
+        prompt_eval_tps: 0.0,
+        token_gen_tps: 0.0,
+        ttft_ms: 0.0,
+        vram_peak_mb: 0.0,
+        vram_allocated_mb: 0.0,
+        prompt_tokens: 0,
+        generated_tokens: 0,
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
+    };
+
+    let result = unsafe {
+        ms_runtime_generate_recipe_chat(
+            c_path.as_ptr(),
+            native_targets.as_ptr(),
+            native_targets.len() as u64,
+            native_messages.as_ptr(),
+            native_messages.len() as u64,
+            max_tokens,
+            text_buffer.as_mut_ptr(),
+            text_buffer.len() as u64,
+            &mut benchmark,
+        )
+    };
+    if result == 0 {
+        let text = unsafe { CStr::from_ptr(text_buffer.as_ptr()) }
+            .to_string_lossy()
+            .to_string();
+        Ok((text, benchmark))
+    } else {
+        Err(unsafe { c_string(ms_runtime_last_error()) })
+    }
+}
+
+#[derive(Debug)]
+pub struct RecipeChatSession {
+    ptr: NonNull<MsRuntimeChatSession>,
+}
+
+unsafe impl Send for RecipeChatSession {}
+
+impl Drop for RecipeChatSession {
+    fn drop(&mut self) {
+        unsafe { ms_runtime_close_recipe_chat_session(self.ptr.as_ptr()) }
+    }
+}
+
+impl RecipeChatSession {
+    pub fn generate_chat(
+        &mut self,
+        messages: &[(String, String)],
+        max_tokens: u32,
+    ) -> Result<(String, MsBaselineBenchmark), String> {
+        let c_roles = messages
+            .iter()
+            .map(|(role, _)| {
+                CString::new(role.as_str())
+                    .map_err(|_| format!("chat role contains an interior NUL byte: {}", role))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let c_contents = messages
+            .iter()
+            .map(|(_, content)| {
+                CString::new(content.as_str())
+                    .map_err(|_| "chat message content contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_messages = c_roles
+            .iter()
+            .zip(c_contents.iter())
+            .map(|(role, content)| MsChatMessage {
+                role: role.as_ptr(),
+                content: content.as_ptr(),
+            })
+            .collect::<Vec<_>>();
+        let mut text_buffer = vec![0 as c_char; 131_072];
+        let mut benchmark = empty_benchmark();
+
+        let result = unsafe {
+            ms_runtime_generate_recipe_chat_session(
+                self.ptr.as_ptr(),
+                native_messages.as_ptr(),
+                native_messages.len() as u64,
+                max_tokens,
+                text_buffer.as_mut_ptr(),
+                text_buffer.len() as u64,
+                &mut benchmark,
+            )
+        };
+        if result == 0 {
+            let text = unsafe { CStr::from_ptr(text_buffer.as_ptr()) }
+                .to_string_lossy()
+                .to_string();
+            Ok((text, benchmark))
+        } else {
+            Err(unsafe { c_string(ms_runtime_last_error()) })
+        }
+    }
+
+    pub fn counters(&self) -> Result<MsRuntimeChatSessionCounters, String> {
+        let mut counters = MsRuntimeChatSessionCounters {
+            model_load_count: 0,
+            context_reset_count: 0,
+            completion_count: 0,
+        };
+        let result = unsafe {
+            ms_runtime_get_recipe_chat_session_counters(self.ptr.as_ptr(), &mut counters)
+        };
+        if result == 0 {
+            Ok(counters)
+        } else {
+            Err(unsafe { c_string(ms_runtime_last_error()) })
+        }
+    }
+}
+
+pub fn open_recipe_chat_session(
+    path: &str,
+    targets: &[(String, String)],
+    max_tokens: u32,
+) -> Result<RecipeChatSession, String> {
+    open_recipe_chat_session_with_native_call(
+        path,
+        targets,
+        max_tokens,
+        |c_path, native_targets, session| unsafe {
+            ms_runtime_open_recipe_chat_session(
+                c_path,
+                native_targets.as_ptr(),
+                native_targets.len() as u64,
+                max_tokens,
+                session,
+            )
+        },
+    )
+}
+
+pub fn open_recipe_chat_session_with_progress<F>(
+    path: &str,
+    targets: &[(String, String)],
+    max_tokens: u32,
+    mut on_log: F,
+) -> Result<RecipeChatSession, String>
+where
+    F: FnMut(&str),
+{
+    open_recipe_chat_session_with_native_call(
+        path,
+        targets,
+        max_tokens,
+        |c_path, native_targets, session| {
+            let log_user_data = &mut on_log as *mut F as *mut c_void;
+            unsafe {
+                ms_runtime_open_recipe_chat_session_with_progress(
+                    c_path,
+                    native_targets.as_ptr(),
+                    native_targets.len() as u64,
+                    max_tokens,
+                    Some(recipe_chat_session_log_trampoline::<F>),
+                    log_user_data,
+                    session,
+                )
+            }
+        },
+    )
+}
+
+unsafe extern "C" fn recipe_chat_session_log_trampoline<F>(
+    message: *const c_char,
+    user_data: *mut c_void,
+) where
+    F: FnMut(&str),
+{
+    if message.is_null() || user_data.is_null() {
+        return;
+    }
+    let callback = unsafe { &mut *(user_data as *mut F) };
+    let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
+    callback(&message);
+}
+
+fn open_recipe_chat_session_with_native_call<F>(
+    path: &str,
+    targets: &[(String, String)],
+    max_tokens: u32,
+    open: F,
+) -> Result<RecipeChatSession, String>
+where
+    F: FnOnce(*const c_char, &[MsRecipeTensorTarget], *mut *mut MsRuntimeChatSession) -> c_int,
+{
+    let c_path =
+        CString::new(path).map_err(|_| format!("path contains an interior NUL byte: {}", path))?;
+    let c_names = targets
+        .iter()
+        .map(|(name, _)| {
+            CString::new(name.as_str())
+                .map_err(|_| format!("tensor name contains an interior NUL byte: {}", name))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let c_quants = targets
+        .iter()
+        .map(|(_, quant)| {
+            CString::new(quant.as_str())
+                .map_err(|_| format!("quant type contains an interior NUL byte: {}", quant))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let native_targets = c_names
+        .iter()
+        .zip(c_quants.iter())
+        .map(|(name, quant)| MsRecipeTensorTarget {
+            name: name.as_ptr(),
+            target_quant: quant.as_ptr(),
+        })
+        .collect::<Vec<_>>();
+    let mut session = std::ptr::null_mut();
+
+    let _ = max_tokens;
+    let result = open(c_path.as_ptr(), &native_targets, &mut session);
+    if result == 0 {
+        NonNull::new(session)
+            .map(|ptr| RecipeChatSession { ptr })
+            .ok_or_else(|| "native recipe chat session pointer is null".to_string())
     } else {
         Err(unsafe { c_string(ms_runtime_last_error()) })
     }
