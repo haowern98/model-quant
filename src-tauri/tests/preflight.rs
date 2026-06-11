@@ -24,11 +24,8 @@ fn tensor_with_quant(
 
 #[test]
 fn preflight_blocks_norm_vectors() {
-    let result = analyze_tensor_quant_preflight(&tensor(
-        "output_norm.weight",
-        vec![2048],
-        "output_norm",
-    ));
+    let result =
+        analyze_tensor_quant_preflight(&tensor("output_norm.weight", vec![2048], "output_norm"));
 
     assert!(!result.can_quantize);
     assert!(result.allowed_target_quants.is_empty());
@@ -40,11 +37,8 @@ fn preflight_blocks_norm_vectors() {
 
 #[test]
 fn preflight_allows_matrix_weights() {
-    let result = analyze_tensor_quant_preflight(&tensor(
-        "output.weight",
-        vec![2048, 151936],
-        "output",
-    ));
+    let result =
+        analyze_tensor_quant_preflight(&tensor("output.weight", vec![2048, 151936], "output"));
 
     assert!(result.can_quantize);
     assert_eq!(
@@ -143,11 +137,7 @@ fn preflight_checks_each_target_quant_block_size() {
     assert!(result.can_quantize);
     assert_eq!(
         result.allowed_target_quants,
-        vec![
-            "BF16".to_string(),
-            "F16".to_string(),
-            "Q8_0".to_string(),
-        ]
+        vec!["BF16".to_string(), "F16".to_string(), "Q8_0".to_string(),]
     );
 }
 

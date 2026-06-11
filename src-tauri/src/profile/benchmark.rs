@@ -808,7 +808,8 @@ fn load_standard_eval_subset(preset: StandardEvalPreset) -> Result<LoadedStandar
 fn load_quick_standard_eval_subset() -> Result<LoadedStandardSubset, String> {
     const QUICK_STANDARD_SUBSET: &str =
         include_str!("../../../evals/lm_eval_subset.quick.generated.json");
-    const DEFAULT_STANDARD_SUBSET: &str = include_str!("../../../evals/lm_eval_subset.generated.json");
+    const DEFAULT_STANDARD_SUBSET: &str =
+        include_str!("../../../evals/lm_eval_subset.generated.json");
     let mut subset = load_standard_eval_subset_from_json(
         QUICK_STANDARD_SUBSET,
         "generated quick lm-eval-style subset",
@@ -981,12 +982,10 @@ mod tests {
         assert_eq!(quick_counts.get("arc_challenge"), Some(&10));
         assert_eq!(quick_counts.get("truthfulqa_mc1"), Some(&10));
         assert!(quick.ppl_texts.len() >= default.ppl_texts.len());
-        assert!(
-            default
-                .ppl_texts
-                .iter()
-                .all(|text| quick.ppl_texts.iter().any(|quick_text| quick_text == text))
-        );
+        assert!(default
+            .ppl_texts
+            .iter()
+            .all(|text| quick.ppl_texts.iter().any(|quick_text| quick_text == text)));
     }
 
     #[test]

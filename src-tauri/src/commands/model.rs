@@ -1,10 +1,10 @@
 use std::path::PathBuf;
-use tauri::State;
 use std::sync::Mutex;
+use tauri::State;
 
+use crate::commands::quant::RecipeStore;
 use crate::gguf::reader::parse_gguf;
 use crate::gguf::types::ModelInfo;
-use crate::commands::quant::RecipeStore;
 use crate::quant::recipe::{QuantType, RecipeState};
 
 pub struct ModelState(pub Mutex<Option<ModelInfo>>);
@@ -24,7 +24,8 @@ pub async fn open_model(
     }
 
     {
-        let tensor_quants = model.tensors
+        let tensor_quants = model
+            .tensors
             .iter()
             .map(|t| (t.name.clone(), parse_default_quant(&t.current_quant)))
             .collect();
@@ -36,7 +37,9 @@ pub async fn open_model(
 }
 
 #[tauri::command]
-pub async fn get_tensors(state: State<'_, ModelState>) -> Result<Vec<crate::gguf::types::TensorInfo>, String> {
+pub async fn get_tensors(
+    state: State<'_, ModelState>,
+) -> Result<Vec<crate::gguf::types::TensorInfo>, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     match &*guard {
         Some(model) => Ok(model.tensors.clone()),

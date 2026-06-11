@@ -7,15 +7,51 @@ struct TargetQuant {
 }
 
 const DIRECT_TARGET_QUANTS: &[TargetQuant] = &[
-    TargetQuant { name: "F32", bits_per_weight: 32.0, block_size: None },
-    TargetQuant { name: "BF16", bits_per_weight: 16.0, block_size: None },
-    TargetQuant { name: "F16", bits_per_weight: 16.0, block_size: None },
-    TargetQuant { name: "Q8_0", bits_per_weight: 8.0, block_size: Some(32) },
-    TargetQuant { name: "Q6_K", bits_per_weight: 6.6, block_size: Some(256) },
-    TargetQuant { name: "Q5_K", bits_per_weight: 5.5, block_size: Some(256) },
-    TargetQuant { name: "Q4_K", bits_per_weight: 4.5, block_size: Some(256) },
-    TargetQuant { name: "Q3_K", bits_per_weight: 3.4, block_size: Some(256) },
-    TargetQuant { name: "Q2_K", bits_per_weight: 2.6, block_size: Some(256) },
+    TargetQuant {
+        name: "F32",
+        bits_per_weight: 32.0,
+        block_size: None,
+    },
+    TargetQuant {
+        name: "BF16",
+        bits_per_weight: 16.0,
+        block_size: None,
+    },
+    TargetQuant {
+        name: "F16",
+        bits_per_weight: 16.0,
+        block_size: None,
+    },
+    TargetQuant {
+        name: "Q8_0",
+        bits_per_weight: 8.0,
+        block_size: Some(32),
+    },
+    TargetQuant {
+        name: "Q6_K",
+        bits_per_weight: 6.6,
+        block_size: Some(256),
+    },
+    TargetQuant {
+        name: "Q5_K",
+        bits_per_weight: 5.5,
+        block_size: Some(256),
+    },
+    TargetQuant {
+        name: "Q4_K",
+        bits_per_weight: 4.5,
+        block_size: Some(256),
+    },
+    TargetQuant {
+        name: "Q3_K",
+        bits_per_weight: 3.4,
+        block_size: Some(256),
+    },
+    TargetQuant {
+        name: "Q2_K",
+        bits_per_weight: 2.6,
+        block_size: Some(256),
+    },
 ];
 
 pub fn analyze_tensor_quant_preflight(tensor: &TensorInfo) -> TensorQuantPreflight {
@@ -39,7 +75,11 @@ pub fn analyze_tensor_quant_preflight(tensor: &TensorInfo) -> TensorQuantPreflig
     let allowed_target_quants = DIRECT_TARGET_QUANTS
         .iter()
         .filter(|target| target.bits_per_weight <= current_bits)
-        .filter(|target| target.block_size.map_or(true, |block| tensor.shape[0] % block == 0))
+        .filter(|target| {
+            target
+                .block_size
+                .map_or(true, |block| tensor.shape[0] % block == 0)
+        })
         .map(|target| target.name.to_string())
         .collect::<Vec<_>>();
 

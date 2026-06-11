@@ -68,9 +68,12 @@ fn main() {
     for i in 0..metadata_count {
         let key = read_string(&buf, &mut offset);
         let value_type = read_u32(&buf, &mut offset);
-        let type_name = ["u8", "i8", "u16", "i16", "u32", "i32", "f32", "bool", "string", "array", "u64", "i64", "f64"]
-            .get(value_type as usize)
-            .unwrap_or(&"?");
+        let type_name = [
+            "u8", "i8", "u16", "i16", "u32", "i32", "f32", "bool", "string", "array", "u64", "i64",
+            "f64",
+        ]
+        .get(value_type as usize)
+        .unwrap_or(&"?");
         skip_value(&buf, &mut offset, value_type);
         if i < 5 {
             println!("  [{}] key=\"{}\" type={}", i, key, type_name);
@@ -82,7 +85,12 @@ fn main() {
     for i in 0..tensor_count.min(5) {
         let name = read_string(&buf, &mut offset);
         let n_dims = read_u32(&buf, &mut offset) as usize;
-        print!("  [{}] name=\"{}...\" dims={} [", i, &name[..name.len().min(50)], n_dims);
+        print!(
+            "  [{}] name=\"{}...\" dims={} [",
+            i,
+            &name[..name.len().min(50)],
+            n_dims
+        );
         for d in 0..n_dims {
             let dim = read_u64(&buf, &mut offset);
             print!("{}", dim);
