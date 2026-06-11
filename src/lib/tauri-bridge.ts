@@ -9,6 +9,9 @@ import type {
   RecipeTestMode,
   RecipeEvalPreset,
   HardwareSnapshot,
+  ModelInspectorApiStatus,
+  GpqaDiamondStatus,
+  GpqaShotMode,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -85,6 +88,52 @@ export async function cancelRecipeTest(): Promise<void> {
 
 export async function getHardwareSnapshot(): Promise<HardwareSnapshot> {
   return invoke<HardwareSnapshot>("get_hardware_snapshot");
+}
+
+export async function startModelInspectorApi(options?: {
+  benchmarkLabel?: string;
+}): Promise<ModelInspectorApiStatus> {
+  return invoke<ModelInspectorApiStatus>("start_modelinspector_api", {
+    benchmarkLabel: options?.benchmarkLabel ?? null,
+  });
+}
+
+export async function stopModelInspectorApi(): Promise<ModelInspectorApiStatus> {
+  return invoke<ModelInspectorApiStatus>("stop_modelinspector_api");
+}
+
+export async function getModelInspectorApiStatus(): Promise<ModelInspectorApiStatus> {
+  return invoke<ModelInspectorApiStatus>("get_modelinspector_api_status");
+}
+
+export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("get_gpqa_diamond_status");
+}
+
+export async function installGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("install_gpqa_diamond_harness");
+}
+
+export async function downloadGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("download_gpqa_diamond_dataset");
+}
+
+export async function runGpqaDiamondBenchmark(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  shotMode: GpqaShotMode,
+): Promise<BenchmarkResult> {
+  return invoke<BenchmarkResult>("run_gpqa_diamond_benchmark", {
+    baseUrl,
+    apiKey,
+    modelId,
+    shotMode,
+  });
+}
+
+export async function cancelOfficialBenchmark(): Promise<void> {
+  return invoke<void>("cancel_official_benchmark");
 }
 
 export async function saveRecipe(
