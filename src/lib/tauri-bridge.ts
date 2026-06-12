@@ -10,6 +10,7 @@ import type {
   RecipeEvalPreset,
   HardwareSnapshot,
   ModelInspectorApiStatus,
+  GpqaBenchmarkConfig,
   GpqaDiamondStatus,
   GpqaShotMode,
 } from "../types";
@@ -123,12 +124,14 @@ export async function runGpqaDiamondBenchmark(
   apiKey: string,
   modelId: string,
   shotMode: GpqaShotMode,
+  config: GpqaBenchmarkConfig,
 ): Promise<BenchmarkResult> {
   return invoke<BenchmarkResult>("run_gpqa_diamond_benchmark", {
     baseUrl,
     apiKey,
     modelId,
     shotMode,
+    config,
   });
 }
 

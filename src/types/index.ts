@@ -232,6 +232,18 @@ export interface GpqaDiamondStatus {
   detail: string;
 }
 
+export interface GpqaBenchmarkConfigInput {
+  maxTokens: string;
+  sampleLimit: string;
+  temperature: string;
+}
+
+export interface GpqaBenchmarkConfig {
+  maxTokens: number;
+  sampleLimit: number;
+  temperature: number;
+}
+
 export interface RecipeQualityEval {
   baselineNll: number | null;
   baselinePpl: number | null;

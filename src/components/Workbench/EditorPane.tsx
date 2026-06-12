@@ -1,6 +1,7 @@
 import {
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -10,6 +11,7 @@ import type {
   BenchmarkResult,
   BenchmarkOutputLine,
   BenchmarkRunId,
+  GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
   ProgressEvent,
@@ -50,6 +52,7 @@ interface EditorPaneProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   gpqaShotMode: GpqaShotMode;
+  gpqaConfig: GpqaBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
@@ -61,6 +64,7 @@ interface EditorPaneProps {
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
+  onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -97,6 +101,7 @@ export function EditorPane({
   selectedRunIds,
   gpqaStatus,
   gpqaShotMode,
+  gpqaConfig,
   onSelectEditor,
   onCloseEditor,
   onReorderEditor,
@@ -108,6 +113,7 @@ export function EditorPane({
   onTestModeChange,
   onToggleRunTarget,
   onGpqaShotModeChange,
+  onGpqaConfigChange,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -209,10 +215,12 @@ export function EditorPane({
         <GpqaDetailsView
           status={gpqaStatus}
           shotMode={gpqaShotMode}
+          config={gpqaConfig}
           running={running}
           onInstallHarness={onInstallGpqaHarness}
           onRefreshStatus={onRefreshGpqaStatus}
           onShotModeChange={onGpqaShotModeChange}
+          onConfigChange={onGpqaConfigChange}
         />
       ) : showingGpqaDataset ? (
         <GpqaDatasetView
@@ -280,19 +288,35 @@ export function EditorPane({
 function GpqaDetailsView({
   status,
   shotMode,
+  config,
   running,
   onInstallHarness,
   onRefreshStatus,
   onShotModeChange,
+  onConfigChange,
 }: {
   status: GpqaDiamondStatus;
   shotMode: GpqaShotMode;
+  config: GpqaBenchmarkConfigInput;
   running: boolean;
   onInstallHarness: () => void;
   onRefreshStatus: () => void;
   onShotModeChange: (mode: GpqaShotMode) => void;
+  onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
 }) {
   const harnessReady = status.python && status.evalscope;
+  const updateIntegerField =
+    (field: "maxTokens" | "sampleLimit") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
+    };
+  const updateTemperature = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.currentTarget.value;
+    if (/^\d*(?:\.\d*)?$/.test(value)) {
+      onConfigChange({ ...config, temperature: value });
+    }
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -326,10 +350,31 @@ function GpqaDetailsView({
             ]}
           />
           <BenchmarkInfoRow label="Reasoning" value="CoT" />
-          <BenchmarkInfoRow label="Temperature" value="0" />
-          <BenchmarkInfoRow label="Max tokens" value="1024" />
+          <BenchmarkInputRow
+            label="Temperature"
+            inputLabel="GPQA Diamond temperature"
+            value={config.temperature}
+            placeholder="0"
+            inputMode="decimal"
+            onChange={updateTemperature}
+          />
+          <BenchmarkInputRow
+            label="Max tokens"
+            inputLabel="GPQA Diamond max tokens"
+            value={config.maxTokens}
+            placeholder="1024"
+            inputMode="numeric"
+            onChange={updateIntegerField("maxTokens")}
+          />
           <BenchmarkInfoRow label="Batch size" value="1" />
-          <BenchmarkInfoRow label="Samples" value="198" />
+          <BenchmarkInputRow
+            label="Samples"
+            inputLabel="GPQA Diamond samples"
+            value={config.sampleLimit}
+            placeholder="198"
+            inputMode="numeric"
+            onChange={updateIntegerField("sampleLimit")}
+          />
         </BenchmarkInfoSection>
         <BenchmarkInfoSection title="Comparability">
           <BenchmarkInfoRow
@@ -442,6 +487,36 @@ function BenchmarkInfoRow({ label, value }: { label: string; value: string | num
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function BenchmarkInputRow({
+  label,
+  inputLabel,
+  value,
+  placeholder,
+  inputMode,
+  onChange,
+}: {
+  label: string;
+  inputLabel: string;
+  value: string;
+  placeholder: string;
+  inputMode: "numeric" | "decimal";
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <label className="benchmark-info-row benchmark-input-row">
+      <span>{label}</span>
+      <input
+        aria-label={inputLabel}
+        className="benchmark-config-input"
+        inputMode={inputMode}
+        value={value}
+        placeholder={placeholder}
+        onChange={onChange}
+      />
+    </label>
   );
 }
 

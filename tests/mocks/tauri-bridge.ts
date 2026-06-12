@@ -8,6 +8,10 @@ import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
   let cancelRequested = false;
+  const mockState = window as Window & {
+    __MODEL_SURGERY_LAST_GPQA_ARGS__?: unknown;
+  };
+  mockState.__MODEL_SURGERY_LAST_GPQA_ARGS__ = null;
   let gpqaReady =
     typeof window === "undefined" ||
     !new URLSearchParams(window.location.search).has("gpqaMissing");
@@ -426,7 +430,9 @@ export function createMockBridge() {
           detail: "Mock EvalScope GPQA Diamond harness and dataset are ready.",
         };
       },
-      run_gpqa_diamond_benchmark: async (args) => ({
+      run_gpqa_diamond_benchmark: async (args) => {
+        mockState.__MODEL_SURGERY_LAST_GPQA_ARGS__ = args;
+        return {
         promptEvalTps: 0,
         tokenGenTps: 0,
         ttftMs: 0,
@@ -482,7 +488,8 @@ export function createMockBridge() {
           ],
           sampleAudits: [],
         },
-      }),
+      };
+      },
       cancel_official_benchmark: () => {},
       save_recipe: () => {
         recipe.status = "saved";

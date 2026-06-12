@@ -4,6 +4,7 @@ import type {
   BenchmarkRunId,
   BenchmarkResult,
   BenchmarkOutputLine,
+  GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
   ProgressEvent,
@@ -46,6 +47,7 @@ interface WorkbenchShellProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   gpqaShotMode: GpqaShotMode;
+  gpqaConfig: GpqaBenchmarkConfigInput;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -58,6 +60,7 @@ interface WorkbenchShellProps {
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
+  onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
   onRefreshGpqaStatus: () => void;
@@ -91,6 +94,7 @@ export function WorkbenchShell({
   selectedRunIds,
   gpqaStatus,
   gpqaShotMode,
+  gpqaConfig,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -103,6 +107,7 @@ export function WorkbenchShell({
   onTestModeChange,
   onToggleRunTarget,
   onGpqaShotModeChange,
+  onGpqaConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
   onRefreshGpqaStatus,
@@ -287,6 +292,7 @@ export function WorkbenchShell({
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
         gpqaShotMode={gpqaShotMode}
+        gpqaConfig={gpqaConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
         onRefreshGpqaStatus={onRefreshGpqaStatus}
@@ -298,6 +304,7 @@ export function WorkbenchShell({
         onTestModeChange={onTestModeChange}
         onToggleRunTarget={onToggleRunTarget}
         onGpqaShotModeChange={onGpqaShotModeChange}
+        onGpqaConfigChange={onGpqaConfigChange}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}

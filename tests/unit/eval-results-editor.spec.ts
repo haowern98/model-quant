@@ -319,6 +319,70 @@ test.describe("Eval Results editor", () => {
     ).toBeVisible();
   });
 
+  test("passes GPQA numeric configuration with blank-field defaults", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await loadModel(page);
+    await page.getByRole("button", { name: "Testing" }).click();
+
+    await page
+      .getByRole("complementary", { name: "Testing" })
+      .getByRole("button", { name: "GPQA Diamond Details" })
+      .click();
+
+    const temperature = page.getByLabel("GPQA Diamond temperature");
+    const maxTokens = page.getByLabel("GPQA Diamond max tokens");
+    const samples = page.getByLabel("GPQA Diamond samples");
+
+    await expect(temperature).toHaveValue("0");
+    await expect(maxTokens).toHaveValue("");
+    await expect(maxTokens).toHaveAttribute("placeholder", "1024");
+    await expect(samples).toHaveValue("");
+    await expect(samples).toHaveAttribute("placeholder", "198");
+
+    await maxTokens.fill("4096");
+    await samples.fill("12");
+    await temperature.fill("0.2");
+    await expect(maxTokens).toHaveValue("4096");
+    await expect(samples).toHaveValue("12");
+    await expect(temperature).toHaveValue("0.2");
+
+    await maxTokens.fill("");
+    await samples.fill("");
+    await temperature.fill("");
+
+    await page.getByRole("button", { name: "Test run options" }).click();
+    const runMenu = page.getByRole("menu", { name: "Test run options" });
+    await runMenu.getByRole("menuitemcheckbox", { name: /PPL Check/ }).click();
+    await runMenu.getByRole("menuitemcheckbox", { name: /GPQA Diamond Ready/ }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Run recipe test" }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __MODEL_SURGERY_LAST_GPQA_ARGS__?: {
+                  maxTokens?: number;
+                  sampleLimit?: number;
+                  temperature?: number;
+                } | null;
+              }
+            ).__MODEL_SURGERY_LAST_GPQA_ARGS__,
+        ),
+      )
+      .toMatchObject({
+        config: {
+          maxTokens: 1024,
+          sampleLimit: 198,
+          temperature: 0,
+        },
+      });
+  });
+
   test("opens completed test results in one reusable editor tab", async ({ page }) => {
     await page.goto("/");
     await loadModel(page);

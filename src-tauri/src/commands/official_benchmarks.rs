@@ -15,6 +15,9 @@ const GPQA_SAMPLE_COUNT: u64 = 198;
 const GPQA_DATASET_ID: &str = "AI-ModelScope/gpqa_diamond";
 const GPQA_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
+const GPQA_DEFAULT_MAX_TOKENS: u32 = 1024;
+const GPQA_MAX_TOKENS_LIMIT: u32 = 10_000;
+const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +56,55 @@ impl GpqaShotMode {
             Self::FiveShotCot => "5-shot CoT",
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpqaRunConfig {
+    pub max_tokens: Option<u32>,
+    pub sample_limit: Option<u64>,
+    pub temperature: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EffectiveGpqaRunConfig {
+    max_tokens: u32,
+    sample_limit: u64,
+    temperature: f64,
+}
+
+fn effective_gpqa_run_config(
+    config: Option<GpqaRunConfig>,
+) -> Result<EffectiveGpqaRunConfig, String> {
+    let config = config.unwrap_or(GpqaRunConfig {
+        max_tokens: None,
+        sample_limit: None,
+        temperature: None,
+    });
+    let max_tokens = config.max_tokens.unwrap_or(GPQA_DEFAULT_MAX_TOKENS);
+    if max_tokens == 0 || max_tokens > GPQA_MAX_TOKENS_LIMIT {
+        return Err(format!(
+            "GPQA max tokens must be between 1 and {GPQA_MAX_TOKENS_LIMIT}."
+        ));
+    }
+
+    let sample_limit = config.sample_limit.unwrap_or(GPQA_SAMPLE_COUNT);
+    if sample_limit == 0 || sample_limit > GPQA_SAMPLE_COUNT {
+        return Err(format!(
+            "GPQA sample limit must be between 1 and {GPQA_SAMPLE_COUNT}."
+        ));
+    }
+
+    let temperature = config.temperature.unwrap_or(GPQA_DEFAULT_TEMPERATURE);
+    if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+        return Err("GPQA temperature must be between 0 and 2.".to_string());
+    }
+
+    Ok(EffectiveGpqaRunConfig {
+        max_tokens,
+        sample_limit,
+        temperature,
+    })
 }
 
 #[derive(Clone)]
@@ -139,12 +191,13 @@ pub async fn run_gpqa_diamond_benchmark(
     api_key: String,
     model_id: String,
     shot_mode: GpqaShotMode,
+    config: Option<GpqaRunConfig>,
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<BenchmarkResult, String> {
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        run_gpqa_diamond_blocking(base_url, api_key, model_id, shot_mode, app, child)
+        run_gpqa_diamond_blocking(base_url, api_key, model_id, shot_mode, config, app, child)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -372,9 +425,11 @@ fn run_gpqa_diamond_blocking(
     api_key: String,
     model_id: String,
     shot_mode: GpqaShotMode,
+    config: Option<GpqaRunConfig>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
 ) -> Result<BenchmarkResult, String> {
+    let effective_config = effective_gpqa_run_config(config)?;
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -411,7 +466,8 @@ fn run_gpqa_diamond_blocking(
     })
     .to_string();
     let generation_config = json!({
-        "temperature": 0,
+        "temperature": effective_config.temperature,
+        "max_tokens": effective_config.max_tokens,
         "stream": false
     })
     .to_string();
@@ -446,6 +502,8 @@ fn run_gpqa_diamond_blocking(
             dataset_args,
             "--generation-config".to_string(),
             generation_config,
+            "--limit".to_string(),
+            effective_config.sample_limit.to_string(),
             "--eval-batch-size".to_string(),
             "1".to_string(),
             "--repeats".to_string(),
@@ -1156,6 +1214,72 @@ mod tests {
         assert_eq!(status.status_label, "Download");
         assert!(!status.dataset_ready);
         assert!(status.detail.contains("dataset"));
+    }
+
+    #[test]
+    fn defaults_gpqa_run_config_when_values_are_missing() {
+        let config = effective_gpqa_run_config(Some(GpqaRunConfig {
+            max_tokens: None,
+            sample_limit: None,
+            temperature: None,
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config,
+            EffectiveGpqaRunConfig {
+                max_tokens: 1024,
+                sample_limit: 198,
+                temperature: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn accepts_gpqa_run_config_within_bounds() {
+        let config = effective_gpqa_run_config(Some(GpqaRunConfig {
+            max_tokens: Some(10_000),
+            sample_limit: Some(12),
+            temperature: Some(0.2),
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config,
+            EffectiveGpqaRunConfig {
+                max_tokens: 10_000,
+                sample_limit: 12,
+                temperature: 0.2,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_gpqa_run_config_outside_bounds() {
+        assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            max_tokens: Some(0),
+            sample_limit: Some(198),
+            temperature: Some(0.0),
+        }))
+        .is_err());
+        assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            max_tokens: Some(10_001),
+            sample_limit: Some(198),
+            temperature: Some(0.0),
+        }))
+        .is_err());
+        assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            max_tokens: Some(1024),
+            sample_limit: Some(199),
+            temperature: Some(0.0),
+        }))
+        .is_err());
+        assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            max_tokens: Some(1024),
+            sample_limit: Some(198),
+            temperature: Some(2.1),
+        }))
+        .is_err());
     }
 
     #[test]

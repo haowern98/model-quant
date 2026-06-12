@@ -1497,6 +1497,36 @@ body.resizing-bottom-panel * {
   cursor: default;
 }
 
+.benchmark-input-row {
+  cursor: default;
+}
+
+.benchmark-config-input {
+  width: 116px;
+  height: 24px;
+  min-width: 0;
+  border: 1px solid var(--vscode-border);
+  border-radius: 3px;
+  background: var(--vscode-panel);
+  color: #cccccc;
+  padding: 0 8px;
+  font: inherit;
+  outline: none;
+}
+
+.benchmark-config-input::placeholder {
+  color: rgba(204, 204, 204, 0.42);
+}
+
+.benchmark-config-input:hover {
+  background: #333333;
+}
+
+.benchmark-config-input:focus {
+  border-color: #5a5a5a;
+  background: #333333;
+}
+
 .benchmark-select-control {
   position: relative;
   width: 116px;

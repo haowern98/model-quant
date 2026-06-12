@@ -29,6 +29,8 @@ import {
 import type {
   BenchmarkRunId,
   BenchmarkResult,
+  GpqaBenchmarkConfig,
+  GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
   RecipeEvalPreset,
@@ -50,6 +52,69 @@ const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
   expectedDatasetHash: "EvalScope dataset cache marker",
   detail: "GPQA Diamond readiness has not been checked yet.",
 };
+
+const GPQA_DEFAULT_MAX_TOKENS = 1024;
+const GPQA_MAX_TOKENS_LIMIT = 10_000;
+const GPQA_SAMPLE_COUNT = 198;
+const GPQA_DEFAULT_TEMPERATURE = 0;
+
+const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
+  maxTokens: "",
+  sampleLimit: "",
+  temperature: "0",
+};
+
+function parseOptionalIntegerField(
+  value: string,
+  defaultValue: number,
+  min: number,
+  max: number,
+  label: string,
+): number | string {
+  const trimmed = value.trim();
+  if (trimmed === "") return defaultValue;
+  if (!/^\d+$/.test(trimmed)) return `${label} must be a whole number.`;
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    return `${label} must be between ${min} and ${max}.`;
+  }
+  return parsed;
+}
+
+function resolveGpqaConfigInput(
+  input: GpqaBenchmarkConfigInput,
+): GpqaBenchmarkConfig | string {
+  const maxTokens = parseOptionalIntegerField(
+    input.maxTokens,
+    GPQA_DEFAULT_MAX_TOKENS,
+    1,
+    GPQA_MAX_TOKENS_LIMIT,
+    "GPQA max tokens",
+  );
+  if (typeof maxTokens === "string") return maxTokens;
+
+  const sampleLimit = parseOptionalIntegerField(
+    input.sampleLimit,
+    GPQA_SAMPLE_COUNT,
+    1,
+    GPQA_SAMPLE_COUNT,
+    "GPQA sample limit",
+  );
+  if (typeof sampleLimit === "string") return sampleLimit;
+
+  const temperatureText = input.temperature.trim();
+  const temperature =
+    temperatureText === "" ? GPQA_DEFAULT_TEMPERATURE : Number(temperatureText);
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+    return "GPQA temperature must be between 0 and 2.";
+  }
+
+  return {
+    maxTokens,
+    sampleLimit,
+    temperature,
+  };
+}
 
 function hasTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -112,6 +177,9 @@ function App() {
     useState<GpqaDiamondStatus>(DEFAULT_GPQA_STATUS);
   const [gpqaShotMode, setGpqaShotMode] =
     useState<GpqaShotMode>("five_shot_cot");
+  const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
+    DEFAULT_GPQA_CONFIG_INPUT,
+  );
 
   const refreshGpqaStatus = useCallback(() => {
     let cancelled = false;
@@ -337,6 +405,10 @@ function App() {
       }
 
       if (runQueue.includes("gpqa_diamond")) {
+        const resolvedGpqaConfig = resolveGpqaConfigInput(gpqaConfig);
+        if (typeof resolvedGpqaConfig === "string") {
+          throw new Error(resolvedGpqaConfig);
+        }
         const apiStatus = await startModelInspectorApi({
           benchmarkLabel: "ModelInspector API",
         });
@@ -349,6 +421,7 @@ function App() {
             apiStatus.apiKey,
             apiStatus.modelId,
             gpqaShotMode,
+            resolvedGpqaConfig,
           );
           openEvalResults(latestResult);
         } finally {
@@ -371,6 +444,7 @@ function App() {
     selectedRunIds,
     gpqaStatus.ready,
     gpqaShotMode,
+    gpqaConfig,
     startOperation,
     endOperation,
     openEvalResults,
@@ -495,6 +569,7 @@ function App() {
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           gpqaShotMode={gpqaShotMode}
+          gpqaConfig={gpqaConfig}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
@@ -507,6 +582,7 @@ function App() {
           onTestModeChange={setRecipeTestMode}
           onToggleRunTarget={handleToggleRunTarget}
           onGpqaShotModeChange={setGpqaShotMode}
+          onGpqaConfigChange={setGpqaConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}
           onDownloadGpqaDataset={handleDownloadGpqaDataset}
           onRefreshGpqaStatus={refreshGpqaStatus}
