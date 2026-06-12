@@ -1,8 +1,12 @@
 #include "model_surgery_runtime.h"
 
+#include "chat.h"
 #include "ggml-backend.h"
 #include "gguf.h"
 #include "llama.h"
+#include "sampling.h"
+
+#include "nlohmann/json.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -414,6 +418,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata);
 
 struct ModelSession {
     std::unique_ptr<llama_model, decltype(&llama_model_free)> model;
+    common_chat_templates_ptr chat_templates;
     std::unique_ptr<llama_context, decltype(&llama_free)> ctx;
     VramTracker vram;
     double load_ms = 0.0;
@@ -427,6 +432,7 @@ struct ModelSession {
 
     ModelSession(llama_model * loaded_model, double load_time_ms, const VramTracker & vram_tracker)
         : model(loaded_model, llama_model_free),
+          chat_templates(common_chat_templates_init(loaded_model, "")),
           ctx(nullptr, llama_free),
           vram(vram_tracker),
           load_ms(load_time_ms) {
@@ -1671,70 +1677,173 @@ std::string token_to_piece(const llama_vocab * vocab, llama_token token) {
     return piece;
 }
 
-std::string format_chat_prompt_with_template(
-    const char * tmpl,
+common_chat_params format_chat_prompt_with_template(
+    const common_chat_templates * chat_templates,
     const std::vector<std::pair<std::string, std::string>> & messages,
-    bool add_generation_prompt) {
+    bool add_generation_prompt,
+    const std::map<std::string, std::string> & chat_template_kwargs = {},
+    common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE) {
     if (messages.empty()) {
         throw std::runtime_error("chat completion request must include at least one message");
     }
 
-    std::vector<llama_chat_message> chat;
-    chat.reserve(messages.size());
+    if (chat_templates == nullptr) {
+        throw std::runtime_error("chat template is not initialized");
+    }
+
+    common_chat_templates_inputs inputs;
+    inputs.messages.reserve(messages.size());
+    inputs.add_generation_prompt = add_generation_prompt;
+    inputs.use_jinja = true;
+    inputs.reasoning_format = reasoning_format;
+    inputs.chat_template_kwargs = chat_template_kwargs;
+
+    const auto enable_thinking = inputs.chat_template_kwargs.find("enable_thinking");
+    if (enable_thinking != inputs.chat_template_kwargs.end()) {
+        if (enable_thinking->second == "true") {
+            inputs.enable_thinking = true;
+        } else if (enable_thinking->second == "false") {
+            inputs.enable_thinking = false;
+        } else if (!enable_thinking->second.empty() && enable_thinking->second[0] == '"') {
+            throw std::invalid_argument("invalid type for \"enable_thinking\" (expected boolean, got string)");
+        }
+    }
+
     for (const auto & message : messages) {
         if (message.first.empty()) {
             throw std::runtime_error("chat message role must not be empty");
         }
-        chat.push_back({
-            message.first.c_str(),
-            message.second.c_str(),
-        });
+        common_chat_msg chat_message = {};
+        chat_message.role = message.first;
+        chat_message.content = message.second;
+        inputs.messages.push_back(std::move(chat_message));
     }
 
-    int32_t size = llama_chat_apply_template(
-        tmpl,
-        chat.data(),
-        chat.size(),
-        add_generation_prompt,
-        nullptr,
-        0);
-    if (size < 0) {
-        if (tmpl != nullptr) {
-            size = llama_chat_apply_template(
-                nullptr,
-                chat.data(),
-                chat.size(),
-                add_generation_prompt,
-                nullptr,
-                0);
-        }
-        if (size < 0) {
-            throw std::runtime_error("failed to apply llama.cpp chat template");
-        }
-        tmpl = nullptr;
+    return common_chat_templates_apply(chat_templates, inputs);
+}
+
+std::map<std::string, std::string> chat_template_kwargs_from_json(const char * json_text) {
+    std::map<std::string, std::string> kwargs;
+    if (json_text == nullptr || json_text[0] == '\0') {
+        return kwargs;
     }
 
-    std::string prompt(static_cast<size_t>(size) + 1, '\0');
-    const int32_t written = llama_chat_apply_template(
-        tmpl,
-        chat.data(),
-        chat.size(),
-        add_generation_prompt,
-        prompt.data(),
-        static_cast<int32_t>(prompt.size()));
-    if (written < 0) {
-        throw std::runtime_error("failed to format chat prompt");
+    const nlohmann::ordered_json parsed = nlohmann::ordered_json::parse(json_text);
+    if (!parsed.is_object()) {
+        throw std::invalid_argument("chat_template_kwargs must be a JSON object");
     }
-    prompt.resize(static_cast<size_t>(written));
-    return prompt;
+    for (const auto & item : parsed.items()) {
+        kwargs[item.key()] = item.value().dump();
+    }
+    return kwargs;
+}
+
+common_reasoning_format reasoning_format_from_request(const char * value) {
+    if (value == nullptr || value[0] == '\0') {
+        return COMMON_REASONING_FORMAT_DEEPSEEK;
+    }
+    return common_reasoning_format_from_name(value);
+}
+
+int32_t normalize_context_window_param(int32_t value, uint32_t context_tokens) {
+    if (value == -1) {
+        return static_cast<int32_t>(std::min<uint32_t>(
+            context_tokens,
+            static_cast<uint32_t>(std::numeric_limits<int32_t>::max())));
+    }
+    return value;
+}
+
+common_params_sampling common_sampling_from_chat_params(
+    const ms_chat_generation_params & params,
+    uint32_t context_tokens) {
+    common_params_sampling sampling;
+    sampling.seed = params.seed;
+    sampling.top_k = params.top_k;
+    sampling.top_p = static_cast<float>(params.top_p);
+    sampling.min_p = static_cast<float>(params.min_p);
+    sampling.typ_p = static_cast<float>(params.typical_p);
+    sampling.temp = static_cast<float>(params.temperature);
+    sampling.penalty_last_n = normalize_context_window_param(params.repeat_last_n, context_tokens);
+    sampling.penalty_repeat = static_cast<float>(params.repeat_penalty);
+    sampling.penalty_freq = static_cast<float>(params.frequency_penalty);
+    sampling.penalty_present = static_cast<float>(params.presence_penalty);
+    sampling.dry_multiplier = static_cast<float>(params.dry_multiplier);
+    sampling.dry_base = static_cast<float>(params.dry_base);
+    sampling.dry_allowed_length = params.dry_allowed_length;
+    sampling.dry_penalty_last_n = normalize_context_window_param(params.dry_penalty_last_n, context_tokens);
+    return sampling;
+}
+
+ms_chat_generation_params default_chat_generation_params(uint32_t max_tokens) {
+    ms_chat_generation_params params = {};
+    params.max_tokens = max_tokens;
+    params.add_generation_prompt = 1;
+    params.seed = LLAMA_DEFAULT_SEED;
+    params.top_k = 40;
+    params.repeat_last_n = 64;
+    params.dry_allowed_length = 2;
+    params.dry_penalty_last_n = -1;
+    params.temperature = 0.8;
+    params.top_p = 0.95;
+    params.min_p = 0.05;
+    params.typical_p = 1.0;
+    params.repeat_penalty = 1.0;
+    params.frequency_penalty = 0.0;
+    params.presence_penalty = 0.0;
+    params.dry_multiplier = 0.0;
+    params.dry_base = 1.75;
+    return params;
+}
+
+bool consume_generated_stop_suffix(std::string & generated_text, const std::vector<std::string> & stop_strings) {
+    for (const std::string & stop : stop_strings) {
+        if (stop.empty() || generated_text.size() < stop.size()) {
+            continue;
+        }
+        const size_t offset = generated_text.size() - stop.size();
+        if (generated_text.compare(offset, stop.size(), stop) == 0) {
+            generated_text.resize(offset);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::string> collect_stop_strings(const char * const * stop_strings, uint64_t stop_count) {
+    std::vector<std::string> stops;
+    stops.reserve(static_cast<size_t>(stop_count));
+    for (uint64_t i = 0; i < stop_count; ++i) {
+        if (stop_strings[i] == nullptr) {
+            throw std::runtime_error("chat stop string is null");
+        }
+        if (stop_strings[i][0] != '\0') {
+            stops.emplace_back(stop_strings[i]);
+        }
+    }
+    return stops;
+}
+
+std::vector<std::string> merge_stop_strings(
+    const std::vector<std::string> & request_stops,
+    const std::vector<std::string> & template_stops) {
+    std::vector<std::string> stops;
+    stops.reserve(request_stops.size() + template_stops.size());
+    stops.insert(stops.end(), request_stops.begin(), request_stops.end());
+    stops.insert(stops.end(), template_stops.begin(), template_stops.end());
+    return stops;
 }
 
 int32_t run_session_generate(
     ModelSession & session,
     const char * prompt,
-    uint32_t max_tokens,
+    const ms_chat_generation_params & params,
+    const std::vector<std::string> & stop_strings,
     std::string & generated_text,
-    ms_baseline_benchmark * out_benchmark) {
+    ms_baseline_benchmark * out_benchmark,
+    uint32_t & out_finish_reason) {
+    const uint32_t max_tokens = params.max_tokens;
+    out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
     int32_t token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
@@ -1777,22 +1886,35 @@ int32_t run_session_generate(
     const auto prompt_end = std::chrono::steady_clock::now();
     session.vram.sample();
 
-    std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
-        llama_sampler_chain_init(llama_sampler_chain_default_params()),
-        llama_sampler_free);
-    llama_sampler_chain_add(sampler.get(), llama_sampler_init_greedy());
+    common_params_sampling sampling_params = common_sampling_from_chat_params(
+        params,
+        llama_n_ctx(session.ctx.get()));
+    common_sampler_ptr sampler(common_sampler_init(session.model.get(), sampling_params));
+    if (!sampler) {
+        return fail("failed to initialize llama.cpp common sampler");
+    }
+    for (const llama_token token : prompt_tokens) {
+        common_sampler_accept(sampler.get(), token, false);
+    }
 
     uint32_t generated = 0;
     generated_text.clear();
     const auto generation_start = std::chrono::steady_clock::now();
     for (uint32_t i = 0; i < max_tokens; ++i) {
         throw_if_recipe_test_cancelled();
-        llama_token token = llama_sampler_sample(sampler.get(), session.ctx.get(), -1);
+        llama_token token = common_sampler_sample(sampler.get(), session.ctx.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_EOS;
             break;
         }
 
         generated_text += token_to_piece(vocab, token);
+        common_sampler_accept(sampler.get(), token, true);
+        ++generated;
+        if (consume_generated_stop_suffix(generated_text, stop_strings)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_STOP;
+            break;
+        }
 
         llama_batch batch = llama_batch_get_one(&token, 1);
         const int gen_res = llama_decode(session.ctx.get(), batch);
@@ -1800,7 +1922,6 @@ int32_t run_session_generate(
             return fail("failed to decode generated token");
         }
         llama_synchronize(session.ctx.get());
-        ++generated;
     }
     const auto generation_end = std::chrono::steady_clock::now();
     session.vram.sample();
@@ -1838,7 +1959,6 @@ struct ms_runtime_chat_session {
     std::unique_ptr<ModelSession> session;
     uint64_t model_load_count = 0;
     uint64_t completion_count = 0;
-    std::string chat_template;
 };
 
 extern "C" {
@@ -2148,13 +2268,17 @@ int32_t ms_runtime_generate_recipe(
             return -1;
         }
 
+        const ms_chat_generation_params params = default_chat_generation_params(max_tokens);
         std::string generated_text;
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
         const int32_t result = run_session_generate(
             *session,
             prompt,
-            max_tokens,
+            params,
+            std::vector<std::string>(),
             generated_text,
-            out_benchmark);
+            out_benchmark,
+            finish_reason);
         if (result != 0) {
             return result;
         }
@@ -2237,19 +2361,22 @@ int32_t ms_runtime_generate_recipe_chat(
             chat_messages.push_back({messages[i].role, messages[i].content});
         }
 
-        const char * tmpl = llama_model_chat_template(session->model.get(), nullptr);
-        const std::string prompt = format_chat_prompt_with_template(
-            tmpl,
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->chat_templates.get(),
             chat_messages,
             true);
 
+        const ms_chat_generation_params params = default_chat_generation_params(max_tokens);
         std::string generated_text;
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
         const int32_t result = run_session_generate(
             *session,
-            prompt.c_str(),
-            max_tokens,
+            chat_params.prompt.c_str(),
+            params,
+            chat_params.additional_stops,
             generated_text,
-            out_benchmark);
+            out_benchmark,
+            finish_reason);
         if (result != 0) {
             return result;
         }
@@ -2314,10 +2441,6 @@ int32_t open_recipe_chat_session_impl(
 
         auto chat_session = std::make_unique<ms_runtime_chat_session>();
         chat_session->model_load_count = 1;
-        const char * tmpl = llama_model_chat_template(model_session->model.get(), nullptr);
-        if (tmpl != nullptr) {
-            chat_session->chat_template = tmpl;
-        }
         chat_session->session = std::move(model_session);
         *out_session = chat_session.release();
         return 0;
@@ -2369,10 +2492,14 @@ int32_t ms_runtime_generate_recipe_chat_session(
     ms_runtime_chat_session * session,
     const ms_chat_message * messages,
     uint64_t message_count,
-    uint32_t max_tokens,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
     char * out_text,
     uint64_t out_text_capacity,
-    ms_baseline_benchmark * out_benchmark) {
+    ms_chat_generation_result * out_result) {
     clear_error();
 
     if (session == nullptr || session->session == nullptr) {
@@ -2383,15 +2510,32 @@ int32_t ms_runtime_generate_recipe_chat_session(
         return fail("chat message set is empty");
     }
 
+    if (params == nullptr) {
+        return fail("chat generation params are null");
+    }
+
+    if (params->max_tokens == 0) {
+        return fail("chat generation max_tokens must be greater than zero");
+    }
+
+    if (stop_strings == nullptr && stop_count > 0) {
+        return fail("chat stop string pointer is null");
+    }
+
     if (out_text == nullptr || out_text_capacity == 0) {
         return fail("generation text output buffer is null or empty");
     }
 
-    if (out_benchmark == nullptr) {
-        return fail("benchmark output pointer is null");
+    if (out_result == nullptr) {
+        return fail("chat generation result output pointer is null");
     }
 
     try {
+        std::vector<std::string> request_stops = collect_stop_strings(stop_strings, stop_count);
+        const std::map<std::string, std::string> chat_template_kwargs =
+            chat_template_kwargs_from_json(chat_template_kwargs_json);
+        const common_reasoning_format native_reasoning_format =
+            reasoning_format_from_request(reasoning_format);
         std::vector<std::pair<std::string, std::string>> chat_messages;
         chat_messages.reserve(static_cast<size_t>(message_count));
         for (uint64_t i = 0; i < message_count; ++i) {
@@ -2404,21 +2548,27 @@ int32_t ms_runtime_generate_recipe_chat_session(
             chat_messages.push_back({messages[i].role, messages[i].content});
         }
 
-        const char * tmpl = session->chat_template.empty()
-            ? nullptr
-            : session->chat_template.c_str();
-        const std::string prompt = format_chat_prompt_with_template(
-            tmpl,
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->session->chat_templates.get(),
             chat_messages,
-            true);
+            params->add_generation_prompt != 0,
+            chat_template_kwargs,
+            native_reasoning_format);
 
+        const std::vector<std::string> all_stops = merge_stop_strings(
+            request_stops,
+            chat_params.additional_stops);
         std::string generated_text;
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        ms_baseline_benchmark benchmark = {};
         const int32_t result = run_session_generate(
             *session->session,
-            prompt.c_str(),
-            max_tokens,
+            chat_params.prompt.c_str(),
+            *params,
+            all_stops,
             generated_text,
-            out_benchmark);
+            &benchmark,
+            finish_reason);
         if (result != 0) {
             return result;
         }
@@ -2428,12 +2578,16 @@ int32_t ms_runtime_generate_recipe_chat_session(
         }
 
         std::memcpy(out_text, generated_text.c_str(), generated_text.size() + 1);
-        out_benchmark->copied_tensor_count = session->session->copied_tensors;
-        out_benchmark->converted_tensor_count = session->session->converted_tensors;
-        out_benchmark->converted_bytes_before = session->session->converted_bytes_before;
-        out_benchmark->converted_bytes_after = session->session->converted_bytes_after;
-        out_benchmark->requested_target_count = session->session->requested_target_count;
-        out_benchmark->verified_target_count = session->session->verified_target_count;
+        benchmark.copied_tensor_count = session->session->copied_tensors;
+        benchmark.converted_tensor_count = session->session->converted_tensors;
+        benchmark.converted_bytes_before = session->session->converted_bytes_before;
+        benchmark.converted_bytes_after = session->session->converted_bytes_after;
+        benchmark.requested_target_count = session->session->requested_target_count;
+        benchmark.verified_target_count = session->session->verified_target_count;
+        out_result->benchmark = benchmark;
+        out_result->prompt_tokens = benchmark.prompt_tokens;
+        out_result->completion_tokens = benchmark.generated_tokens;
+        out_result->finish_reason = finish_reason;
         session->completion_count += 1;
         return 0;
     } catch (const std::exception & err) {

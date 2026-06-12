@@ -52,6 +52,85 @@ struct MsChatMessage {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChatGenerationParams {
+    pub max_tokens: u32,
+    pub add_generation_prompt: u32,
+    pub seed: u32,
+    pub top_k: i32,
+    pub repeat_last_n: i32,
+    pub dry_allowed_length: i32,
+    pub dry_penalty_last_n: i32,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub min_p: f64,
+    pub typical_p: f64,
+    pub repeat_penalty: f64,
+    pub frequency_penalty: f64,
+    pub presence_penalty: f64,
+    pub dry_multiplier: f64,
+    pub dry_base: f64,
+}
+
+impl Default for ChatGenerationParams {
+    fn default() -> Self {
+        Self {
+            max_tokens: 1024,
+            add_generation_prompt: 1,
+            seed: u32::MAX,
+            top_k: 40,
+            repeat_last_n: 64,
+            dry_allowed_length: 2,
+            dry_penalty_last_n: -1,
+            temperature: 0.8,
+            top_p: 0.95,
+            min_p: 0.05,
+            typical_p: 1.0,
+            repeat_penalty: 1.0,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            dry_multiplier: 0.0,
+            dry_base: 1.75,
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatFinishReason {
+    Stop = 0,
+    Length = 1,
+    Eos = 2,
+}
+
+impl ChatFinishReason {
+    fn from_native(value: u32) -> Result<Self, String> {
+        match value {
+            0 => Ok(Self::Stop),
+            1 => Ok(Self::Length),
+            2 => Ok(Self::Eos),
+            _ => Err(format!("unknown native chat finish reason: {value}")),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct MsChatGenerationResult {
+    benchmark: MsBaselineBenchmark,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    finish_reason: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatGenerationOutput {
+    pub text: String,
+    pub benchmark: MsBaselineBenchmark,
+    pub finish_reason: ChatFinishReason,
+}
+
+#[repr(C)]
 struct MsRuntimeChatSession {
     _private: [u8; 0],
 }
@@ -246,10 +325,14 @@ extern "C" {
         session: *mut MsRuntimeChatSession,
         messages: *const MsChatMessage,
         message_count: u64,
-        max_tokens: u32,
+        params: *const ChatGenerationParams,
+        stop_strings: *const *const c_char,
+        stop_count: u64,
+        chat_template_kwargs_json: *const c_char,
+        reasoning_format: *const c_char,
         out_text: *mut c_char,
         out_text_capacity: u64,
-        out_benchmark: *mut MsBaselineBenchmark,
+        out_result: *mut MsChatGenerationResult,
     ) -> c_int;
     fn ms_runtime_get_recipe_chat_session_counters(
         session: *const MsRuntimeChatSession,
@@ -749,8 +832,11 @@ impl RecipeChatSession {
     pub fn generate_chat(
         &mut self,
         messages: &[(String, String)],
-        max_tokens: u32,
-    ) -> Result<(String, MsBaselineBenchmark), String> {
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+    ) -> Result<ChatGenerationOutput, String> {
         let c_roles = messages
             .iter()
             .map(|(role, _)| {
@@ -773,25 +859,67 @@ impl RecipeChatSession {
                 content: content.as_ptr(),
             })
             .collect::<Vec<_>>();
+        let c_stop_strings = stop_strings
+            .iter()
+            .map(|stop| {
+                CString::new(stop.as_str())
+                    .map_err(|_| "chat stop string contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_stop_strings = c_stop_strings
+            .iter()
+            .map(|stop| stop.as_ptr())
+            .collect::<Vec<_>>();
+        let c_chat_template_kwargs_json = chat_template_kwargs_json
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "chat_template_kwargs contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let c_reasoning_format = reasoning_format
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "reasoning_format contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
         let mut text_buffer = vec![0 as c_char; 131_072];
-        let mut benchmark = empty_benchmark();
+        let mut native_result = MsChatGenerationResult {
+            benchmark: empty_benchmark(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            finish_reason: ChatFinishReason::Stop as u32,
+        };
 
-        let result = unsafe {
+        let status = unsafe {
             ms_runtime_generate_recipe_chat_session(
                 self.ptr.as_ptr(),
                 native_messages.as_ptr(),
                 native_messages.len() as u64,
-                max_tokens,
+                params,
+                native_stop_strings.as_ptr(),
+                native_stop_strings.len() as u64,
+                c_chat_template_kwargs_json
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                c_reasoning_format
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
                 text_buffer.as_mut_ptr(),
                 text_buffer.len() as u64,
-                &mut benchmark,
+                &mut native_result,
             )
         };
-        if result == 0 {
+        if status == 0 {
             let text = unsafe { CStr::from_ptr(text_buffer.as_ptr()) }
                 .to_string_lossy()
                 .to_string();
-            Ok((text, benchmark))
+            Ok(ChatGenerationOutput {
+                text,
+                benchmark: native_result.benchmark,
+                finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+            })
         } else {
             Err(unsafe { c_string(ms_runtime_last_error()) })
         }

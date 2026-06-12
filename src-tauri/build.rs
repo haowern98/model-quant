@@ -1,5 +1,4 @@
 fn main() {
-
     println!("cargo:rerun-if-changed=icons/icon.ico");
     println!("cargo:rerun-if-changed=icons/32x32.png");
     println!("cargo:rerun-if-changed=icons/128x128.png");
@@ -83,6 +82,11 @@ fn link_native_runtime() {
     );
     copy_dll(&llama_bin_dir.join("llama.dll"), target_profile_dir);
     copy_dll(&llama_bin_dir.join("llama.dll"), &target_test_deps_dir);
+    copy_dll(&llama_bin_dir.join("llama-common.dll"), target_profile_dir);
+    copy_dll(
+        &llama_bin_dir.join("llama-common.dll"),
+        &target_test_deps_dir,
+    );
     copy_dll(&llama_bin_dir.join("ggml.dll"), target_profile_dir);
     copy_dll(&llama_bin_dir.join("ggml.dll"), &target_test_deps_dir);
     copy_all_matching_dlls(&llama_bin_dir, "ggml", target_profile_dir);

@@ -8,11 +8,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
 use crate::commands::quant::RecipeStore;
-use crate::ffi::runtime_bindings::RecipeChatSession;
+use crate::ffi::runtime_bindings::{ChatFinishReason, ChatGenerationParams, RecipeChatSession};
 use crate::quant::recipe::{QuantType, RecipeState};
 
 const API_CHAT_MAX_TOKENS: u32 = 10000;
@@ -211,16 +211,32 @@ struct ChatCompletionRequest {
     messages: Option<Vec<ChatMessage>>,
     stream: Option<bool>,
     max_tokens: Option<u32>,
+    max_completion_tokens: Option<u32>,
+    n_predict: Option<i32>,
     stop: Option<StopField>,
     temperature: Option<f64>,
     top_p: Option<f64>,
+    top_k: Option<i32>,
+    min_p: Option<f64>,
+    typical_p: Option<f64>,
+    repeat_last_n: Option<i32>,
+    repeat_penalty: Option<f64>,
+    frequency_penalty: Option<f64>,
+    presence_penalty: Option<f64>,
+    dry_multiplier: Option<f64>,
+    dry_base: Option<f64>,
+    dry_allowed_length: Option<i32>,
+    dry_penalty_last_n: Option<i32>,
     seed: Option<i64>,
+    add_generation_prompt: Option<bool>,
+    chat_template_kwargs: Option<Value>,
+    reasoning_format: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatMessage {
     role: String,
-    content: String,
+    content: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +244,153 @@ struct ChatMessage {
 enum StopField {
     One(String),
     Many(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
+struct ChatGenerationConfig {
+    max_tokens: u32,
+    stop: Vec<String>,
+    temperature: Option<f64>,
+    top_p: Option<f64>,
+    top_k: Option<i32>,
+    min_p: Option<f64>,
+    typical_p: Option<f64>,
+    repeat_last_n: Option<i32>,
+    repeat_penalty: Option<f64>,
+    frequency_penalty: Option<f64>,
+    presence_penalty: Option<f64>,
+    dry_multiplier: Option<f64>,
+    dry_base: Option<f64>,
+    dry_allowed_length: Option<i32>,
+    dry_penalty_last_n: Option<i32>,
+    seed: Option<i64>,
+    add_generation_prompt: Option<bool>,
+    chat_template_kwargs: Option<Value>,
+    reasoning_format: Option<String>,
+}
+
+fn chat_generation_config(payload: &ChatCompletionRequest) -> ChatGenerationConfig {
+    let requested_tokens = payload
+        .n_predict
+        .and_then(|value| u32::try_from(value).ok())
+        .or(payload.max_completion_tokens)
+        .or(payload.max_tokens)
+        .unwrap_or(API_CHAT_MAX_TOKENS);
+
+    ChatGenerationConfig {
+        max_tokens: requested_tokens.min(API_CHAT_MAX_TOKENS),
+        stop: stop_strings(payload.stop.as_ref()),
+        temperature: payload.temperature,
+        top_p: payload.top_p,
+        top_k: payload.top_k,
+        min_p: payload.min_p,
+        typical_p: payload.typical_p,
+        repeat_last_n: payload.repeat_last_n,
+        repeat_penalty: payload.repeat_penalty,
+        frequency_penalty: payload.frequency_penalty,
+        presence_penalty: payload.presence_penalty,
+        dry_multiplier: payload.dry_multiplier,
+        dry_base: payload.dry_base,
+        dry_allowed_length: payload.dry_allowed_length,
+        dry_penalty_last_n: payload.dry_penalty_last_n,
+        seed: payload.seed,
+        add_generation_prompt: payload.add_generation_prompt,
+        chat_template_kwargs: payload.chat_template_kwargs.clone(),
+        reasoning_format: payload.reasoning_format.clone(),
+    }
+}
+
+impl ChatGenerationConfig {
+    fn to_native_params(&self) -> ChatGenerationParams {
+        let defaults = ChatGenerationParams::default();
+        ChatGenerationParams {
+            max_tokens: self.max_tokens,
+            add_generation_prompt: u32::from(self.add_generation_prompt.unwrap_or(true)),
+            seed: self
+                .seed
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(defaults.seed),
+            top_k: self.top_k.unwrap_or(defaults.top_k),
+            repeat_last_n: self.repeat_last_n.unwrap_or(defaults.repeat_last_n),
+            dry_allowed_length: self
+                .dry_allowed_length
+                .unwrap_or(defaults.dry_allowed_length),
+            dry_penalty_last_n: self
+                .dry_penalty_last_n
+                .unwrap_or(defaults.dry_penalty_last_n),
+            temperature: self.temperature.unwrap_or(defaults.temperature),
+            top_p: self.top_p.unwrap_or(defaults.top_p),
+            min_p: self.min_p.unwrap_or(defaults.min_p),
+            typical_p: self.typical_p.unwrap_or(defaults.typical_p),
+            repeat_penalty: self.repeat_penalty.unwrap_or(defaults.repeat_penalty),
+            frequency_penalty: self.frequency_penalty.unwrap_or(defaults.frequency_penalty),
+            presence_penalty: self.presence_penalty.unwrap_or(defaults.presence_penalty),
+            dry_multiplier: self.dry_multiplier.unwrap_or(defaults.dry_multiplier),
+            dry_base: self.dry_base.unwrap_or(defaults.dry_base),
+        }
+    }
+
+    fn native_stop_strings(&self) -> Vec<String> {
+        self.stop
+            .iter()
+            .filter(|stop| !stop.is_empty())
+            .cloned()
+            .collect()
+    }
+
+    fn native_chat_template_kwargs_json(&self) -> Option<String> {
+        self.chat_template_kwargs
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .ok()
+            .flatten()
+    }
+
+    fn native_reasoning_format(&self) -> Option<&str> {
+        self.reasoning_format.as_deref()
+    }
+}
+
+fn stop_strings(stop: Option<&StopField>) -> Vec<String> {
+    match stop {
+        Some(StopField::One(value)) => vec![value.clone()],
+        Some(StopField::Many(values)) => values.clone(),
+        None => Vec::new(),
+    }
+}
+
+fn chat_messages_for_generation(
+    messages: Option<&[ChatMessage]>,
+) -> Result<Vec<(String, String)>, String> {
+    let messages = messages.unwrap_or_default();
+    messages
+        .iter()
+        .map(|message| {
+            let content = chat_message_content_text(&message.content).ok_or_else(|| {
+                "messages must use string content or text content parts".to_string()
+            })?;
+            Ok((message.role.clone(), content))
+        })
+        .collect()
+}
+
+fn chat_message_content_text(content: &Value) -> Option<String> {
+    match content {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(parts) => {
+            let mut text = String::new();
+            for part in parts {
+                let part_type = part.get("type").and_then(Value::as_str);
+                if part_type != Some("text") {
+                    return None;
+                }
+                text.push_str(part.get("text").and_then(Value::as_str).unwrap_or_default());
+            }
+            Some(text)
+        }
+        _ => None,
+    }
 }
 
 fn run_server(listener: TcpListener, stop: Arc<AtomicBool>, state: Arc<HttpApiState>) {
@@ -407,14 +570,29 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         );
     }
 
-    let messages = payload.messages.unwrap_or_default();
-    let max_tokens = payload.max_tokens.unwrap_or(API_CHAT_MAX_TOKENS).min(API_CHAT_MAX_TOKENS);
-    let _sampling_params = (payload.temperature, payload.top_p, payload.seed);
+    let config = chat_generation_config(&payload);
+    let messages = match chat_messages_for_generation(payload.messages.as_deref()) {
+        Ok(messages) => messages,
+        Err(message) => {
+            return json_response(
+                400,
+                "Bad Request",
+                json!({
+                    "error": {
+                        "message": message,
+                        "type": "invalid_request_error"
+                    }
+                }),
+            );
+        }
+    };
+    let native_params = config.to_native_params();
+    let max_tokens = native_params.max_tokens;
     let model = payload.model.unwrap_or_else(|| state.model_id.clone());
     if messages.is_empty()
         || messages
             .iter()
-            .all(|message| message.content.trim().is_empty())
+            .all(|(_, content)| content.trim().is_empty())
     {
         return json_response(
             400,
@@ -428,17 +606,25 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         );
     }
 
-    let chat_messages = messages
-        .into_iter()
-        .map(|message| (message.role, message.content))
-        .collect::<Vec<_>>();
-    let (mut content, benchmark) = match state.session.as_ref() {
+    let (mut content, benchmark, mut finish_reason) = match state.session.as_ref() {
         Some(session) => match session
             .lock()
             .map_err(|e| e.to_string())
-            .and_then(|mut session| session.generate_chat(&chat_messages, max_tokens))
+            .and_then(|mut session| {
+                session.generate_chat(
+                    &messages,
+                    &native_params,
+                    &config.native_stop_strings(),
+                    config.native_chat_template_kwargs_json().as_deref(),
+                    config.native_reasoning_format(),
+                )
+            })
         {
-            Ok((text, benchmark)) => (text, benchmark),
+            Ok(output) => (
+                output.text,
+                output.benchmark,
+                chat_finish_reason_label(output.finish_reason),
+            ),
             Err(error) => {
                 return json_response(
                     500,
@@ -453,7 +639,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
             }
         },
         None => {
-            let prompt_chars = chat_messages
+            let prompt_chars = messages
                 .iter()
                 .map(|(_, content)| content.chars().count())
                 .sum::<usize>();
@@ -462,10 +648,13 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                     "Model Inspector API smoke response for {model}. Received {prompt_chars} prompt character(s), max_tokens={max_tokens}."
                 ),
                 empty_benchmark(),
+                "stop",
             )
         }
     };
-    let finish_reason = apply_stop_strings(&mut content, payload.stop.as_ref());
+    if state.session.is_none() {
+        finish_reason = apply_stop_strings(&mut content, &config.stop);
+    }
     emit_completion_output(state);
 
     json_response(
@@ -532,14 +721,10 @@ fn empty_benchmark() -> crate::ffi::runtime_bindings::MsBaselineBenchmark {
     }
 }
 
-fn apply_stop_strings(content: &mut String, stop: Option<&StopField>) -> &'static str {
-    let stops = match stop {
-        Some(StopField::One(value)) => vec![value.as_str()],
-        Some(StopField::Many(values)) => values.iter().map(String::as_str).collect(),
-        None => Vec::new(),
-    };
+fn apply_stop_strings(content: &mut String, stops: &[String]) -> &'static str {
     let Some((index, _)) = stops
-        .into_iter()
+        .iter()
+        .map(String::as_str)
         .filter(|stop| !stop.is_empty())
         .filter_map(|stop| content.find(stop).map(|index| (index, stop)))
         .min_by_key(|(index, _)| *index)
@@ -548,6 +733,14 @@ fn apply_stop_strings(content: &mut String, stop: Option<&StopField>) -> &'stati
     };
     content.truncate(index);
     "stop"
+}
+
+fn chat_finish_reason_label(reason: ChatFinishReason) -> &'static str {
+    match reason {
+        ChatFinishReason::Stop => "stop",
+        ChatFinishReason::Length => "length",
+        ChatFinishReason::Eos => "stop",
+    }
 }
 
 fn json_response(status: u16, reason: &'static str, body: serde_json::Value) -> HttpResponse {
@@ -733,6 +926,160 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Streaming"));
+    }
+
+    #[test]
+    fn parses_llama_server_chat_generation_fields() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "max_tokens": 100,
+            "max_completion_tokens": 12,
+            "stop": ["</s>", "<|im_end|>"],
+            "temperature": 0.2,
+            "top_p": 0.95,
+            "top_k": 40,
+            "min_p": 0.05,
+            "seed": 42,
+            "repeat_penalty": 1.1,
+            "frequency_penalty": 0.2,
+            "presence_penalty": 0.3,
+            "chat_template_kwargs": {"enable_thinking": true},
+            "reasoning_format": "deepseek",
+            "add_generation_prompt": true
+        }))
+        .unwrap();
+
+        let config = chat_generation_config(&payload);
+
+        assert_eq!(config.max_tokens, 12);
+        assert_eq!(config.stop, vec!["</s>", "<|im_end|>"]);
+        assert_eq!(config.temperature, Some(0.2));
+        assert_eq!(config.top_p, Some(0.95));
+        assert_eq!(config.top_k, Some(40));
+        assert_eq!(config.min_p, Some(0.05));
+        assert_eq!(config.typical_p, None);
+        assert_eq!(config.seed, Some(42));
+        assert_eq!(config.repeat_last_n, None);
+        assert_eq!(config.repeat_penalty, Some(1.1));
+        assert_eq!(config.frequency_penalty, Some(0.2));
+        assert_eq!(config.presence_penalty, Some(0.3));
+        assert_eq!(config.dry_multiplier, None);
+        assert_eq!(config.dry_base, None);
+        assert_eq!(config.dry_allowed_length, None);
+        assert_eq!(config.dry_penalty_last_n, None);
+        assert_eq!(
+            config.chat_template_kwargs.as_ref().unwrap()["enable_thinking"],
+            true
+        );
+        assert_eq!(config.reasoning_format.as_deref(), Some("deepseek"));
+        assert_eq!(config.add_generation_prompt, Some(true));
+    }
+
+    #[test]
+    fn maps_chat_generation_config_to_native_llama_sampling_params() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "max_tokens": 100,
+            "temperature": 0.0,
+            "top_p": 0.75,
+            "top_k": 20,
+            "min_p": 0.01,
+            "typical_p": 0.9,
+            "seed": 1234,
+            "repeat_last_n": 32,
+            "repeat_penalty": 1.15,
+            "frequency_penalty": 0.25,
+            "presence_penalty": 0.5,
+            "dry_multiplier": 0.8,
+            "dry_base": 1.5,
+            "dry_allowed_length": 3,
+            "dry_penalty_last_n": 64,
+            "add_generation_prompt": false
+        }))
+        .unwrap();
+
+        let params = chat_generation_config(&payload).to_native_params();
+
+        assert_eq!(params.max_tokens, 100);
+        assert_eq!(params.add_generation_prompt, 0);
+        assert_eq!(params.seed, 1234);
+        assert_eq!(params.top_k, 20);
+        assert_eq!(params.repeat_last_n, 32);
+        assert_eq!(params.dry_allowed_length, 3);
+        assert_eq!(params.dry_penalty_last_n, 64);
+        assert_eq!(params.temperature, 0.0);
+        assert_eq!(params.top_p, 0.75);
+        assert_eq!(params.min_p, 0.01);
+        assert_eq!(params.typical_p, 0.9);
+        assert_eq!(params.repeat_penalty, 1.15);
+        assert_eq!(params.frequency_penalty, 0.25);
+        assert_eq!(params.presence_penalty, 0.5);
+        assert_eq!(params.dry_multiplier, 0.8);
+        assert_eq!(params.dry_base, 1.5);
+    }
+
+    #[test]
+    fn maps_native_chat_finish_reasons_to_openai_labels() {
+        assert_eq!(chat_finish_reason_label(ChatFinishReason::Stop), "stop");
+        assert_eq!(chat_finish_reason_label(ChatFinishReason::Length), "length");
+        assert_eq!(chat_finish_reason_label(ChatFinishReason::Eos), "stop");
+    }
+
+    #[test]
+    fn stop_strings_are_forwarded_to_native_generation() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "stop": ["</s>", "<|im_end|>"]
+        }))
+        .unwrap();
+
+        let config = chat_generation_config(&payload);
+
+        assert_eq!(config.native_stop_strings(), vec!["</s>", "<|im_end|>"]);
+    }
+
+    #[test]
+    fn chat_template_options_are_serialized_for_native_generation() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "chat_template_kwargs": {"enable_thinking": false},
+            "reasoning_format": "deepseek"
+        }))
+        .unwrap();
+
+        let config = chat_generation_config(&payload);
+
+        assert_eq!(
+            config.native_chat_template_kwargs_json().as_deref(),
+            Some("{\"enable_thinking\":false}")
+        );
+        assert_eq!(config.native_reasoning_format(), Some("deepseek"));
+    }
+
+    #[test]
+    fn accepts_openai_text_content_parts_for_chat_messages() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Say "},
+                    {"type": "text", "text": "hello"}
+                ]
+            }]
+        }))
+        .unwrap();
+
+        let messages = chat_messages_for_generation(payload.messages.as_deref()).unwrap();
+
+        assert_eq!(
+            messages,
+            vec![("user".to_string(), "Say hello".to_string())]
+        );
     }
 
     #[test]

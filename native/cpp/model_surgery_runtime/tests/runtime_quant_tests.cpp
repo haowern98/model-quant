@@ -195,15 +195,85 @@ void test_chat_template_formats_openai_messages() {
         {"system", "Answer carefully."},
         {"user", "What is GPQA?"},
     };
-    const std::string prompt = format_chat_prompt_with_template(
+    auto templates = common_chat_templates_init(
+        nullptr,
         "{{ bos_token }}{% for message in messages %}<|im_start|>{{ message['role'] }}\n{{ message['content'] }}<|im_end|>\n{% endfor %}<|im_start|>assistant\n",
+        "<s>",
+        "</s>");
+    const common_chat_params chat_params = format_chat_prompt_with_template(
+        templates.get(),
         messages,
         true);
+    const std::string & prompt = chat_params.prompt;
 
     assert(prompt.find("<|im_start|>system") != std::string::npos);
     assert(prompt.find("<|im_start|>user") != std::string::npos);
     assert(prompt.rfind("<|im_start|>assistant") != std::string::npos);
     assert(prompt.find("system: Answer carefully.") == std::string::npos);
+}
+
+void test_request_and_template_stop_strings_are_merged() {
+    const std::vector<std::string> request_stops = {"</s>", "<|im_end|>"};
+    const std::vector<std::string> template_stops = {"<|eot_id|>"};
+
+    const std::vector<std::string> stops = merge_stop_strings(request_stops, template_stops);
+
+    assert(stops.size() == 3);
+    assert(stops[0] == "</s>");
+    assert(stops[1] == "<|im_end|>");
+    assert(stops[2] == "<|eot_id|>");
+}
+
+void test_generated_stop_suffix_is_consumed_in_loop() {
+    std::string generated = "The answer is A<|im_end|>";
+
+    const bool stopped = consume_generated_stop_suffix(generated, {"<|im_end|>"});
+
+    assert(stopped);
+    assert(generated == "The answer is A");
+}
+
+void test_chat_template_kwargs_json_matches_llama_server_shape() {
+    const std::map<std::string, std::string> kwargs =
+        chat_template_kwargs_from_json("{\"enable_thinking\":false,\"mode\":\"compact\"}");
+
+    assert(kwargs.at("enable_thinking") == "false");
+    assert(kwargs.at("mode") == "\"compact\"");
+}
+
+void test_missing_reasoning_format_defaults_to_llama_server_deepseek() {
+    assert(reasoning_format_from_request(nullptr) == COMMON_REASONING_FORMAT_DEEPSEEK);
+    assert(reasoning_format_from_request("") == COMMON_REASONING_FORMAT_DEEPSEEK);
+}
+
+void test_chat_sampling_params_normalize_context_windows_like_llama_server() {
+    ms_chat_generation_params params = default_chat_generation_params(128);
+    params.repeat_last_n = -1;
+    params.dry_penalty_last_n = -1;
+
+    const common_params_sampling sampling = common_sampling_from_chat_params(params, 4096);
+
+    assert(sampling.penalty_last_n == 4096);
+    assert(sampling.dry_penalty_last_n == 4096);
+}
+
+void test_chat_sampling_params_use_llama_server_sampler_chain() {
+    const ms_chat_generation_params params = default_chat_generation_params(128);
+
+    const common_params_sampling sampling = common_sampling_from_chat_params(params, 4096);
+
+    const std::vector<common_sampler_type> expected = {
+        COMMON_SAMPLER_TYPE_PENALTIES,
+        COMMON_SAMPLER_TYPE_DRY,
+        COMMON_SAMPLER_TYPE_TOP_N_SIGMA,
+        COMMON_SAMPLER_TYPE_TOP_K,
+        COMMON_SAMPLER_TYPE_TYPICAL_P,
+        COMMON_SAMPLER_TYPE_TOP_P,
+        COMMON_SAMPLER_TYPE_MIN_P,
+        COMMON_SAMPLER_TYPE_XTC,
+        COMMON_SAMPLER_TYPE_TEMPERATURE,
+    };
+    assert(sampling.samplers == expected);
 }
 
 void test_persistent_chat_session_loads_once_and_resets_context_per_completion() {
@@ -268,23 +338,34 @@ void test_persistent_chat_session_loads_once_and_resets_context_per_completion()
         {"user", "Reply with exactly one short word."},
     };
     char output[4096] = {};
-    ms_baseline_benchmark benchmark = {};
+    ms_chat_generation_result result = {};
+    ms_chat_generation_params generation = default_chat_generation_params(4);
+    generation.temperature = 0.0;
+    const char * stop_strings[] = {"<|im_end|>"};
     assert(ms_runtime_generate_recipe_chat_session(
         session,
         messages,
         1,
-        4,
+        &generation,
+        stop_strings,
+        1,
+        nullptr,
+        nullptr,
         output,
         sizeof(output),
-        &benchmark) == 0);
+        &result) == 0);
     assert(ms_runtime_generate_recipe_chat_session(
         session,
         messages,
         1,
-        4,
+        &generation,
+        stop_strings,
+        1,
+        nullptr,
+        nullptr,
         output,
         sizeof(output),
-        &benchmark) == 0);
+        &result) == 0);
 
     ms_runtime_chat_session_counters counters = {};
     assert(ms_runtime_get_recipe_chat_session_counters(session, &counters) == 0);
@@ -310,6 +391,12 @@ int main() {
     test_recipe_test_cancellation_flag_can_reset_and_cancel();
     test_generation_context_allows_official_eval_prompts();
     test_chat_template_formats_openai_messages();
+    test_request_and_template_stop_strings_are_merged();
+    test_generated_stop_suffix_is_consumed_in_loop();
+    test_chat_template_kwargs_json_matches_llama_server_shape();
+    test_missing_reasoning_format_defaults_to_llama_server_deepseek();
+    test_chat_sampling_params_normalize_context_windows_like_llama_server();
+    test_chat_sampling_params_use_llama_server_sampler_chain();
     test_persistent_chat_session_loads_once_and_resets_context_per_completion();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;
