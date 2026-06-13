@@ -26,11 +26,90 @@ pub struct ModelInspectorApiStatus {
     pub model_id: Option<String>,
 }
 
-pub struct ModelInspectorApiState(pub Mutex<Option<ModelInspectorApiServer>>);
+pub struct ModelInspectorApiState(pub Mutex<ModelInspectorApiLifecycle>);
 
 impl ModelInspectorApiState {
     pub fn new() -> Self {
-        Self(Mutex::new(None))
+        Self(Mutex::new(ModelInspectorApiLifecycle::default()))
+    }
+}
+
+pub struct ModelInspectorApiLifecycle {
+    server: Option<ModelInspectorApiServer>,
+    startup: Option<ModelInspectorApiStartup>,
+}
+
+impl Default for ModelInspectorApiLifecycle {
+    fn default() -> Self {
+        Self {
+            server: None,
+            startup: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ModelInspectorApiStartup {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl ModelInspectorApiStartup {
+    fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    fn cancel_requested(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    fn same_startup(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.cancelled, &other.cancelled)
+    }
+}
+
+impl ModelInspectorApiLifecycle {
+    fn begin_start(
+        &mut self,
+    ) -> Result<(ModelInspectorApiStartup, Option<ModelInspectorApiServer>), String> {
+        if self.startup.is_some() {
+            return Err("ModelInspector API is already starting".to_string());
+        }
+        let startup = ModelInspectorApiStartup::new();
+        self.startup = Some(startup.clone());
+        Ok((startup, self.server.take()))
+    }
+
+    fn cancel(&mut self) -> Option<ModelInspectorApiServer> {
+        if let Some(startup) = self.startup.as_ref() {
+            startup.cancel();
+        }
+        self.server.take()
+    }
+
+    fn finish_start(
+        &mut self,
+        startup: &ModelInspectorApiStartup,
+        server: Option<ModelInspectorApiServer>,
+    ) -> bool {
+        let Some(current) = self.startup.as_ref() else {
+            return false;
+        };
+        if !current.same_startup(startup) {
+            return false;
+        }
+        let cancelled = current.cancel_requested();
+        self.startup = None;
+        if cancelled {
+            return false;
+        }
+        self.server = server;
+        true
     }
 }
 
@@ -65,7 +144,7 @@ impl ModelInspectorApiServer {
 #[tauri::command]
 pub async fn start_modelinspector_api(
     benchmark_label: Option<String>,
-    _benchmark_sample_count: Option<u64>,
+    benchmark_sample_count: Option<u64>,
     app: AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     recipe_state: State<'_, RecipeStore>,
@@ -79,11 +158,33 @@ pub async fn start_modelinspector_api(
 
     let model_id = model_id_from_path(&recipe.base_model);
     let token = make_token();
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("Failed to bind Model Inspector API: {e}"))?;
-    let addr = listener
-        .local_addr()
-        .map_err(|e| format!("Failed to read Model Inspector API address: {e}"))?;
+    let (startup, old_server) = {
+        let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+        guard.begin_start()?
+    };
+    if let Some(mut server) = old_server {
+        server.stop();
+    }
+    crate::ffi::runtime_bindings::reset_recipe_test_cancel();
+
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(error) => {
+            let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+            guard.finish_start(&startup, None);
+            return Err(format!("Failed to bind Model Inspector API: {error}"));
+        }
+    };
+    let addr = match listener.local_addr() {
+        Ok(addr) => addr,
+        Err(error) => {
+            let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+            guard.finish_start(&startup, None);
+            return Err(format!(
+                "Failed to read Model Inspector API address: {error}"
+            ));
+        }
+    };
     let base_url = format!("http://{addr}/v1");
     let stop = Arc::new(AtomicBool::new(false));
     let targets = recipe_targets(&recipe);
@@ -92,42 +193,70 @@ pub async fn start_modelinspector_api(
         "ModelInspector API: loading in-process model session",
     );
     let output_app = app.clone();
-    let session = crate::ffi::runtime_bindings::open_recipe_chat_session_with_progress(
+    let session = match crate::ffi::runtime_bindings::open_recipe_chat_session_with_progress(
         &recipe.base_model,
         &targets,
         API_CHAT_MAX_TOKENS,
         |message| {
             crate::progress::emit_benchmark_output(&output_app, message);
         },
-    )
-    .map_err(|e| format!("Failed to load Model Inspector API model session: {e}"))?;
+    ) {
+        Ok(session) => session,
+        Err(error) => {
+            let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+            let was_cancelled = startup.cancel_requested();
+            guard.finish_start(&startup, None);
+            if was_cancelled || error.to_lowercase().contains("cancel") {
+                return Err("ModelInspector API startup cancelled".to_string());
+            }
+            return Err(format!(
+                "Failed to load Model Inspector API model session: {error}"
+            ));
+        }
+    };
+    if startup.cancel_requested() {
+        let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+        guard.finish_start(&startup, None);
+        return Err("ModelInspector API startup cancelled".to_string());
+    }
     let server_state = Arc::new(HttpApiState {
         token: token.clone(),
         model_id: model_id.clone(),
         session: Some(Mutex::new(session)),
         benchmark_label,
+        benchmark_sample_count,
         completion_count: AtomicU64::new(0),
         app: Some(app),
     });
 
     let thread_stop = stop.clone();
     let thread_state = server_state.clone();
-    let handle = thread::Builder::new()
+    let handle = match thread::Builder::new()
         .name("modelinspector-api".to_string())
         .spawn(move || run_server(listener, thread_stop, thread_state))
-        .map_err(|e| format!("Failed to start Model Inspector API thread: {e}"))?;
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+            guard.finish_start(&startup, None);
+            return Err(format!(
+                "Failed to start Model Inspector API thread: {error}"
+            ));
+        }
+    };
 
-    let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(mut server) = guard.take() {
-        server.stop();
-    }
-    *guard = Some(ModelInspectorApiServer {
+    let server = ModelInspectorApiServer {
         base_url: base_url.clone(),
         model_id: model_id.clone(),
         token,
         stop,
         handle: Some(handle),
-    });
+    };
+    let api_key = server.token.clone();
+    let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+    if !guard.finish_start(&startup, Some(server)) {
+        return Err("ModelInspector API startup cancelled".to_string());
+    }
     if let Some(app) = server_state.app.as_ref() {
         crate::progress::emit_benchmark_output(
             app,
@@ -138,7 +267,7 @@ pub async fn start_modelinspector_api(
     Ok(ModelInspectorApiStatus {
         running: true,
         base_url: Some(base_url),
-        api_key: guard.as_ref().map(|server| server.token.clone()),
+        api_key: Some(api_key),
         model_id: Some(model_id),
     })
 }
@@ -147,8 +276,12 @@ pub async fn start_modelinspector_api(
 pub async fn stop_modelinspector_api(
     api_state: State<'_, ModelInspectorApiState>,
 ) -> Result<ModelInspectorApiStatus, String> {
-    let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(mut server) = guard.take() {
+    crate::ffi::runtime_bindings::cancel_recipe_test();
+    let server = {
+        let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+        guard.cancel()
+    };
+    if let Some(mut server) = server {
         server.stop();
     }
     Ok(ModelInspectorApiStatus {
@@ -164,7 +297,7 @@ pub async fn get_modelinspector_api_status(
     api_state: State<'_, ModelInspectorApiState>,
 ) -> Result<ModelInspectorApiStatus, String> {
     let guard = api_state.0.lock().map_err(|e| e.to_string())?;
-    Ok(match guard.as_ref() {
+    Ok(match guard.server.as_ref() {
         Some(server) => ModelInspectorApiStatus {
             running: true,
             base_url: Some(server.base_url.clone()),
@@ -186,6 +319,7 @@ struct HttpApiState {
     model_id: String,
     session: Option<Mutex<RecipeChatSession>>,
     benchmark_label: Option<String>,
+    benchmark_sample_count: Option<u64>,
     completion_count: AtomicU64,
     app: Option<AppHandle>,
 }
@@ -606,7 +740,10 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         );
     }
 
-    let (mut content, benchmark, mut finish_reason) = match state.session.as_ref() {
+    let (mut content, reasoning_content, benchmark, mut finish_reason) = match state
+        .session
+        .as_ref()
+    {
         Some(session) => match session
             .lock()
             .map_err(|e| e.to_string())
@@ -618,10 +755,10 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                     config.native_chat_template_kwargs_json().as_deref(),
                     config.native_reasoning_format(),
                 )
-            })
-        {
+            }) {
             Ok(output) => (
                 output.text,
+                output.reasoning_text,
                 output.benchmark,
                 chat_finish_reason_label(output.finish_reason),
             ),
@@ -647,6 +784,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                 format!(
                     "Model Inspector API smoke response for {model}. Received {prompt_chars} prompt character(s), max_tokens={max_tokens}."
                 ),
+                None,
                 empty_benchmark(),
                 "stop",
             )
@@ -655,34 +793,50 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
     if state.session.is_none() {
         finish_reason = apply_stop_strings(&mut content, &config.stop);
     }
-    emit_completion_output(state);
+    let diagnostics = ChatCompletionDiagnostics {
+        model: model.clone(),
+        finish_reason,
+        prompt_tokens: benchmark.prompt_tokens,
+        completion_tokens: benchmark.generated_tokens,
+        total_tokens: benchmark.prompt_tokens + benchmark.generated_tokens,
+        visible_content: content.clone(),
+        reasoning_content: reasoning_content.clone(),
+    };
+    emit_completion_output(state, &diagnostics);
 
-    json_response(
-        200,
-        "OK",
+    json_response(200, "OK", {
+        let assistant_message = assistant_message_json(&content, reasoning_content.as_deref());
         json!({
-            "id": format!("chatcmpl-{}", unix_millis()),
-            "object": "chat.completion",
-            "created": unix_seconds(),
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content
-                },
-                "finish_reason": finish_reason
-            }],
-            "usage": {
-                "prompt_tokens": benchmark.prompt_tokens,
-                "completion_tokens": benchmark.generated_tokens,
-                "total_tokens": benchmark.prompt_tokens + benchmark.generated_tokens
-            }
-        }),
-    )
+        "id": format!("chatcmpl-{}", unix_millis()),
+        "object": "chat.completion",
+        "created": unix_seconds(),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": assistant_message,
+            "finish_reason": finish_reason
+        }],
+        "usage": {
+            "prompt_tokens": benchmark.prompt_tokens,
+            "completion_tokens": benchmark.generated_tokens,
+            "total_tokens": benchmark.prompt_tokens + benchmark.generated_tokens
+        }
+        })
+    })
 }
 
-fn emit_completion_output(state: &HttpApiState) {
+#[derive(Debug, Clone)]
+struct ChatCompletionDiagnostics {
+    model: String,
+    finish_reason: &'static str,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+    visible_content: String,
+    reasoning_content: Option<String>,
+}
+
+fn emit_completion_output(state: &HttpApiState, diagnostics: &ChatCompletionDiagnostics) {
     let Some(label) = state.benchmark_label.as_deref() else {
         return;
     };
@@ -690,14 +844,63 @@ fn emit_completion_output(state: &HttpApiState) {
     if let Some(app) = state.app.as_ref() {
         crate::progress::emit_benchmark_output(
             app,
-            benchmark_completion_output(label, count, None),
+            benchmark_completion_output(label, count, state.benchmark_sample_count, diagnostics),
         );
     }
 }
 
-fn benchmark_completion_output(label: &str, count: u64, total: Option<u64>) -> String {
-    let _ = total;
-    format!("{label}: chat completion request {count} completed")
+fn assistant_message_json(content: &str, reasoning_content: Option<&str>) -> Value {
+    let mut message = json!({
+        "role": "assistant",
+        "content": content
+    });
+    if let Some(reasoning) = reasoning_content.filter(|value| !value.is_empty()) {
+        message["reasoning_content"] = json!(reasoning);
+    }
+    message
+}
+
+fn benchmark_completion_output(
+    label: &str,
+    count: u64,
+    total: Option<u64>,
+    diagnostics: &ChatCompletionDiagnostics,
+) -> String {
+    let progress = total
+        .map(|total| format!(" {count}/{total}"))
+        .unwrap_or_else(|| format!(" {count}"));
+    let reasoning = diagnostics.reasoning_content.as_deref().unwrap_or("");
+    format!(
+        "{label}: chat completion request{progress} completed model={} finish={} prompt_tokens={} completion_tokens={} total_tokens={}\n\
+         {label}: visible output ({} chars)\n{}\n\
+         {label}: reasoning output ({} chars)\n{}",
+        diagnostics.model,
+        diagnostics.finish_reason,
+        diagnostics.prompt_tokens,
+        diagnostics.completion_tokens,
+        diagnostics.total_tokens,
+        diagnostics.visible_content.chars().count(),
+        diagnostic_excerpt(&diagnostics.visible_content),
+        reasoning.chars().count(),
+        diagnostic_excerpt(reasoning),
+    )
+}
+
+fn diagnostic_excerpt(text: &str) -> String {
+    const LIMIT: usize = 4096;
+    if text.chars().count() <= LIMIT {
+        return text.to_string();
+    }
+    let head = text.chars().take(LIMIT / 2).collect::<String>();
+    let tail = text
+        .chars()
+        .rev()
+        .take(LIMIT / 2)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{head}\n[... truncated ...]\n{tail}")
 }
 
 fn empty_benchmark() -> crate::ffi::runtime_bindings::MsBaselineBenchmark {
@@ -833,6 +1036,7 @@ mod tests {
             model_id: "Qwen3.5-9B-Q4_K_M.gguf".to_string(),
             session: None,
             benchmark_label: None,
+            benchmark_sample_count: None,
             completion_count: AtomicU64::new(0),
             app: None,
         }
@@ -905,6 +1109,15 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Model Inspector API smoke response"));
+    }
+
+    #[test]
+    fn formats_reasoning_content_separately_from_visible_content() {
+        let message = assistant_message_json("visible answer", Some("hidden chain"));
+
+        assert_eq!(message["role"], "assistant");
+        assert_eq!(message["content"], "visible answer");
+        assert_eq!(message["reasoning_content"], "hidden chain");
     }
 
     #[test]
@@ -1115,13 +1328,46 @@ mod tests {
 
     #[test]
     fn formats_benchmark_completion_output_as_api_diagnostic_only() {
-        assert_eq!(
-            benchmark_completion_output("ModelInspector API", 12, Some(198)),
-            "ModelInspector API: chat completion request 12 completed"
-        );
-        assert_eq!(
-            benchmark_completion_output("ModelInspector API", 3, None),
-            "ModelInspector API: chat completion request 3 completed"
-        );
+        let diagnostics = ChatCompletionDiagnostics {
+            model: "gemma".to_string(),
+            finish_reason: "stop",
+            prompt_tokens: 12,
+            completion_tokens: 34,
+            total_tokens: 46,
+            visible_content: "ANSWER: C".to_string(),
+            reasoning_content: Some("private reasoning".to_string()),
+        };
+
+        let output = benchmark_completion_output("ModelInspector API", 12, Some(198), &diagnostics);
+
+        assert!(output.contains("ModelInspector API: chat completion request 12/198 completed"));
+        assert!(output.contains("finish=stop"));
+        assert!(output.contains("visible output"));
+        assert!(output.contains("ANSWER: C"));
+        assert!(output.contains("reasoning output"));
+        assert!(output.contains("private reasoning"));
+    }
+
+    #[test]
+    fn api_startup_lifecycle_blocks_reentry_until_cancelled_start_finishes() {
+        let mut lifecycle = ModelInspectorApiLifecycle::default();
+        let (first_start, old_server) = lifecycle.begin_start().unwrap();
+
+        assert!(old_server.is_none());
+        assert!(matches!(
+            lifecycle.begin_start(),
+            Err(message) if message.contains("already starting")
+        ));
+
+        let old_server = lifecycle.cancel();
+
+        assert!(old_server.is_none());
+        assert!(first_start.cancel_requested());
+        assert!(matches!(
+            lifecycle.begin_start(),
+            Err(message) if message.contains("already starting")
+        ));
+        assert!(!lifecycle.finish_start(&first_start, None));
+        assert!(lifecycle.begin_start().is_ok());
     }
 }

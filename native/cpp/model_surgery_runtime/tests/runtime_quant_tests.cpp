@@ -1,5 +1,7 @@
 #include "../src/model_surgery_runtime.cpp"
 
+#include "chat-peg-parser.h"
+
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
@@ -276,6 +278,27 @@ void test_chat_sampling_params_use_llama_server_sampler_chain() {
     assert(sampling.samplers == expected);
 }
 
+void test_gemma4_generated_output_is_split_into_reasoning_and_visible_content() {
+    common_chat_params chat_params = {};
+    chat_params.format = COMMON_CHAT_FORMAT_PEG_GEMMA4;
+    auto parser = build_chat_peg_parser([](common_chat_peg_builder & p) {
+        auto thought = p.literal("<|channel>thought") + p.space() +
+            p.reasoning(p.until("<channel|>")) + p.literal("<channel|>");
+        auto content = p.content(p.rest());
+        return thought + content + p.end();
+    });
+    chat_params.parser = parser.save();
+
+    const ParsedChatOutput parsed = parse_generated_chat_output(
+        "<|channel>thought\nprivate derivation<channel|>Final answer\nANSWER: C",
+        chat_params,
+        COMMON_REASONING_FORMAT_DEEPSEEK,
+        false);
+
+    assert(parsed.visible_text == "Final answer\nANSWER: C");
+    assert(parsed.reasoning_text == "private derivation");
+}
+
 void test_persistent_chat_session_loads_once_and_resets_context_per_completion() {
     const std::filesystem::path fixture =
         std::filesystem::path("models") / "test-subjects" / "Qwen_Qwen3-1.7B-bf16.gguf";
@@ -342,6 +365,7 @@ void test_persistent_chat_session_loads_once_and_resets_context_per_completion()
     ms_chat_generation_params generation = default_chat_generation_params(4);
     generation.temperature = 0.0;
     const char * stop_strings[] = {"<|im_end|>"};
+    char reasoning_output[4096] = {};
     assert(ms_runtime_generate_recipe_chat_session(
         session,
         messages,
@@ -353,6 +377,8 @@ void test_persistent_chat_session_loads_once_and_resets_context_per_completion()
         nullptr,
         output,
         sizeof(output),
+        reasoning_output,
+        sizeof(reasoning_output),
         &result) == 0);
     assert(ms_runtime_generate_recipe_chat_session(
         session,
@@ -365,6 +391,8 @@ void test_persistent_chat_session_loads_once_and_resets_context_per_completion()
         nullptr,
         output,
         sizeof(output),
+        reasoning_output,
+        sizeof(reasoning_output),
         &result) == 0);
 
     ms_runtime_chat_session_counters counters = {};
@@ -397,6 +425,7 @@ int main() {
     test_missing_reasoning_format_defaults_to_llama_server_deepseek();
     test_chat_sampling_params_normalize_context_windows_like_llama_server();
     test_chat_sampling_params_use_llama_server_sampler_chain();
+    test_gemma4_generated_output_is_split_into_reasoning_and_visible_content();
     test_persistent_chat_session_loads_once_and_resets_context_per_completion();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;

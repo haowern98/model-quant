@@ -365,6 +365,11 @@ struct RuntimeLogSink {
     }
 };
 
+struct ParsedChatOutput {
+    std::string visible_text;
+    std::string reasoning_text;
+};
+
 struct RecipeTargetVerification {
     uint64_t requested_count = 0;
     uint64_t verified_count = 0;
@@ -1834,6 +1839,29 @@ std::vector<std::string> merge_stop_strings(
     return stops;
 }
 
+ParsedChatOutput parse_generated_chat_output(
+    const std::string & generated_text,
+    const common_chat_params & chat_params,
+    common_reasoning_format reasoning_format,
+    bool is_partial) {
+    common_chat_parser_params parser_params(chat_params);
+    parser_params.reasoning_format = reasoning_format;
+    parser_params.reasoning_in_content = false;
+    if (!chat_params.parser.empty()) {
+        parser_params.parser.load(chat_params.parser);
+    }
+
+    try {
+        const common_chat_msg parsed = common_chat_parse(generated_text, is_partial, parser_params);
+        return ParsedChatOutput{
+            parsed.render_content(),
+            parsed.reasoning_content,
+        };
+    } catch (...) {
+        return ParsedChatOutput{generated_text, ""};
+    }
+}
+
 int32_t run_session_generate(
     ModelSession & session,
     const char * prompt,
@@ -2499,6 +2527,8 @@ int32_t ms_runtime_generate_recipe_chat_session(
     const char * reasoning_format,
     char * out_text,
     uint64_t out_text_capacity,
+    char * out_reasoning_text,
+    uint64_t out_reasoning_text_capacity,
     ms_chat_generation_result * out_result) {
     clear_error();
 
@@ -2524,6 +2554,10 @@ int32_t ms_runtime_generate_recipe_chat_session(
 
     if (out_text == nullptr || out_text_capacity == 0) {
         return fail("generation text output buffer is null or empty");
+    }
+
+    if (out_reasoning_text == nullptr || out_reasoning_text_capacity == 0) {
+        return fail("generation reasoning output buffer is null or empty");
     }
 
     if (out_result == nullptr) {
@@ -2573,11 +2607,25 @@ int32_t ms_runtime_generate_recipe_chat_session(
             return result;
         }
 
-        if (generated_text.size() + 1 > out_text_capacity) {
+        const ParsedChatOutput parsed = parse_generated_chat_output(
+            generated_text,
+            chat_params,
+            native_reasoning_format,
+            finish_reason == MS_CHAT_FINISH_REASON_LENGTH);
+
+        if (parsed.visible_text.size() + 1 > out_text_capacity) {
             return fail("generated text output buffer is too small");
         }
 
-        std::memcpy(out_text, generated_text.c_str(), generated_text.size() + 1);
+        if (parsed.reasoning_text.size() + 1 > out_reasoning_text_capacity) {
+            return fail("generated reasoning output buffer is too small");
+        }
+
+        std::memcpy(out_text, parsed.visible_text.c_str(), parsed.visible_text.size() + 1);
+        std::memcpy(
+            out_reasoning_text,
+            parsed.reasoning_text.c_str(),
+            parsed.reasoning_text.size() + 1);
         benchmark.copied_tensor_count = session->session->copied_tensors;
         benchmark.converted_tensor_count = session->session->converted_tensors;
         benchmark.converted_bytes_before = session->session->converted_bytes_before;

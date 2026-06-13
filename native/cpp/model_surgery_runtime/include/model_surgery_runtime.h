@@ -254,6 +254,8 @@ MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session(
     const char * reasoning_format,
     char * out_text,
     uint64_t out_text_capacity,
+    char * out_reasoning_text,
+    uint64_t out_reasoning_text_capacity,
     ms_chat_generation_result * out_result);
 MS_RUNTIME_API int32_t ms_runtime_get_recipe_chat_session_counters(
     const ms_runtime_chat_session * session,

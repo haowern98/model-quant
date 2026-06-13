@@ -126,6 +126,7 @@ struct MsChatGenerationResult {
 #[derive(Debug, Clone)]
 pub struct ChatGenerationOutput {
     pub text: String,
+    pub reasoning_text: Option<String>,
     pub benchmark: MsBaselineBenchmark,
     pub finish_reason: ChatFinishReason,
 }
@@ -332,6 +333,8 @@ extern "C" {
         reasoning_format: *const c_char,
         out_text: *mut c_char,
         out_text_capacity: u64,
+        out_reasoning_text: *mut c_char,
+        out_reasoning_text_capacity: u64,
         out_result: *mut MsChatGenerationResult,
     ) -> c_int;
     fn ms_runtime_get_recipe_chat_session_counters(
@@ -883,6 +886,7 @@ impl RecipeChatSession {
             })
             .transpose()?;
         let mut text_buffer = vec![0 as c_char; 131_072];
+        let mut reasoning_buffer = vec![0 as c_char; 131_072];
         let mut native_result = MsChatGenerationResult {
             benchmark: empty_benchmark(),
             prompt_tokens: 0,
@@ -908,6 +912,8 @@ impl RecipeChatSession {
                     .unwrap_or(std::ptr::null()),
                 text_buffer.as_mut_ptr(),
                 text_buffer.len() as u64,
+                reasoning_buffer.as_mut_ptr(),
+                reasoning_buffer.len() as u64,
                 &mut native_result,
             )
         };
@@ -915,8 +921,12 @@ impl RecipeChatSession {
             let text = unsafe { CStr::from_ptr(text_buffer.as_ptr()) }
                 .to_string_lossy()
                 .to_string();
+            let reasoning_text = unsafe { CStr::from_ptr(reasoning_buffer.as_ptr()) }
+                .to_string_lossy()
+                .to_string();
             Ok(ChatGenerationOutput {
                 text,
+                reasoning_text: (!reasoning_text.is_empty()).then_some(reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
             })
