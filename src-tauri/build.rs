@@ -64,6 +64,16 @@ fn link_native_runtime() {
             .join("native/cpp/model_surgery_runtime/include/model_surgery_runtime.h")
             .display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        repo_dir
+            .join("native/cpp/model_surgery_runtime/src/model_surgery_runtime.cpp")
+            .display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        runtime_dir.join("model_surgery_runtime.dll").display()
+    );
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let target_profile_dir = out_dir

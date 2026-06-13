@@ -299,6 +299,11 @@ void test_gemma4_generated_output_is_split_into_reasoning_and_visible_content() 
     assert(parsed.reasoning_text == "private derivation");
 }
 
+void test_runtime_version_advertises_chat_abi() {
+    const std::string version = ms_runtime_version();
+    assert(version.find("chat-abi=2") != std::string::npos);
+}
+
 void test_persistent_chat_session_loads_once_and_resets_context_per_completion() {
     const std::filesystem::path fixture =
         std::filesystem::path("models") / "test-subjects" / "Qwen_Qwen3-1.7B-bf16.gguf";
@@ -426,6 +431,7 @@ int main() {
     test_chat_sampling_params_normalize_context_windows_like_llama_server();
     test_chat_sampling_params_use_llama_server_sampler_chain();
     test_gemma4_generated_output_is_split_into_reasoning_and_visible_content();
+    test_runtime_version_advertises_chat_abi();
     test_persistent_chat_session_loads_once_and_resets_context_per_completion();
     std::cout << "runtime quant tests passed\n";
     return EXIT_SUCCESS;

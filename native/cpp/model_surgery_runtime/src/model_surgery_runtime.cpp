@@ -1992,7 +1992,7 @@ struct ms_runtime_chat_session {
 extern "C" {
 
 const char * ms_runtime_version(void) {
-    return "model-surgery-runtime/0.1";
+    return "model-surgery-runtime/0.2 chat-abi=2";
 }
 
 const char * ms_runtime_llama_system_info(void) {

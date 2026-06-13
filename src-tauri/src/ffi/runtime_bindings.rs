@@ -5,6 +5,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::ptr::NonNull;
 
 const STANDARD_EVAL_AUDIT_MAX_CHOICES: usize = 32;
+const EXPECTED_CHAT_RUNTIME_ABI: u32 = 2;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -409,6 +410,32 @@ extern "C" {
 
 pub fn runtime_version() -> String {
     unsafe { c_string(ms_runtime_version()) }
+}
+
+fn ensure_chat_runtime_abi() -> Result<(), String> {
+    validate_chat_runtime_abi_from_version(&runtime_version())
+}
+
+fn validate_chat_runtime_abi_from_version(version: &str) -> Result<(), String> {
+    let Some(abi) = version
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("chat-abi="))
+    else {
+        return Err(format!(
+            "Loaded native runtime is incompatible: expected chat ABI {EXPECTED_CHAT_RUNTIME_ABI}, got no chat ABI marker from '{version}'. Rebuild the native runtime DLL and restart the app."
+        ));
+    };
+    let parsed = abi.parse::<u32>().map_err(|_| {
+        format!(
+            "Loaded native runtime is incompatible: expected chat ABI {EXPECTED_CHAT_RUNTIME_ABI}, got invalid chat ABI '{abi}' from '{version}'. Rebuild the native runtime DLL and restart the app."
+        )
+    })?;
+    if parsed != EXPECTED_CHAT_RUNTIME_ABI {
+        return Err(format!(
+            "Loaded native runtime is incompatible: expected chat ABI {EXPECTED_CHAT_RUNTIME_ABI}, got chat ABI {parsed} from '{version}'. Rebuild the native runtime DLL and restart the app."
+        ));
+    }
+    Ok(())
 }
 
 pub fn llama_system_info() -> String {
@@ -1026,6 +1053,7 @@ fn open_recipe_chat_session_with_native_call<F>(
 where
     F: FnOnce(*const c_char, &[MsRecipeTensorTarget], *mut *mut MsRuntimeChatSession) -> c_int,
 {
+    ensure_chat_runtime_abi()?;
     let c_path =
         CString::new(path).map_err(|_| format!("path contains an interior NUL byte: {}", path))?;
     let c_names = targets
@@ -1579,4 +1607,22 @@ unsafe fn c_string(ptr: *const c_char) -> String {
         return String::new();
     }
     CStr::from_ptr(ptr).to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_native_runtime_without_expected_chat_abi_marker() {
+        let error = validate_chat_runtime_abi_from_version("model-surgery-runtime/0.1")
+            .expect_err("missing chat ABI marker must be rejected");
+
+        assert!(error.contains("expected chat ABI"));
+    }
+
+    #[test]
+    fn accepts_native_runtime_with_expected_chat_abi_marker() {
+        validate_chat_runtime_abi_from_version("model-surgery-runtime/0.2 chat-abi=2").unwrap();
+    }
 }
