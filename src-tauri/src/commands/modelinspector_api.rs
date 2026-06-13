@@ -13,7 +13,7 @@ use tauri::{AppHandle, State};
 
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{ChatFinishReason, ChatGenerationParams, RecipeChatSession};
-use crate::quant::recipe::{QuantType, RecipeState};
+use crate::quant::recipe::RecipeState;
 
 const API_CHAT_CONTEXT_TOKENS: u32 = 20_000;
 const API_CHAT_UNTIL_CONTEXT_MAX_TOKENS: u32 = 0;
@@ -986,30 +986,16 @@ fn recipe_targets(recipe: &RecipeState) -> Vec<(String, String)> {
     recipe
         .assignments
         .iter()
+        .filter(|assignment| {
+            !assignment.source_quant.is_empty() && assignment.quant_type != assignment.source_quant
+        })
         .map(|assignment| {
             (
                 assignment.tensor_name.clone(),
-                quant_type_name(&assignment.quant_type).to_string(),
+                assignment.quant_type.clone(),
             )
         })
         .collect()
-}
-
-fn quant_type_name(quant_type: &QuantType) -> &'static str {
-    match quant_type {
-        QuantType::F32 => "F32",
-        QuantType::BF16 => "BF16",
-        QuantType::F16 => "F16",
-        QuantType::Q8_0 => "Q8_0",
-        QuantType::Q6_K => "Q6_K",
-        QuantType::Q5_K => "Q5_K",
-        QuantType::Q5_K_M => "Q5_K_M",
-        QuantType::Q4_K => "Q4_K",
-        QuantType::Q4_K_M => "Q4_K_M",
-        QuantType::Q3_K => "Q3_K",
-        QuantType::Q3_K_M => "Q3_K_M",
-        QuantType::Q2_K => "Q2_K",
-    }
 }
 
 fn unix_seconds() -> u64 {
@@ -1029,6 +1015,7 @@ fn unix_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quant::recipe::QuantType;
     use std::net::TcpStream;
 
     fn state() -> HttpApiState {
@@ -1252,6 +1239,50 @@ mod tests {
         let config = chat_generation_config(&payload);
 
         assert_eq!(config.native_stop_strings(), vec!["</s>", "<|im_end|>"]);
+    }
+
+    #[test]
+    fn recipe_targets_skip_unchanged_source_only_quant_assignments() {
+        let recipe = RecipeState::from_current_quants(
+            "test.gguf".to_string(),
+            vec![
+                ("blk.0.ffn_down.weight".to_string(), "Q5_0".to_string()),
+                ("blk.0.attn_q.weight".to_string(), "Q4_K".to_string()),
+            ],
+        );
+
+        assert!(recipe_targets(&recipe).is_empty());
+    }
+
+    #[test]
+    fn recipe_targets_include_explicit_changes_from_source_only_quant() {
+        let mut recipe = RecipeState::from_current_quants(
+            "test.gguf".to_string(),
+            vec![("blk.0.ffn_down.weight".to_string(), "Q5_0".to_string())],
+        );
+        recipe.assign_tensors(&["blk.0.ffn_down.weight".to_string()], QuantType::Q3_K);
+
+        assert_eq!(
+            recipe_targets(&recipe),
+            vec![("blk.0.ffn_down.weight".to_string(), "Q3_K".to_string())]
+        );
+    }
+
+    #[test]
+    fn recipe_targets_skip_legacy_assignments_without_source_quant() {
+        let recipe = RecipeState {
+            id: "legacy-recipe".to_string(),
+            base_model: "test.gguf".to_string(),
+            assignments: vec![crate::quant::recipe::QuantAssignment {
+                tensor_name: "blk.0.ffn_down.weight".to_string(),
+                quant_type: "Q4_K".to_string(),
+                source_quant: String::new(),
+            }],
+            profile: None,
+            status: crate::quant::recipe::RecipeStatus::Draft,
+        };
+
+        assert!(recipe_targets(&recipe).is_empty());
     }
 
     #[test]

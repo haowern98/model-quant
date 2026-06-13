@@ -1,4 +1,4 @@
-import { type QuantType, QUANT_TYPES, toTargetQuant } from '../../types';
+import { type QuantType, QUANT_TYPES, quantBitsPerWeight } from '../../types';
 import { formatBytes, estQuantSize, formatTensorName } from '../../lib/format';
 import type { TensorInfo } from '../../types';
 
@@ -29,23 +29,34 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
         </thead>
         <tbody>
           {tensors.map((t, index) => {
-            const assignedQuant = assignments[t.name] ?? toTargetQuant(t.currentQuant);
+            const assignedQuant = assignments[t.name] ?? t.currentQuant;
             const currentSize = t.sizeBytes;
-            const targetBits =
-              QUANT_TYPES.find(q => q.value === assignedQuant)?.bitsPerWeight ?? 4.5;
+            const targetBits = quantBitsPerWeight(assignedQuant) ?? 4.5;
             const targetSize = estQuantSize(t.shape, targetBits);
             const canAssignTarget = t.quantPreflight?.canQuantize ?? true;
             const disabledReason = t.quantPreflight?.blockedReason ?? 'Tensor cannot be quantized';
             const allowedTargetQuants = t.quantPreflight?.allowedTargetQuants;
-            const quantOptions = allowedTargetQuants && allowedTargetQuants.length > 0
+            const editableOptions = allowedTargetQuants && allowedTargetQuants.length > 0
               ? QUANT_TYPES.filter(q => allowedTargetQuants.includes(q.value))
               : QUANT_TYPES;
+            const hasAssignedOption = editableOptions.some(q => q.value === assignedQuant);
+            const quantOptions = hasAssignedOption
+              ? editableOptions
+              : [
+                  {
+                    value: assignedQuant,
+                    label: assignedQuant,
+                    bitsPerWeight: targetBits,
+                    quality: 'Source as-is',
+                  },
+                  ...editableOptions,
+                ];
             const hasAlternateTarget = quantOptions.some(q => q.value !== assignedQuant);
             const targetDisabled = !canAssignTarget || !hasAlternateTarget;
             const targetDisabledReason = !canAssignTarget
               ? disabledReason
               : 'No compatible smaller target quant is available';
-            const changed = assignedQuant !== toTargetQuant(t.currentQuant);
+            const changed = assignedQuant !== t.currentQuant;
             return (
               <tr key={t.name} className={changed ? "changed-row" : undefined}>
                 <td className="row-number">{index + 1}</td>

@@ -175,6 +175,15 @@ const char * display_quant_type(ggml_type type) {
     }
 }
 
+bool tensor_row_fits_type(int64_t n_per_row, ggml_type target_type) {
+    if (n_per_row <= 0) {
+        return false;
+    }
+
+    const int64_t target_block = ggml_blck_size(target_type);
+    return target_block > 0 && n_per_row % target_block == 0;
+}
+
 uint64_t estimate_type_size(size_t current_size, ggml_type current_type, ggml_type target_type) {
     const double current_bpw = static_cast<double>(ggml_type_size(current_type)) / static_cast<double>(ggml_blck_size(current_type));
     const double target_bpw = static_cast<double>(ggml_type_size(target_type)) / static_cast<double>(ggml_blck_size(target_type));
@@ -303,9 +312,13 @@ bool validate_recipe_for_user_model(
         }
 
         const ggml_type current_type = gguf_get_tensor_type(source_metadata, tensor_id);
-        if (current_type != target_type && !supports_recipe_conversion(name, current_type, target_type)) {
-            unsupported.push_back(
-                name + " " + display_quant_type(current_type) + "->" + display_quant_type(target_type));
+        if (current_type != target_type) {
+            const int64_t n_per_row = gguf_get_tensor_ne(source_metadata, tensor_id, 0);
+            if (!tensor_row_fits_type(n_per_row, target_type)
+                || !supports_recipe_conversion(name, current_type, target_type)) {
+                unsupported.push_back(
+                    name + " " + display_quant_type(current_type) + "->" + display_quant_type(target_type));
+            }
         }
     }
 
@@ -334,6 +347,26 @@ void apply_recipe_tensor_types(
     gguf_context * model_metadata,
     const std::unordered_map<std::string, ggml_type> & target_types) {
     for (const auto & entry : target_types) {
+        const int64_t tensor_id = gguf_find_tensor(model_metadata, entry.first.c_str());
+        if (tensor_id < 0) {
+            throw std::runtime_error("recipe target tensor is missing before metadata apply: " + entry.first);
+        }
+
+        const ggml_type current_type = gguf_get_tensor_type(model_metadata, tensor_id);
+        if (current_type == entry.second) {
+            continue;
+        }
+
+        const int64_t n_per_row = gguf_get_tensor_ne(model_metadata, tensor_id, 0);
+        if (!tensor_row_fits_type(n_per_row, entry.second)) {
+            throw std::runtime_error(
+                std::string("cannot retag tensor to ")
+                + display_quant_type(entry.second)
+                + " because row size is not divisible by "
+                + std::to_string(ggml_blck_size(entry.second))
+                + ": " + entry.first);
+        }
+
         gguf_set_tensor_type(model_metadata, entry.first.c_str(), entry.second);
     }
 }
@@ -2125,7 +2158,9 @@ int32_t ms_runtime_analyze_recipe(
             const size_t current_size = gguf_get_tensor_size(ctx, tensor_id);
             if (current_type != target_type) {
                 analysis.changed_count += 1;
-                if (!supports_recipe_conversion(target.name, current_type, target_type)) {
+                const int64_t n_per_row = gguf_get_tensor_ne(ctx, tensor_id, 0);
+                if (!tensor_row_fits_type(n_per_row, target_type)
+                    || !supports_recipe_conversion(target.name, current_type, target_type)) {
                     analysis.unsupported_count += 1;
                 }
             }

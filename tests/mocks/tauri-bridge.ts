@@ -4,7 +4,6 @@ import type {
   QuantType,
   AssignPattern,
 } from "../../src/types";
-import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
   let cancelRequested = false;
@@ -182,7 +181,8 @@ export function createMockBridge() {
     baseModel: "mock-model.gguf",
     assignments: mockModel.tensors.map((t) => ({
       tensorName: t.name,
-      quantType: toTargetQuant(t.currentQuant),
+      quantType: t.currentQuant,
+      sourceQuant: t.currentQuant,
     })),
     profile: null,
     status: "draft",

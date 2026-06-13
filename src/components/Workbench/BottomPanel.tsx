@@ -5,7 +5,7 @@ import type {
   RecipeProfile,
   TensorInfo,
 } from "../../types";
-import { QUANT_TYPES, toTargetQuant } from "../../types";
+import { quantBitsPerWeight } from "../../types";
 import { estQuantSize, formatBytes } from "../../lib/format";
 import { HardwarePanel } from "./HardwarePanel";
 
@@ -24,8 +24,8 @@ export function BottomPanel({
 }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<"size" | "hardware" | "output">("size");
   const totalTargetBytes = tensors.reduce((sum, tensor) => {
-    const quant = assignments[tensor.name] ?? toTargetQuant(tensor.currentQuant);
-    const bits = QUANT_TYPES.find((item) => item.value === quant)?.bitsPerWeight ?? 4.5;
+    const quant = assignments[tensor.name] ?? tensor.currentQuant;
+    const bits = quantBitsPerWeight(quant) ?? 4.5;
     return sum + estQuantSize(tensor.shape, bits);
   }, 0);
   const f16Size = tensors.reduce((sum, tensor) => sum + estQuantSize(tensor.shape, 16), 0);

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::quant::recipe::RecipeState;
+use crate::quant::recipe::{quant_bits_per_weight, RecipeState};
 
 /// Estimate the quantized size (bytes) for a tensor given shape and quant type.
 pub fn estimate_quantized_size(shape: &[u64], bits_per_weight: f32) -> u64 {
@@ -13,7 +13,8 @@ pub fn estimate_vram_mb(recipe: &RecipeState, tensor_shapes: &[Vec<u64>]) -> f64
     let mut total: u64 = 0;
     for (i, assign) in recipe.assignments.iter().enumerate() {
         let shape = tensor_shapes.get(i).map(|s| s.as_slice()).unwrap_or(&[]);
-        total += estimate_quantized_size(shape, assign.quant_type.bits_per_weight());
+        let bits_per_weight = quant_bits_per_weight(&assign.quant_type).unwrap_or(4.5);
+        total += estimate_quantized_size(shape, bits_per_weight);
     }
     total as f64 / (1024.0 * 1024.0)
 }

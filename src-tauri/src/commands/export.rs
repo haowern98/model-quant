@@ -250,10 +250,13 @@ fn recipe_targets(recipe: &RecipeState) -> Vec<(String, String)> {
     recipe
         .assignments
         .iter()
+        .filter(|assignment| {
+            !assignment.source_quant.is_empty() && assignment.quant_type != assignment.source_quant
+        })
         .map(|assignment| {
             (
                 assignment.tensor_name.clone(),
-                quant_type_name(&assignment.quant_type).to_string(),
+                assignment.quant_type.clone(),
             )
         })
         .collect::<Vec<_>>()
@@ -277,21 +280,4 @@ fn validate_recipe_analysis(
     }
 
     Ok(())
-}
-
-fn quant_type_name(quant_type: &crate::quant::recipe::QuantType) -> &'static str {
-    match quant_type {
-        crate::quant::recipe::QuantType::F32 => "F32",
-        crate::quant::recipe::QuantType::BF16 => "BF16",
-        crate::quant::recipe::QuantType::F16 => "F16",
-        crate::quant::recipe::QuantType::Q8_0 => "Q8_0",
-        crate::quant::recipe::QuantType::Q6_K => "Q6_K",
-        crate::quant::recipe::QuantType::Q5_K => "Q5_K",
-        crate::quant::recipe::QuantType::Q5_K_M => "Q5_K_M",
-        crate::quant::recipe::QuantType::Q4_K => "Q4_K",
-        crate::quant::recipe::QuantType::Q4_K_M => "Q4_K_M",
-        crate::quant::recipe::QuantType::Q3_K => "Q3_K",
-        crate::quant::recipe::QuantType::Q3_K_M => "Q3_K_M",
-        crate::quant::recipe::QuantType::Q2_K => "Q2_K",
-    }
 }

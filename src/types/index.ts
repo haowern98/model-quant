@@ -1,6 +1,6 @@
 // ---- Quantization Types ----
 
-export type QuantType =
+export type EditableQuantType =
   | "F32"
   | "BF16"
   | "F16"
@@ -14,8 +14,10 @@ export type QuantType =
   | "Q3_K_M"
   | "Q2_K";
 
+export type QuantType = EditableQuantType | (string & {});
+
 export const QUANT_TYPES: {
-  value: QuantType;
+  value: EditableQuantType;
   label: string;
   bitsPerWeight: number;
   quality: string;
@@ -63,6 +65,42 @@ export const QUANT_TYPES: {
 
 export function isQuantType(value: string): value is QuantType {
   return QUANT_TYPES.some((q) => q.value === value);
+}
+
+export function quantBitsPerWeight(value: string | null | undefined): number | null {
+  switch (value) {
+    case "F32":
+      return 32.0;
+    case "BF16":
+    case "F16":
+      return 16.0;
+    case "Q8_0":
+      return 8.0;
+    case "Q6_K":
+      return 6.6;
+    case "Q5_K":
+      return 5.5;
+    case "Q5_K_M":
+      return 5.3;
+    case "Q5_0":
+    case "Q5_1":
+      return 5.0;
+    case "Q4_K_M":
+      return 4.8;
+    case "Q4_K":
+      return 4.5;
+    case "Q4_0":
+    case "Q4_1":
+      return 4.0;
+    case "Q3_K_M":
+      return 3.9;
+    case "Q3_K":
+      return 3.4;
+    case "Q2_K":
+      return 2.6;
+    default:
+      return null;
+  }
 }
 
 export function toTargetQuant(
@@ -115,6 +153,7 @@ export interface ModelInfo {
 export interface QuantAssignment {
   tensorName: string;
   quantType: QuantType;
+  sourceQuant: string;
 }
 
 export interface RecipeProfile {

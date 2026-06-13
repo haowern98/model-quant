@@ -31,21 +31,21 @@ fn test_recipe_full_workflow() {
         .iter()
         .find(|a| a.tensor_name == "tok_embeddings.weight")
         .unwrap();
-    assert_eq!(emb.quant_type, QuantType::Q8_0);
+    assert_eq!(emb.quant_type, "Q8_0");
 
     let attn = recipe
         .assignments
         .iter()
         .find(|a| a.tensor_name.contains("attention"))
         .unwrap();
-    assert_eq!(attn.quant_type, QuantType::Q6_K);
+    assert_eq!(attn.quant_type, "Q6_K");
 
     let ffn = recipe
         .assignments
         .iter()
         .find(|a| a.tensor_name.contains("feed_forward"))
         .unwrap();
-    assert_eq!(ffn.quant_type, QuantType::Q4_K_M);
+    assert_eq!(ffn.quant_type, "Q4_K_M");
 
     // JSON roundtrip
     let json = serde_json::to_string(&recipe).unwrap();
