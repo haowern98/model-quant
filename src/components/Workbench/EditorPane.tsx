@@ -306,7 +306,7 @@ function GpqaDetailsView({
 }) {
   const harnessReady = status.python && status.evalscope;
   const updateIntegerField =
-    (field: "maxTokens" | "sampleLimit") =>
+    (field: "contextWindow" | "sampleLimit") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -359,12 +359,12 @@ function GpqaDetailsView({
             onChange={updateTemperature}
           />
           <BenchmarkInputRow
-            label="Max tokens"
-            inputLabel="GPQA Diamond max tokens"
-            value={config.maxTokens}
-            placeholder="1024"
+            label="Context window"
+            inputLabel="GPQA Diamond context window"
+            value={config.contextWindow}
+            placeholder="20000"
             inputMode="numeric"
-            onChange={updateIntegerField("maxTokens")}
+            onChange={updateIntegerField("contextWindow")}
           />
           <BenchmarkInfoRow label="Batch size" value="1" />
           <BenchmarkInputRow

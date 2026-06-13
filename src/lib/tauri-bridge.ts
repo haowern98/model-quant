@@ -93,9 +93,11 @@ export async function getHardwareSnapshot(): Promise<HardwareSnapshot> {
 
 export async function startModelInspectorApi(options?: {
   benchmarkLabel?: string;
+  contextWindow?: number;
 }): Promise<ModelInspectorApiStatus> {
   return invoke<ModelInspectorApiStatus>("start_modelinspector_api", {
     benchmarkLabel: options?.benchmarkLabel ?? null,
+    contextWindow: options?.contextWindow ?? null,
   });
 }
 

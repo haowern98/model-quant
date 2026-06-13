@@ -454,6 +454,14 @@ uint32_t session_context_tokens_for_generation(uint32_t max_tokens) {
     return std::max<uint32_t>(LLAMA_GENERATION_CONTEXT_TOKENS, generation_limit * 2);
 }
 
+uint32_t context_generation_room(uint32_t context_tokens, size_t prompt_tokens) {
+    constexpr uint32_t reserved_tokens = 1;
+    if (prompt_tokens + reserved_tokens >= context_tokens) {
+        return 0;
+    }
+    return static_cast<uint32_t>(context_tokens - prompt_tokens - reserved_tokens);
+}
+
 void open_session_context(
     ModelSession & session,
     uint32_t context_tokens,
@@ -1870,7 +1878,6 @@ int32_t run_session_generate(
     std::string & generated_text,
     ms_baseline_benchmark * out_benchmark,
     uint32_t & out_finish_reason) {
-    const uint32_t max_tokens = params.max_tokens;
     out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
@@ -1900,6 +1907,16 @@ int32_t run_session_generate(
     prompt_tokens.resize(static_cast<size_t>(actual_tokens));
 
     reset_session_context(session);
+
+    const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
+    const uint32_t max_tokens = context_generation_room(context_tokens, prompt_tokens.size());
+    if (max_tokens == 0) {
+        return fail(
+            std::string("benchmark prompt exceeds context window: prompt tokens=")
+            + std::to_string(prompt_tokens.size())
+            + ", context tokens="
+            + std::to_string(context_tokens));
+    }
 
     const auto prompt_start = std::chrono::steady_clock::now();
     const int prompt_res = decode_prompt_tokens(
@@ -2432,7 +2449,7 @@ int32_t open_recipe_chat_session_impl(
     const char * path,
     const ms_recipe_tensor_target * targets,
     uint64_t target_count,
-    uint32_t max_tokens,
+    uint32_t context_tokens,
     const RuntimeLogSink * log,
     ms_runtime_chat_session ** out_session) {
     clear_error();
@@ -2461,7 +2478,7 @@ int32_t open_recipe_chat_session_impl(
         std::unique_ptr<ModelSession> model_session = open_recipe_session(
             path,
             std::move(target_types),
-            session_context_tokens_for_generation(max_tokens),
+            context_tokens,
             log);
         if (model_session == nullptr) {
             return -1;
@@ -2483,13 +2500,13 @@ int32_t ms_runtime_open_recipe_chat_session(
     const char * path,
     const ms_recipe_tensor_target * targets,
     uint64_t target_count,
-    uint32_t max_tokens,
+    uint32_t context_tokens,
     ms_runtime_chat_session ** out_session) {
     return open_recipe_chat_session_impl(
         path,
         targets,
         target_count,
-        max_tokens,
+        context_tokens,
         nullptr,
         out_session);
 }
@@ -2498,7 +2515,7 @@ int32_t ms_runtime_open_recipe_chat_session_with_progress(
     const char * path,
     const ms_recipe_tensor_target * targets,
     uint64_t target_count,
-    uint32_t max_tokens,
+    uint32_t context_tokens,
     ms_runtime_log_callback log_callback,
     void * log_user_data,
     ms_runtime_chat_session ** out_session) {
@@ -2507,7 +2524,7 @@ int32_t ms_runtime_open_recipe_chat_session_with_progress(
         path,
         targets,
         target_count,
-        max_tokens,
+        context_tokens,
         log_callback == nullptr ? nullptr : &log,
         out_session);
 }
@@ -2542,10 +2559,6 @@ int32_t ms_runtime_generate_recipe_chat_session(
 
     if (params == nullptr) {
         return fail("chat generation params are null");
-    }
-
-    if (params->max_tokens == 0) {
-        return fail("chat generation max_tokens must be greater than zero");
     }
 
     if (stop_strings == nullptr && stop_count > 0) {

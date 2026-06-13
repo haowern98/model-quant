@@ -233,13 +233,13 @@ export interface GpqaDiamondStatus {
 }
 
 export interface GpqaBenchmarkConfigInput {
-  maxTokens: string;
+  contextWindow: string;
   sampleLimit: string;
   temperature: string;
 }
 
 export interface GpqaBenchmarkConfig {
-  maxTokens: number;
+  contextWindow: number;
   sampleLimit: number;
   temperature: number;
 }

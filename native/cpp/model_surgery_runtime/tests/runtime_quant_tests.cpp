@@ -192,6 +192,11 @@ void test_generation_context_allows_official_eval_prompts() {
     assert(session_context_tokens_for_generation(1024) >= 4096);
 }
 
+void test_context_generation_room_uses_context_window_not_request_max_tokens() {
+    assert(context_generation_room(20'000, 2'000) == 17'999);
+    assert(context_generation_room(20'000, 19'999) == 0);
+}
+
 void test_chat_template_formats_openai_messages() {
     const std::vector<std::pair<std::string, std::string>> messages = {
         {"system", "Answer carefully."},
@@ -423,6 +428,7 @@ int main() {
     test_llama_mcq_score_uses_token_average_logprob();
     test_recipe_test_cancellation_flag_can_reset_and_cancel();
     test_generation_context_allows_official_eval_prompts();
+    test_context_generation_room_uses_context_window_not_request_max_tokens();
     test_chat_template_formats_openai_messages();
     test_request_and_template_stop_strings_are_merged();
     test_generated_stop_suffix_is_consumed_in_loop();

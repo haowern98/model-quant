@@ -15,7 +15,8 @@ use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{ChatFinishReason, ChatGenerationParams, RecipeChatSession};
 use crate::quant::recipe::{QuantType, RecipeState};
 
-const API_CHAT_MAX_TOKENS: u32 = 10000;
+const API_CHAT_CONTEXT_TOKENS: u32 = 20_000;
+const API_CHAT_UNTIL_CONTEXT_MAX_TOKENS: u32 = 0;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +146,7 @@ impl ModelInspectorApiServer {
 pub async fn start_modelinspector_api(
     benchmark_label: Option<String>,
     benchmark_sample_count: Option<u64>,
+    context_window: Option<u32>,
     app: AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     recipe_state: State<'_, RecipeStore>,
@@ -193,10 +195,14 @@ pub async fn start_modelinspector_api(
         "ModelInspector API: loading in-process model session",
     );
     let output_app = app.clone();
+    let context_tokens = context_window.unwrap_or(API_CHAT_CONTEXT_TOKENS);
+    if context_tokens == 0 {
+        return Err("ModelInspector API context window must be greater than 0.".to_string());
+    }
     let session = match crate::ffi::runtime_bindings::open_recipe_chat_session_with_progress(
         &recipe.base_model,
         &targets,
-        API_CHAT_MAX_TOKENS,
+        context_tokens,
         |message| {
             crate::progress::emit_benchmark_output(&output_app, message);
         },
@@ -382,7 +388,6 @@ enum StopField {
 
 #[derive(Debug, Clone)]
 struct ChatGenerationConfig {
-    max_tokens: u32,
     stop: Vec<String>,
     temperature: Option<f64>,
     top_p: Option<f64>,
@@ -404,15 +409,12 @@ struct ChatGenerationConfig {
 }
 
 fn chat_generation_config(payload: &ChatCompletionRequest) -> ChatGenerationConfig {
-    let requested_tokens = payload
-        .n_predict
-        .and_then(|value| u32::try_from(value).ok())
-        .or(payload.max_completion_tokens)
-        .or(payload.max_tokens)
-        .unwrap_or(API_CHAT_MAX_TOKENS);
-
+    let _accepted_but_ignored_token_limits = (
+        payload.max_tokens,
+        payload.max_completion_tokens,
+        payload.n_predict,
+    );
     ChatGenerationConfig {
-        max_tokens: requested_tokens.min(API_CHAT_MAX_TOKENS),
         stop: stop_strings(payload.stop.as_ref()),
         temperature: payload.temperature,
         top_p: payload.top_p,
@@ -438,7 +440,7 @@ impl ChatGenerationConfig {
     fn to_native_params(&self) -> ChatGenerationParams {
         let defaults = ChatGenerationParams::default();
         ChatGenerationParams {
-            max_tokens: self.max_tokens,
+            max_tokens: API_CHAT_UNTIL_CONTEXT_MAX_TOKENS,
             add_generation_prompt: u32::from(self.add_generation_prompt.unwrap_or(true)),
             seed: self
                 .seed
@@ -721,7 +723,6 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         }
     };
     let native_params = config.to_native_params();
-    let max_tokens = native_params.max_tokens;
     let model = payload.model.unwrap_or_else(|| state.model_id.clone());
     if messages.is_empty()
         || messages
@@ -782,7 +783,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                 .sum::<usize>();
             (
                 format!(
-                    "Model Inspector API smoke response for {model}. Received {prompt_chars} prompt character(s), max_tokens={max_tokens}."
+                    "Model Inspector API smoke response for {model}. Received {prompt_chars} prompt character(s)."
                 ),
                 None,
                 empty_benchmark(),
@@ -1165,7 +1166,6 @@ mod tests {
 
         let config = chat_generation_config(&payload);
 
-        assert_eq!(config.max_tokens, 12);
         assert_eq!(config.stop, vec!["</s>", "<|im_end|>"]);
         assert_eq!(config.temperature, Some(0.2));
         assert_eq!(config.top_p, Some(0.95));
@@ -1215,7 +1215,7 @@ mod tests {
 
         let params = chat_generation_config(&payload).to_native_params();
 
-        assert_eq!(params.max_tokens, 100);
+        assert_eq!(params.max_tokens, API_CHAT_UNTIL_CONTEXT_MAX_TOKENS);
         assert_eq!(params.add_generation_prompt, 0);
         assert_eq!(params.seed, 1234);
         assert_eq!(params.top_k, 20);

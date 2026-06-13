@@ -53,13 +53,12 @@ const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
   detail: "GPQA Diamond readiness has not been checked yet.",
 };
 
-const GPQA_DEFAULT_MAX_TOKENS = 1024;
-const GPQA_MAX_TOKENS_LIMIT = 10_000;
+const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
 const GPQA_SAMPLE_COUNT = 198;
 const GPQA_DEFAULT_TEMPERATURE = 0;
 
 const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
-  maxTokens: "",
+  contextWindow: "",
   sampleLimit: "",
   temperature: "0",
 };
@@ -84,14 +83,14 @@ function parseOptionalIntegerField(
 function resolveGpqaConfigInput(
   input: GpqaBenchmarkConfigInput,
 ): GpqaBenchmarkConfig | string {
-  const maxTokens = parseOptionalIntegerField(
-    input.maxTokens,
-    GPQA_DEFAULT_MAX_TOKENS,
+  const contextWindow = parseOptionalIntegerField(
+    input.contextWindow,
+    GPQA_DEFAULT_CONTEXT_WINDOW,
     1,
-    GPQA_MAX_TOKENS_LIMIT,
-    "GPQA max tokens",
+    Number.MAX_SAFE_INTEGER,
+    "GPQA context window",
   );
-  if (typeof maxTokens === "string") return maxTokens;
+  if (typeof contextWindow === "string") return contextWindow;
 
   const sampleLimit = parseOptionalIntegerField(
     input.sampleLimit,
@@ -110,7 +109,7 @@ function resolveGpqaConfigInput(
   }
 
   return {
-    maxTokens,
+    contextWindow,
     sampleLimit,
     temperature,
   };
@@ -411,6 +410,7 @@ function App() {
         }
         const apiStatus = await startModelInspectorApi({
           benchmarkLabel: "ModelInspector API",
+          contextWindow: resolvedGpqaConfig.contextWindow,
         });
         if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");

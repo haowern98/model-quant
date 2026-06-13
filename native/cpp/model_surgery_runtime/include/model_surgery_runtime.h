@@ -232,13 +232,13 @@ MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session(
     const char * path,
     const ms_recipe_tensor_target * targets,
     uint64_t target_count,
-    uint32_t max_tokens,
+    uint32_t context_tokens,
     ms_runtime_chat_session ** out_session);
 MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session_with_progress(
     const char * path,
     const ms_recipe_tensor_target * targets,
     uint64_t target_count,
-    uint32_t max_tokens,
+    uint32_t context_tokens,
     ms_runtime_log_callback log_callback,
     void * log_user_data,
     ms_runtime_chat_session ** out_session);

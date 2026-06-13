@@ -15,8 +15,7 @@ const GPQA_SAMPLE_COUNT: u64 = 198;
 const GPQA_DATASET_ID: &str = "AI-ModelScope/gpqa_diamond";
 const GPQA_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
-const GPQA_DEFAULT_MAX_TOKENS: u32 = 1024;
-const GPQA_MAX_TOKENS_LIMIT: u32 = 10_000;
+const GPQA_DEFAULT_CONTEXT_WINDOW: u32 = 20_000;
 const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,14 +60,14 @@ impl GpqaShotMode {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GpqaRunConfig {
-    pub max_tokens: Option<u32>,
+    pub context_window: Option<u32>,
     pub sample_limit: Option<u64>,
     pub temperature: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct EffectiveGpqaRunConfig {
-    max_tokens: u32,
+    context_window: u32,
     sample_limit: u64,
     temperature: f64,
 }
@@ -77,15 +76,13 @@ fn effective_gpqa_run_config(
     config: Option<GpqaRunConfig>,
 ) -> Result<EffectiveGpqaRunConfig, String> {
     let config = config.unwrap_or(GpqaRunConfig {
-        max_tokens: None,
+        context_window: None,
         sample_limit: None,
         temperature: None,
     });
-    let max_tokens = config.max_tokens.unwrap_or(GPQA_DEFAULT_MAX_TOKENS);
-    if max_tokens == 0 || max_tokens > GPQA_MAX_TOKENS_LIMIT {
-        return Err(format!(
-            "GPQA max tokens must be between 1 and {GPQA_MAX_TOKENS_LIMIT}."
-        ));
+    let context_window = config.context_window.unwrap_or(GPQA_DEFAULT_CONTEXT_WINDOW);
+    if context_window == 0 {
+        return Err(format!("GPQA context window must be greater than 0."));
     }
 
     let sample_limit = config.sample_limit.unwrap_or(GPQA_SAMPLE_COUNT);
@@ -101,9 +98,16 @@ fn effective_gpqa_run_config(
     }
 
     Ok(EffectiveGpqaRunConfig {
-        max_tokens,
+        context_window,
         sample_limit,
         temperature,
+    })
+}
+
+fn gpqa_generation_config(effective_config: &EffectiveGpqaRunConfig) -> serde_json::Value {
+    json!({
+        "temperature": effective_config.temperature,
+        "stream": false
     })
 }
 
@@ -465,12 +469,7 @@ fn run_gpqa_diamond_blocking(
         }
     })
     .to_string();
-    let generation_config = json!({
-        "temperature": effective_config.temperature,
-        "max_tokens": effective_config.max_tokens,
-        "stream": false
-    })
-    .to_string();
+    let generation_config = gpqa_generation_config(&effective_config).to_string();
 
     let mut command = if evalscope_cli.exists() {
         Command::new(&evalscope_cli)
@@ -592,13 +591,20 @@ fn run_gpqa_diamond_blocking(
         ));
     }
 
-    let report_path = find_gpqa_report_path(&run_dir)
-        .ok_or_else(|| format!("EvalScope finished but did not write a GPQA report under {}", run_dir.display()))?;
+    let report_path = find_gpqa_report_path(&run_dir).ok_or_else(|| {
+        format!(
+            "EvalScope finished but did not write a GPQA report under {}",
+            run_dir.display()
+        )
+    })?;
     crate::progress::emit_benchmark_output(
         &app,
         format!("EvalScope: GPQA Diamond report {}", report_path.display()),
     );
-    crate::progress::emit_benchmark_output(&app, "EvalScope: GPQA Diamond official harness finished");
+    crate::progress::emit_benchmark_output(
+        &app,
+        "EvalScope: GPQA Diamond official harness finished",
+    );
     Ok(gpqa_result_from_report(
         &model_id,
         shot_mode,
@@ -893,7 +899,8 @@ fn classify_gpqa_status(output: &str, dataset_state: GpqaDatasetState) -> GpqaDi
         dataset_url: GPQA_DATASET_ID.to_string(),
         expected_dataset_hash: "EvalScope dataset cache marker".to_string(),
         detail: if ready {
-            "EvalScope, GPQA Diamond adapter, OpenAI client, and dataset cache marker are verified.".to_string()
+            "EvalScope, GPQA Diamond adapter, OpenAI client, and dataset cache marker are verified."
+                .to_string()
         } else if harness_ready {
             dataset_detail(&dataset_state)
         } else {
@@ -914,12 +921,14 @@ fn detect_gpqa_dataset_state(app_data_dir: &Path) -> GpqaDatasetState {
 
     match std::fs::read_to_string(&path)
         .map_err(|e| e.to_string())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string()))
-    {
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
+        }) {
         Ok(marker)
             if marker.get("version").and_then(|value| value.as_u64())
                 == Some(GPQA_DATASET_MARKER_VERSION as u64)
-                && marker.get("dataset").and_then(|value| value.as_str()) == Some("gpqa_diamond")
+                && marker.get("dataset").and_then(|value| value.as_str())
+                    == Some("gpqa_diamond")
                 && marker.get("sample_count").and_then(|value| value.as_u64())
                     == Some(GPQA_SAMPLE_COUNT) =>
         {
@@ -1108,8 +1117,7 @@ fn extract_sample_count_from_json(value: &serde_json::Value) -> Option<u64> {
                 if matches!(
                     key.as_str(),
                     "sample_count" | "num_samples" | "total" | "num"
-                )
-                    && candidate.as_u64().is_some()
+                ) && candidate.as_u64().is_some()
                 {
                     return candidate.as_u64();
                 }
@@ -1145,9 +1153,8 @@ mod tests {
 
     #[test]
     fn classifies_gpqa_ready_when_required_packages_are_importable() {
-        let status = classify_probe_output(
-            "python=3.11.8\nevalscope=1.8.0\ngpqa_task=ok\nopenai=1.0.0\n",
-        );
+        let status =
+            classify_probe_output("python=3.11.8\nevalscope=1.8.0\ngpqa_task=ok\nopenai=1.0.0\n");
 
         assert!(status.ready);
         assert_eq!(status.status_label, "Ready");
@@ -1219,7 +1226,7 @@ mod tests {
     #[test]
     fn defaults_gpqa_run_config_when_values_are_missing() {
         let config = effective_gpqa_run_config(Some(GpqaRunConfig {
-            max_tokens: None,
+            context_window: None,
             sample_limit: None,
             temperature: None,
         }))
@@ -1228,7 +1235,7 @@ mod tests {
         assert_eq!(
             config,
             EffectiveGpqaRunConfig {
-                max_tokens: 1024,
+                context_window: 20_000,
                 sample_limit: 198,
                 temperature: 0.0,
             }
@@ -1238,7 +1245,7 @@ mod tests {
     #[test]
     fn accepts_gpqa_run_config_within_bounds() {
         let config = effective_gpqa_run_config(Some(GpqaRunConfig {
-            max_tokens: Some(10_000),
+            context_window: Some(20_000),
             sample_limit: Some(12),
             temperature: Some(0.2),
         }))
@@ -1247,7 +1254,7 @@ mod tests {
         assert_eq!(
             config,
             EffectiveGpqaRunConfig {
-                max_tokens: 10_000,
+                context_window: 20_000,
                 sample_limit: 12,
                 temperature: 0.2,
             }
@@ -1257,29 +1264,39 @@ mod tests {
     #[test]
     fn rejects_gpqa_run_config_outside_bounds() {
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
-            max_tokens: Some(0),
+            context_window: Some(0),
             sample_limit: Some(198),
             temperature: Some(0.0),
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
-            max_tokens: Some(10_001),
-            sample_limit: Some(198),
-            temperature: Some(0.0),
-        }))
-        .is_err());
-        assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
-            max_tokens: Some(1024),
             sample_limit: Some(199),
             temperature: Some(0.0),
+            context_window: Some(20_000),
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
-            max_tokens: Some(1024),
+            context_window: Some(20_000),
             sample_limit: Some(198),
             temperature: Some(2.1),
         }))
         .is_err());
+    }
+
+    #[test]
+    fn evalscope_generation_config_omits_max_tokens_for_until_eos_generation() {
+        let config = EffectiveGpqaRunConfig {
+            context_window: 20_000,
+            sample_limit: 10,
+            temperature: 0.0,
+        };
+
+        let generation_config = gpqa_generation_config(&config);
+
+        assert_eq!(generation_config["temperature"], 0.0);
+        assert_eq!(generation_config["stream"], false);
+        assert!(generation_config.get("max_tokens").is_none());
+        assert!(generation_config.get("max_completion_tokens").is_none());
     }
 
     #[test]

@@ -310,14 +310,14 @@ extern "C" {
         path: *const c_char,
         targets: *const MsRecipeTensorTarget,
         target_count: u64,
-        max_tokens: u32,
+        context_tokens: u32,
         out_session: *mut *mut MsRuntimeChatSession,
     ) -> c_int;
     fn ms_runtime_open_recipe_chat_session_with_progress(
         path: *const c_char,
         targets: *const MsRecipeTensorTarget,
         target_count: u64,
-        max_tokens: u32,
+        context_tokens: u32,
         log_callback: MsRuntimeLogCallback,
         log_user_data: *mut c_void,
         out_session: *mut *mut MsRuntimeChatSession,
@@ -982,18 +982,18 @@ impl RecipeChatSession {
 pub fn open_recipe_chat_session(
     path: &str,
     targets: &[(String, String)],
-    max_tokens: u32,
+    context_tokens: u32,
 ) -> Result<RecipeChatSession, String> {
     open_recipe_chat_session_with_native_call(
         path,
         targets,
-        max_tokens,
+        context_tokens,
         |c_path, native_targets, session| unsafe {
             ms_runtime_open_recipe_chat_session(
                 c_path,
                 native_targets.as_ptr(),
                 native_targets.len() as u64,
-                max_tokens,
+                context_tokens,
                 session,
             )
         },
@@ -1003,7 +1003,7 @@ pub fn open_recipe_chat_session(
 pub fn open_recipe_chat_session_with_progress<F>(
     path: &str,
     targets: &[(String, String)],
-    max_tokens: u32,
+    context_tokens: u32,
     mut on_log: F,
 ) -> Result<RecipeChatSession, String>
 where
@@ -1012,7 +1012,7 @@ where
     open_recipe_chat_session_with_native_call(
         path,
         targets,
-        max_tokens,
+        context_tokens,
         |c_path, native_targets, session| {
             let log_user_data = &mut on_log as *mut F as *mut c_void;
             unsafe {
@@ -1020,7 +1020,7 @@ where
                     c_path,
                     native_targets.as_ptr(),
                     native_targets.len() as u64,
-                    max_tokens,
+                    context_tokens,
                     Some(recipe_chat_session_log_trampoline::<F>),
                     log_user_data,
                     session,
@@ -1047,7 +1047,7 @@ unsafe extern "C" fn recipe_chat_session_log_trampoline<F>(
 fn open_recipe_chat_session_with_native_call<F>(
     path: &str,
     targets: &[(String, String)],
-    max_tokens: u32,
+    context_tokens: u32,
     open: F,
 ) -> Result<RecipeChatSession, String>
 where
@@ -1080,7 +1080,7 @@ where
         .collect::<Vec<_>>();
     let mut session = std::ptr::null_mut();
 
-    let _ = max_tokens;
+    let _ = context_tokens;
     let result = open(c_path.as_ptr(), &native_targets, &mut session);
     if result == 0 {
         NonNull::new(session)
