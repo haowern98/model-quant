@@ -1,6 +1,6 @@
 use model_surgery::gguf::reader::parse_gguf;
-use model_surgery::quant::recipe::{QuantType, RecipeState};
 use model_surgery::quant::engine::estimate_quantized_size;
+use model_surgery::quant::recipe::{QuantType, RecipeState};
 
 #[test]
 fn test_gguf_parse_invalid_file() {
@@ -26,13 +26,25 @@ fn test_recipe_full_workflow() {
     recipe.assign_by_pattern("all_embeddings", QuantType::Q8_0);
 
     // Verify
-    let emb = recipe.assignments.iter().find(|a| a.tensor_name == "tok_embeddings.weight").unwrap();
+    let emb = recipe
+        .assignments
+        .iter()
+        .find(|a| a.tensor_name == "tok_embeddings.weight")
+        .unwrap();
     assert_eq!(emb.quant_type, QuantType::Q8_0);
 
-    let attn = recipe.assignments.iter().find(|a| a.tensor_name.contains("attention")).unwrap();
+    let attn = recipe
+        .assignments
+        .iter()
+        .find(|a| a.tensor_name.contains("attention"))
+        .unwrap();
     assert_eq!(attn.quant_type, QuantType::Q6_K);
 
-    let ffn = recipe.assignments.iter().find(|a| a.tensor_name.contains("feed_forward")).unwrap();
+    let ffn = recipe
+        .assignments
+        .iter()
+        .find(|a| a.tensor_name.contains("feed_forward"))
+        .unwrap();
     assert_eq!(ffn.quant_type, QuantType::Q4_K_M);
 
     // JSON roundtrip
@@ -70,7 +82,7 @@ fn test_estimate_quantized_size() {
 #[test]
 fn test_parse_real_gguf_gemma_4b() {
     let path = std::path::Path::new(
-        r"C:\Users\Wu Family Computer\.lmstudio\models\lmstudio-community\gemma-3-4b-it-GGUF\gemma-3-4b-it-Q4_K_M.gguf"
+        r"C:\Users\Wu Family Computer\.lmstudio\models\lmstudio-community\gemma-3-4b-it-GGUF\gemma-3-4b-it-Q4_K_M.gguf",
     );
     if !path.exists() {
         eprintln!("Skipping: file not found at {}", path.display());
@@ -87,18 +99,24 @@ fn test_parse_real_gguf_gemma_4b() {
             println!("  name:         {}", model.metadata.name);
             println!("  architecture: {}", model.metadata.architecture);
             println!("  total params: {}", model.metadata.total_params);
-            println!("  FP16 size:    {} MB", model.metadata.total_size_fp16 / 1_048_576);
+            println!(
+                "  FP16 size:    {} MB",
+                model.metadata.total_size_fp16 / 1_048_576
+            );
 
             println!("\n=== TENSORS (first 20) ===");
             for t in model.tensors.iter().take(20) {
-                println!("  {:60} layer={:4} group={:15} quant={:6} shape={:?} size={}",
-                    t.name, t.layer_index, t.layer_group, t.current_quant, t.shape, t.size_bytes);
+                println!(
+                    "  {:60} layer={:4} group={:15} quant={:6} shape={:?} size={}",
+                    t.name, t.layer_index, t.layer_group, t.current_quant, t.shape, t.size_bytes
+                );
             }
 
             println!("\n  ... {} total tensors", model.tensors.len());
 
             println!("\n=== LAYER DISTRIBUTION ===");
-            let mut groups: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+            let mut groups: std::collections::HashMap<i32, usize> =
+                std::collections::HashMap::new();
             for t in &model.tensors {
                 *groups.entry(t.layer_index).or_default() += 1;
             }
@@ -109,7 +127,10 @@ fn test_parse_real_gguf_gemma_4b() {
             }
 
             assert!(model.tensors.len() > 0, "should have tensors");
-            assert!(!model.metadata.architecture.is_empty(), "should have architecture");
+            assert!(
+                !model.metadata.architecture.is_empty(),
+                "should have architecture"
+            );
         }
     }
 }

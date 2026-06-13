@@ -1,7 +1,12 @@
 import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   AssignPattern,
+  BenchmarkRunId,
   BenchmarkResult,
+  BenchmarkOutputLine,
+  GpqaBenchmarkConfigInput,
+  GpqaDiamondStatus,
+  GpqaShotMode,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -9,10 +14,11 @@ import type {
   RecipeTestMode,
   TensorInfo,
 } from "../../types";
-import { ActivityBar } from "./ActivityBar";
+import { ActivityBar, type ActivityId } from "./ActivityBar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
 import type { EditorTab } from "./editorTabModel";
+import { TestingPanel } from "./TestingPanel";
 
 const EXPLORER_DEFAULT_WIDTH = 365;
 const EXPLORER_MIN_WIDTH = 150;
@@ -35,8 +41,13 @@ interface WorkbenchShellProps {
   running: boolean;
   cancelling: boolean;
   progress: ProgressEvent | null;
+  outputLines: BenchmarkOutputLine[];
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
+  selectedRunIds: BenchmarkRunId[];
+  gpqaStatus: GpqaDiamondStatus;
+  gpqaShotMode: GpqaShotMode;
+  gpqaConfig: GpqaBenchmarkConfigInput;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -47,6 +58,14 @@ interface WorkbenchShellProps {
   onAssignByPattern: (pattern: AssignPattern, quantType: QuantType) => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
+  onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onGpqaShotModeChange: (mode: GpqaShotMode) => void;
+  onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onInstallGpqaHarness: () => void;
+  onDownloadGpqaDataset: () => void;
+  onRefreshGpqaStatus: () => void;
+  onOpenGpqaDetails: () => void;
+  onOpenGpqaDataset: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -69,8 +88,13 @@ export function WorkbenchShell({
   running,
   cancelling,
   progress,
+  outputLines,
   evalPreset,
   testMode,
+  selectedRunIds,
+  gpqaStatus,
+  gpqaShotMode,
+  gpqaConfig,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -81,6 +105,14 @@ export function WorkbenchShell({
   onAssignByPattern,
   onEvalPresetChange,
   onTestModeChange,
+  onToggleRunTarget,
+  onGpqaShotModeChange,
+  onGpqaConfigChange,
+  onInstallGpqaHarness,
+  onDownloadGpqaDataset,
+  onRefreshGpqaStatus,
+  onOpenGpqaDetails,
+  onOpenGpqaDataset,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -90,8 +122,9 @@ export function WorkbenchShell({
 }: WorkbenchShellProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
+  const [activeActivity, setActiveActivity] = useState<ActivityId>("gguf");
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
-  const explorerVisible = explorerWidth > 0;
+  const sidePanelVisible = explorerWidth > 0;
 
   const explorerMaxWidth = () => {
     const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
@@ -128,8 +161,8 @@ export function WorkbenchShell({
     window.addEventListener("pointerup", stopResize);
   };
 
-  const toggleExplorer = () => {
-    if (explorerVisible) {
+  const toggleSidePanel = () => {
+    if (sidePanelVisible) {
       lastExpandedExplorerWidth.current = explorerWidth;
       setExplorerWidth(0);
       return;
@@ -144,31 +177,73 @@ export function WorkbenchShell({
     setExplorerWidth(restoredWidth);
   };
 
+  const selectActivity = (activity: ActivityId) => {
+    if (activity !== "gguf" && activity !== "testing") return;
+    if (activity === activeActivity) {
+      toggleSidePanel();
+      return;
+    }
+
+    setActiveActivity(activity);
+    if (!sidePanelVisible) {
+      const restoredWidth = clamp(
+        lastExpandedExplorerWidth.current,
+        EXPLORER_MIN_WIDTH,
+        explorerMaxWidth(),
+      );
+      lastExpandedExplorerWidth.current = restoredWidth;
+      setExplorerWidth(restoredWidth);
+    }
+  };
+
   return (
     <div
       ref={shellRef}
-      className={`workbench-shell ${explorerVisible ? "" : "explorer-collapsed"}`}
+      className={`workbench-shell ${sidePanelVisible ? "" : "explorer-collapsed"}`}
       style={{ "--explorer-width": `${explorerWidth}px` } as CSSProperties}
     >
-      <ActivityBar explorerVisible={explorerVisible} onToggleExplorer={toggleExplorer} />
-      <ExplorerPanel
-        modelPath={modelPath}
-        tensors={tensors}
-        activeLayerIndex={activeLayerIndex}
-        expandedLayers={expandedLayers}
-        running={running}
-        onOpenLayer={onOpenLayer}
-        onOpenModel={onOpenModel}
-        onToggleLayer={onToggleLayer}
-        onAssignByPattern={onAssignByPattern}
-        onSaveRecipe={onSaveRecipe}
-        onLoadRecipe={onLoadRecipe}
-        onExport={onExport}
+      <ActivityBar
+        activeActivity={activeActivity}
+        panelVisible={sidePanelVisible}
+        onSelectActivity={selectActivity}
       />
+      {activeActivity === "testing" ? (
+        <TestingPanel
+          modelPath={modelPath}
+          assignments={assignments}
+          benchmarkResult={benchmarkResult}
+          running={running}
+          cancelling={cancelling}
+          progress={progress}
+          evalPreset={evalPreset}
+          testMode={testMode}
+          selectedRunIds={selectedRunIds}
+          gpqaStatus={gpqaStatus}
+          onToggleRunTarget={onToggleRunTarget}
+          onInstallGpqaHarness={onInstallGpqaHarness}
+          onOpenGpqaDetails={onOpenGpqaDetails}
+          onOpenGpqaDataset={onOpenGpqaDataset}
+        />
+      ) : (
+        <ExplorerPanel
+          modelPath={modelPath}
+          tensors={tensors}
+          activeLayerIndex={activeLayerIndex}
+          expandedLayers={expandedLayers}
+          running={running}
+          onOpenLayer={onOpenLayer}
+          onOpenModel={onOpenModel}
+          onToggleLayer={onToggleLayer}
+          onAssignByPattern={onAssignByPattern}
+          onSaveRecipe={onSaveRecipe}
+          onLoadRecipe={onLoadRecipe}
+          onExport={onExport}
+        />
+      )}
       <div
         className="resize-handle explorer-resizer"
         role="separator"
-        aria-label="Resize Explorer"
+        aria-label={activeActivity === "testing" ? "Resize Testing" : "Resize Explorer"}
         aria-orientation="vertical"
         aria-valuemin={0}
         aria-valuemax={explorerMaxWidth()}
@@ -205,6 +280,7 @@ export function WorkbenchShell({
         running={running}
         cancelling={cancelling}
         progress={progress}
+        outputLines={outputLines}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
         benchmarkResult={benchmarkResult}
@@ -213,12 +289,22 @@ export function WorkbenchShell({
         profile={profile}
         evalPreset={evalPreset}
         testMode={testMode}
+        selectedRunIds={selectedRunIds}
+        gpqaStatus={gpqaStatus}
+        gpqaShotMode={gpqaShotMode}
+        gpqaConfig={gpqaConfig}
+        onInstallGpqaHarness={onInstallGpqaHarness}
+        onDownloadGpqaDataset={onDownloadGpqaDataset}
+        onRefreshGpqaStatus={onRefreshGpqaStatus}
         onSelectEditor={onSelectEditor}
         onCloseEditor={onCloseEditor}
         onReorderEditor={onReorderEditor}
         onAssignQuant={onAssignQuant}
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}
+        onToggleRunTarget={onToggleRunTarget}
+        onGpqaShotModeChange={onGpqaShotModeChange}
+        onGpqaConfigChange={onGpqaConfigChange}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}

@@ -28,27 +28,13 @@ extern "C" {
     pub fn llama_model_size(model: *mut llama_model) -> u64;
 
     // Row-level quantize functions from ggml-quants.h
-    pub fn quantize_row_q8_0(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
-    pub fn quantize_row_q4_K(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
-    pub fn quantize_row_q6_K(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
-    pub fn quantize_row_q5_K(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
-    pub fn quantize_row_q3_K(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
-    pub fn quantize_row_q2_K(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
-    pub fn quantize_row_q8_K(
-        src: *const f32, dst: *mut std::ffi::c_void, k: i32,
-    ) -> usize;
+    pub fn quantize_row_q8_0(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
+    pub fn quantize_row_q4_K(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
+    pub fn quantize_row_q6_K(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
+    pub fn quantize_row_q5_K(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
+    pub fn quantize_row_q3_K(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
+    pub fn quantize_row_q2_K(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
+    pub fn quantize_row_q8_K(src: *const f32, dst: *mut std::ffi::c_void, k: i32) -> usize;
 }
 
 #[repr(C)]
@@ -120,8 +106,12 @@ impl Default for llama_context_params {
             n_batch: 512,
             n_ubatch: 512,
             n_seq_max: 1,
-            n_threads: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u32,
-            n_threads_batch: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u32,
+            n_threads: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4) as u32,
+            n_threads_batch: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4) as u32,
             rope_scaling_type: 0,
             pooling_type: 0,
             rope_freq_base: 0.0,
@@ -154,7 +144,9 @@ pub struct LlamaBackend;
 #[cfg(feature = "llama")]
 impl LlamaBackend {
     pub fn init() -> Self {
-        unsafe { llama_backend_init(); }
+        unsafe {
+            llama_backend_init();
+        }
         LlamaBackend
     }
 }
@@ -162,6 +154,8 @@ impl LlamaBackend {
 #[cfg(feature = "llama")]
 impl Drop for LlamaBackend {
     fn drop(&mut self) {
-        unsafe { llama_backend_free(); }
+        unsafe {
+            llama_backend_free();
+        }
     }
 }

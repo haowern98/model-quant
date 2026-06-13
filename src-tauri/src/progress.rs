@@ -10,6 +10,12 @@ pub struct ProgressEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BenchmarkOutputEvent {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub enum ProgressStage {
     #[serde(rename = "requantizing")]
     Requantizing,
@@ -40,18 +46,43 @@ impl ProgressEmitter {
     }
 
     pub fn requantizing(&self, percent: f32, info: &str) {
-        self.emit(ProgressStage::Requantizing, percent, &format!("Requantizing: {}", info));
+        self.emit(
+            ProgressStage::Requantizing,
+            percent,
+            &format!("Requantizing: {}", info),
+        );
     }
 
     pub fn writing(&self, percent: f32, info: &str) {
-        self.emit(ProgressStage::Writing, percent, &format!("Writing: {}", info));
+        self.emit(
+            ProgressStage::Writing,
+            percent,
+            &format!("Writing: {}", info),
+        );
     }
 
     pub fn loading(&self, percent: f32) {
-        self.emit(ProgressStage::Loading, percent, "Loading model into VRAM...");
+        self.emit(
+            ProgressStage::Loading,
+            percent,
+            "Loading model into VRAM...",
+        );
     }
 
     pub fn benchmarking(&self, percent: f32) {
-        self.emit(ProgressStage::Benchmarking, percent, "Running inference benchmark...");
+        self.emit(
+            ProgressStage::Benchmarking,
+            percent,
+            "Running inference benchmark...",
+        );
     }
+}
+
+pub fn emit_benchmark_output(app: &AppHandle, message: impl Into<String>) {
+    let message = message.into();
+    if message.trim().is_empty() {
+        return;
+    }
+
+    let _ = app.emit("benchmark-output", BenchmarkOutputEvent { message });
 }

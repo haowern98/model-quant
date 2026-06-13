@@ -1,5 +1,10 @@
-import { useState } from "react";
-import type { QuantType, RecipeProfile, TensorInfo } from "../../types";
+import { useLayoutEffect, useRef, useState } from "react";
+import type {
+  BenchmarkOutputLine,
+  QuantType,
+  RecipeProfile,
+  TensorInfo,
+} from "../../types";
 import { QUANT_TYPES, toTargetQuant } from "../../types";
 import { estQuantSize, formatBytes } from "../../lib/format";
 import { HardwarePanel } from "./HardwarePanel";
@@ -8,10 +13,16 @@ interface BottomPanelProps {
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
+  outputLines: BenchmarkOutputLine[];
 }
 
-export function BottomPanel({ tensors, assignments, profile }: BottomPanelProps) {
-  const [activeTab, setActiveTab] = useState<"size" | "hardware">("size");
+export function BottomPanel({
+  tensors,
+  assignments,
+  profile,
+  outputLines,
+}: BottomPanelProps) {
+  const [activeTab, setActiveTab] = useState<"size" | "hardware" | "output">("size");
   const totalTargetBytes = tensors.reduce((sum, tensor) => {
     const quant = assignments[tensor.name] ?? toTargetQuant(tensor.currentQuant);
     const bits = QUANT_TYPES.find((item) => item.value === quant)?.bitsPerWeight ?? 4.5;
@@ -51,12 +62,21 @@ export function BottomPanel({ tensors, assignments, profile }: BottomPanelProps)
         <button type="button" role="tab" aria-label="SAMPLE AUDIT">
           SAMPLE AUDIT
         </button>
-        <button type="button" role="tab" aria-label="OUTPUT">
+        <button
+          type="button"
+          role="tab"
+          className={activeTab === "output" ? "active" : ""}
+          aria-label="OUTPUT"
+          aria-selected={activeTab === "output"}
+          onClick={() => setActiveTab("output")}
+        >
           OUTPUT
         </button>
       </div>
       {activeTab === "hardware" ? (
         <HardwarePanel />
+      ) : activeTab === "output" ? (
+        <OutputPanel outputLines={outputLines} />
       ) : (
         <div className="bottom-content">
           <Metric label="FP16" value={formatBytes(f16Size)} />
@@ -71,6 +91,42 @@ export function BottomPanel({ tensors, assignments, profile }: BottomPanelProps)
         </div>
       )}
     </section>
+  );
+}
+
+function OutputPanel({ outputLines }: { outputLines: BenchmarkOutputLine[] }) {
+  const outputRef = useRef<HTMLDivElement | null>(null);
+  const followTailRef = useRef(true);
+
+  useLayoutEffect(() => {
+    const output = outputRef.current;
+    if (!output || !followTailRef.current) return;
+    output.scrollTop = output.scrollHeight;
+  }, [outputLines]);
+
+  return (
+    <div
+      ref={outputRef}
+      className="bottom-output"
+      role="log"
+      aria-label="Benchmark output"
+      onScroll={(event) => {
+        const output = event.currentTarget;
+        followTailRef.current =
+          output.scrollTop + output.clientHeight >= output.scrollHeight - 24;
+      }}
+    >
+      {outputLines.length === 0 ? (
+        <p className="bottom-output-empty">No benchmark output yet.</p>
+      ) : (
+        outputLines.map((line) => (
+          <div className="bottom-output-line" key={line.id}>
+            <span className="bottom-output-time">[{line.timestamp}]</span>
+            <span>{line.message}</span>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 

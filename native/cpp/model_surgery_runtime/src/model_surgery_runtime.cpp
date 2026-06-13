@@ -1,8 +1,12 @@
 #include "model_surgery_runtime.h"
 
+#include "chat.h"
 #include "ggml-backend.h"
 #include "gguf.h"
 #include "llama.h"
+#include "sampling.h"
+
+#include "nlohmann/json.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -350,6 +354,22 @@ struct UserCopyTensorReader {
     uint64_t converted_bytes_after = 0;
 };
 
+struct RuntimeLogSink {
+    ms_runtime_log_callback callback = nullptr;
+    void * user_data = nullptr;
+
+    void emit(const std::string & message) const {
+        if (callback != nullptr) {
+            callback(message.c_str(), user_data);
+        }
+    }
+};
+
+struct ParsedChatOutput {
+    std::string visible_text;
+    std::string reasoning_text;
+};
+
 struct RecipeTargetVerification {
     uint64_t requested_count = 0;
     uint64_t verified_count = 0;
@@ -370,6 +390,7 @@ struct PerplexityScore {
 };
 
 constexpr uint32_t LLAMA_PPL_CONTEXT_TOKENS = 512;
+constexpr uint32_t LLAMA_GENERATION_CONTEXT_TOKENS = 8192;
 
 struct StandardEvalSampleScore {
     std::string task;
@@ -402,6 +423,7 @@ void copy_user_tensor_data(ggml_tensor * tensor, void * userdata);
 
 struct ModelSession {
     std::unique_ptr<llama_model, decltype(&llama_model_free)> model;
+    common_chat_templates_ptr chat_templates;
     std::unique_ptr<llama_context, decltype(&llama_free)> ctx;
     VramTracker vram;
     double load_ms = 0.0;
@@ -411,9 +433,11 @@ struct ModelSession {
     uint64_t converted_bytes_after = 0;
     uint64_t requested_target_count = 0;
     uint64_t verified_target_count = 0;
+    uint64_t context_reset_count = 0;
 
     ModelSession(llama_model * loaded_model, double load_time_ms, const VramTracker & vram_tracker)
         : model(loaded_model, llama_model_free),
+          chat_templates(common_chat_templates_init(loaded_model, "")),
           ctx(nullptr, llama_free),
           vram(vram_tracker),
           load_ms(load_time_ms) {
@@ -425,8 +449,27 @@ uint32_t session_context_tokens(uint32_t max_eval_tokens) {
     return std::max<uint32_t>(512, eval_limit + 8);
 }
 
-void open_session_context(ModelSession & session, uint32_t context_tokens) {
+uint32_t session_context_tokens_for_generation(uint32_t max_tokens) {
+    const uint32_t generation_limit = std::max<uint32_t>(2, max_tokens == 0 ? 128 : max_tokens);
+    return std::max<uint32_t>(LLAMA_GENERATION_CONTEXT_TOKENS, generation_limit * 2);
+}
+
+uint32_t context_generation_room(uint32_t context_tokens, size_t prompt_tokens) {
+    constexpr uint32_t reserved_tokens = 1;
+    if (prompt_tokens + reserved_tokens >= context_tokens) {
+        return 0;
+    }
+    return static_cast<uint32_t>(context_tokens - prompt_tokens - reserved_tokens);
+}
+
+void open_session_context(
+    ModelSession & session,
+    uint32_t context_tokens,
+    const RuntimeLogSink * log = nullptr) {
     throw_if_recipe_test_cancelled();
+    if (log != nullptr) {
+        log->emit("Native runtime: creating chat context");
+    }
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = context_tokens;
     ctx_params.n_batch = std::min<uint32_t>(512, context_tokens);
@@ -441,6 +484,9 @@ void open_session_context(ModelSession & session, uint32_t context_tokens) {
     }
     throw_if_recipe_test_cancelled();
     session.vram.sample();
+    if (log != nullptr) {
+        log->emit("Native runtime: chat context ready");
+    }
 }
 
 void reset_session_context(ModelSession & session) {
@@ -448,6 +494,7 @@ void reset_session_context(ModelSession & session) {
         throw std::runtime_error("model session context is not initialized");
     }
     llama_memory_clear(llama_get_memory(session.ctx.get()), true);
+    session.context_reset_count += 1;
 }
 
 std::unique_ptr<ModelSession> open_baseline_session(const char * path, uint32_t context_tokens) {
@@ -598,12 +645,16 @@ RecipeTargetVerification verify_recipe_tensor_targets_in_map(
 std::unique_ptr<ModelSession> open_recipe_session(
     const char * path,
     std::unordered_map<std::string, ggml_type> target_types,
-    uint32_t context_tokens) {
+    uint32_t context_tokens,
+    const RuntimeLogSink * log = nullptr) {
     throw_if_recipe_test_cancelled();
     gguf_init_params gguf_params = {};
     gguf_params.no_alloc = true;
     gguf_params.ctx = nullptr;
 
+    if (log != nullptr) {
+        log->emit("Native runtime: opening GGUF metadata");
+    }
     std::unique_ptr<gguf_context, decltype(&gguf_free)> source_metadata(
         gguf_init_from_file(path, gguf_params),
         gguf_free);
@@ -617,6 +668,9 @@ std::unique_ptr<ModelSession> open_recipe_session(
     if (model_metadata == nullptr) {
         throw std::runtime_error(std::string("failed to open GGUF model metadata: ") + path);
     }
+    if (log != nullptr) {
+        log->emit("Native runtime: GGUF metadata loaded");
+    }
 
     if (!validate_recipe_for_user_model(source_metadata.get(), target_types)) {
         return nullptr;
@@ -624,12 +678,22 @@ std::unique_ptr<ModelSession> open_recipe_session(
     const std::unordered_map<std::string, ggml_type> source_types = build_source_types_for_targets(
         source_metadata.get(),
         target_types);
+    if (log != nullptr) {
+        if (target_types.empty()) {
+            log->emit("Native runtime: using source tensor types");
+        } else {
+            log->emit("Native runtime: applying in-memory recipe target metadata");
+        }
+    }
     apply_recipe_tensor_types(model_metadata.get(), target_types);
 
     UserCopyTensorReader reader = {};
     reader.source_metadata = source_metadata.get();
     reader.target_types = std::move(target_types);
     reader.data_offset = gguf_get_data_offset(source_metadata.get());
+    if (log != nullptr) {
+        log->emit("Native runtime: opening GGUF tensor data");
+    }
     reader.file.open(path, std::ios::binary);
     if (!reader.file.is_open()) {
         throw std::runtime_error(std::string("failed to open GGUF tensor data: ") + path);
@@ -643,6 +707,9 @@ std::unique_ptr<ModelSession> open_recipe_session(
     model_params.use_mmap = false;
     model_params.progress_callback = recipe_test_load_progress;
 
+    if (log != nullptr) {
+        log->emit("Native runtime: loading model weights into memory");
+    }
     const auto load_start = std::chrono::steady_clock::now();
     llama_model * model = llama_model_init_from_user(
         model_metadata.get(),
@@ -656,6 +723,9 @@ std::unique_ptr<ModelSession> open_recipe_session(
     }
     throw_if_recipe_test_cancelled();
     vram_tracker.sample();
+    if (log != nullptr) {
+        log->emit("Native runtime: model weights loaded");
+    }
 
     const RecipeTargetVerification verification = verify_recipe_tensor_target_types(
         reader.loaded_target_types,
@@ -675,7 +745,14 @@ std::unique_ptr<ModelSession> open_recipe_session(
     session->converted_bytes_after = reader.converted_bytes_after;
     session->requested_target_count = verification.requested_count;
     session->verified_target_count = verification.verified_count;
-    open_session_context(*session, context_tokens);
+    if (log != nullptr) {
+        log->emit(
+            "Native runtime: verified recipe targets "
+            + std::to_string(verification.verified_count)
+            + "/"
+            + std::to_string(verification.requested_count));
+    }
+    open_session_context(*session, context_tokens, log);
     return session;
 }
 
@@ -1455,6 +1532,39 @@ PerplexityScore score_session_perplexity(
     return score;
 }
 
+int32_t decode_prompt_tokens(
+    ModelSession & session,
+    std::vector<llama_token> & prompt_tokens,
+    uint32_t max_generated_tokens,
+    const char * error_label) {
+    const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
+    if (prompt_tokens.size() + static_cast<size_t>(max_generated_tokens) > context_tokens) {
+        return fail(
+            std::string(error_label)
+            + " exceeds context window: prompt tokens="
+            + std::to_string(prompt_tokens.size())
+            + ", max generated tokens="
+            + std::to_string(max_generated_tokens)
+            + ", context tokens="
+            + std::to_string(context_tokens));
+    }
+
+    const uint32_t batch_limit = std::max<uint32_t>(1, llama_n_batch(session.ctx.get()));
+    for (size_t offset = 0; offset < prompt_tokens.size(); offset += batch_limit) {
+        const size_t remaining = prompt_tokens.size() - offset;
+        const size_t chunk_size = std::min<size_t>(remaining, batch_limit);
+        llama_batch batch = llama_batch_get_one(
+            prompt_tokens.data() + offset,
+            static_cast<int32_t>(chunk_size));
+        const int decode_result = llama_decode(session.ctx.get(), batch);
+        if (decode_result != 0) {
+            return fail(std::string("failed to decode ") + error_label);
+        }
+    }
+
+    return 0;
+}
+
 int32_t run_session_benchmark(
     ModelSession & session,
     const char * prompt,
@@ -1490,11 +1600,13 @@ int32_t run_session_benchmark(
     reset_session_context(session);
 
     const auto prompt_start = std::chrono::steady_clock::now();
-    const int prompt_res = llama_decode(
-        session.ctx.get(),
-        llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size())));
+    const int prompt_res = decode_prompt_tokens(
+        session,
+        prompt_tokens,
+        max_tokens,
+        "generation prompt");
     if (prompt_res != 0) {
-        return fail("failed to decode prompt");
+        return prompt_res;
     }
     llama_synchronize(session.ctx.get());
     const auto prompt_end = std::chrono::steady_clock::now();
@@ -1552,12 +1664,352 @@ int32_t run_session_benchmark(
     return 0;
 }
 
+std::string token_to_piece(const llama_vocab * vocab, llama_token token) {
+    std::string piece(32, '\0');
+    int32_t n_chars = llama_token_to_piece(
+        vocab,
+        token,
+        piece.data(),
+        static_cast<int32_t>(piece.size()),
+        0,
+        false);
+    if (n_chars < 0) {
+        piece.resize(static_cast<size_t>(-n_chars));
+        n_chars = llama_token_to_piece(
+            vocab,
+            token,
+            piece.data(),
+            static_cast<int32_t>(piece.size()),
+            0,
+            false);
+    }
+    if (n_chars < 0) {
+        throw std::runtime_error("failed to decode generated token piece");
+    }
+    piece.resize(static_cast<size_t>(n_chars));
+    return piece;
+}
+
+common_chat_params format_chat_prompt_with_template(
+    const common_chat_templates * chat_templates,
+    const std::vector<std::pair<std::string, std::string>> & messages,
+    bool add_generation_prompt,
+    const std::map<std::string, std::string> & chat_template_kwargs = {},
+    common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE) {
+    if (messages.empty()) {
+        throw std::runtime_error("chat completion request must include at least one message");
+    }
+
+    if (chat_templates == nullptr) {
+        throw std::runtime_error("chat template is not initialized");
+    }
+
+    common_chat_templates_inputs inputs;
+    inputs.messages.reserve(messages.size());
+    inputs.add_generation_prompt = add_generation_prompt;
+    inputs.use_jinja = true;
+    inputs.reasoning_format = reasoning_format;
+    inputs.chat_template_kwargs = chat_template_kwargs;
+
+    const auto enable_thinking = inputs.chat_template_kwargs.find("enable_thinking");
+    if (enable_thinking != inputs.chat_template_kwargs.end()) {
+        if (enable_thinking->second == "true") {
+            inputs.enable_thinking = true;
+        } else if (enable_thinking->second == "false") {
+            inputs.enable_thinking = false;
+        } else if (!enable_thinking->second.empty() && enable_thinking->second[0] == '"') {
+            throw std::invalid_argument("invalid type for \"enable_thinking\" (expected boolean, got string)");
+        }
+    }
+
+    for (const auto & message : messages) {
+        if (message.first.empty()) {
+            throw std::runtime_error("chat message role must not be empty");
+        }
+        common_chat_msg chat_message = {};
+        chat_message.role = message.first;
+        chat_message.content = message.second;
+        inputs.messages.push_back(std::move(chat_message));
+    }
+
+    return common_chat_templates_apply(chat_templates, inputs);
+}
+
+std::map<std::string, std::string> chat_template_kwargs_from_json(const char * json_text) {
+    std::map<std::string, std::string> kwargs;
+    if (json_text == nullptr || json_text[0] == '\0') {
+        return kwargs;
+    }
+
+    const nlohmann::ordered_json parsed = nlohmann::ordered_json::parse(json_text);
+    if (!parsed.is_object()) {
+        throw std::invalid_argument("chat_template_kwargs must be a JSON object");
+    }
+    for (const auto & item : parsed.items()) {
+        kwargs[item.key()] = item.value().dump();
+    }
+    return kwargs;
+}
+
+common_reasoning_format reasoning_format_from_request(const char * value) {
+    if (value == nullptr || value[0] == '\0') {
+        return COMMON_REASONING_FORMAT_DEEPSEEK;
+    }
+    return common_reasoning_format_from_name(value);
+}
+
+int32_t normalize_context_window_param(int32_t value, uint32_t context_tokens) {
+    if (value == -1) {
+        return static_cast<int32_t>(std::min<uint32_t>(
+            context_tokens,
+            static_cast<uint32_t>(std::numeric_limits<int32_t>::max())));
+    }
+    return value;
+}
+
+common_params_sampling common_sampling_from_chat_params(
+    const ms_chat_generation_params & params,
+    uint32_t context_tokens) {
+    common_params_sampling sampling;
+    sampling.seed = params.seed;
+    sampling.top_k = params.top_k;
+    sampling.top_p = static_cast<float>(params.top_p);
+    sampling.min_p = static_cast<float>(params.min_p);
+    sampling.typ_p = static_cast<float>(params.typical_p);
+    sampling.temp = static_cast<float>(params.temperature);
+    sampling.penalty_last_n = normalize_context_window_param(params.repeat_last_n, context_tokens);
+    sampling.penalty_repeat = static_cast<float>(params.repeat_penalty);
+    sampling.penalty_freq = static_cast<float>(params.frequency_penalty);
+    sampling.penalty_present = static_cast<float>(params.presence_penalty);
+    sampling.dry_multiplier = static_cast<float>(params.dry_multiplier);
+    sampling.dry_base = static_cast<float>(params.dry_base);
+    sampling.dry_allowed_length = params.dry_allowed_length;
+    sampling.dry_penalty_last_n = normalize_context_window_param(params.dry_penalty_last_n, context_tokens);
+    return sampling;
+}
+
+ms_chat_generation_params default_chat_generation_params(uint32_t max_tokens) {
+    ms_chat_generation_params params = {};
+    params.max_tokens = max_tokens;
+    params.add_generation_prompt = 1;
+    params.seed = LLAMA_DEFAULT_SEED;
+    params.top_k = 40;
+    params.repeat_last_n = 64;
+    params.dry_allowed_length = 2;
+    params.dry_penalty_last_n = -1;
+    params.temperature = 0.8;
+    params.top_p = 0.95;
+    params.min_p = 0.05;
+    params.typical_p = 1.0;
+    params.repeat_penalty = 1.0;
+    params.frequency_penalty = 0.0;
+    params.presence_penalty = 0.0;
+    params.dry_multiplier = 0.0;
+    params.dry_base = 1.75;
+    return params;
+}
+
+bool consume_generated_stop_suffix(std::string & generated_text, const std::vector<std::string> & stop_strings) {
+    for (const std::string & stop : stop_strings) {
+        if (stop.empty() || generated_text.size() < stop.size()) {
+            continue;
+        }
+        const size_t offset = generated_text.size() - stop.size();
+        if (generated_text.compare(offset, stop.size(), stop) == 0) {
+            generated_text.resize(offset);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::string> collect_stop_strings(const char * const * stop_strings, uint64_t stop_count) {
+    std::vector<std::string> stops;
+    stops.reserve(static_cast<size_t>(stop_count));
+    for (uint64_t i = 0; i < stop_count; ++i) {
+        if (stop_strings[i] == nullptr) {
+            throw std::runtime_error("chat stop string is null");
+        }
+        if (stop_strings[i][0] != '\0') {
+            stops.emplace_back(stop_strings[i]);
+        }
+    }
+    return stops;
+}
+
+std::vector<std::string> merge_stop_strings(
+    const std::vector<std::string> & request_stops,
+    const std::vector<std::string> & template_stops) {
+    std::vector<std::string> stops;
+    stops.reserve(request_stops.size() + template_stops.size());
+    stops.insert(stops.end(), request_stops.begin(), request_stops.end());
+    stops.insert(stops.end(), template_stops.begin(), template_stops.end());
+    return stops;
+}
+
+ParsedChatOutput parse_generated_chat_output(
+    const std::string & generated_text,
+    const common_chat_params & chat_params,
+    common_reasoning_format reasoning_format,
+    bool is_partial) {
+    common_chat_parser_params parser_params(chat_params);
+    parser_params.reasoning_format = reasoning_format;
+    parser_params.reasoning_in_content = false;
+    if (!chat_params.parser.empty()) {
+        parser_params.parser.load(chat_params.parser);
+    }
+
+    try {
+        const common_chat_msg parsed = common_chat_parse(generated_text, is_partial, parser_params);
+        return ParsedChatOutput{
+            parsed.render_content(),
+            parsed.reasoning_content,
+        };
+    } catch (...) {
+        return ParsedChatOutput{generated_text, ""};
+    }
+}
+
+int32_t run_session_generate(
+    ModelSession & session,
+    const char * prompt,
+    const ms_chat_generation_params & params,
+    const std::vector<std::string> & stop_strings,
+    std::string & generated_text,
+    ms_baseline_benchmark * out_benchmark,
+    uint32_t & out_finish_reason) {
+    out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+    const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
+    const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
+    int32_t token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
+    if (token_count == INT32_MIN) {
+        return fail("prompt tokenization overflowed");
+    }
+    if (token_count < 0) {
+        token_count = -token_count;
+    }
+    if (token_count <= 0) {
+        return fail("prompt produced no tokens");
+    }
+
+    std::vector<llama_token> prompt_tokens(static_cast<size_t>(token_count));
+    const int32_t actual_tokens = llama_tokenize(
+        vocab,
+        prompt,
+        prompt_len,
+        prompt_tokens.data(),
+        token_count,
+        true,
+        true);
+    if (actual_tokens <= 0) {
+        return fail("failed to tokenize prompt");
+    }
+    prompt_tokens.resize(static_cast<size_t>(actual_tokens));
+
+    reset_session_context(session);
+
+    const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
+    const uint32_t max_tokens = context_generation_room(context_tokens, prompt_tokens.size());
+    if (max_tokens == 0) {
+        return fail(
+            std::string("benchmark prompt exceeds context window: prompt tokens=")
+            + std::to_string(prompt_tokens.size())
+            + ", context tokens="
+            + std::to_string(context_tokens));
+    }
+
+    const auto prompt_start = std::chrono::steady_clock::now();
+    const int prompt_res = decode_prompt_tokens(
+        session,
+        prompt_tokens,
+        max_tokens,
+        "benchmark prompt");
+    if (prompt_res != 0) {
+        return prompt_res;
+    }
+    llama_synchronize(session.ctx.get());
+    const auto prompt_end = std::chrono::steady_clock::now();
+    session.vram.sample();
+
+    common_params_sampling sampling_params = common_sampling_from_chat_params(
+        params,
+        llama_n_ctx(session.ctx.get()));
+    common_sampler_ptr sampler(common_sampler_init(session.model.get(), sampling_params));
+    if (!sampler) {
+        return fail("failed to initialize llama.cpp common sampler");
+    }
+    for (const llama_token token : prompt_tokens) {
+        common_sampler_accept(sampler.get(), token, false);
+    }
+
+    uint32_t generated = 0;
+    generated_text.clear();
+    const auto generation_start = std::chrono::steady_clock::now();
+    for (uint32_t i = 0; i < max_tokens; ++i) {
+        throw_if_recipe_test_cancelled();
+        llama_token token = common_sampler_sample(sampler.get(), session.ctx.get(), -1);
+        if (llama_vocab_is_eog(vocab, token)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_EOS;
+            break;
+        }
+
+        generated_text += token_to_piece(vocab, token);
+        common_sampler_accept(sampler.get(), token, true);
+        ++generated;
+        if (consume_generated_stop_suffix(generated_text, stop_strings)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_STOP;
+            break;
+        }
+
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        const int gen_res = llama_decode(session.ctx.get(), batch);
+        if (gen_res != 0) {
+            return fail("failed to decode generated token");
+        }
+        llama_synchronize(session.ctx.get());
+    }
+    const auto generation_end = std::chrono::steady_clock::now();
+    session.vram.sample();
+
+    const double prompt_time_ms = elapsed_ms(prompt_start, prompt_end);
+    const double generation_time_ms = elapsed_ms(generation_start, generation_end);
+
+    out_benchmark->load_ms = session.load_ms;
+    out_benchmark->prompt_eval_ms = prompt_time_ms;
+    out_benchmark->generation_ms = generation_time_ms;
+    out_benchmark->prompt_eval_tps = prompt_time_ms > 0.0
+        ? (static_cast<double>(prompt_tokens.size()) * 1000.0 / prompt_time_ms)
+        : 0.0;
+    out_benchmark->token_gen_tps = generation_time_ms > 0.0
+        ? (static_cast<double>(generated) * 1000.0 / generation_time_ms)
+        : 0.0;
+    out_benchmark->ttft_ms = prompt_time_ms;
+    out_benchmark->vram_peak_mb = session.vram.peak_mb;
+    out_benchmark->vram_allocated_mb = session.vram.current_mb;
+    out_benchmark->prompt_tokens = static_cast<uint32_t>(prompt_tokens.size());
+    out_benchmark->generated_tokens = generated;
+    out_benchmark->copied_tensor_count = 0;
+    out_benchmark->converted_tensor_count = 0;
+    out_benchmark->converted_bytes_before = 0;
+    out_benchmark->converted_bytes_after = 0;
+    out_benchmark->requested_target_count = 0;
+    out_benchmark->verified_target_count = 0;
+
+    return 0;
+}
+
 } // namespace
+
+struct ms_runtime_chat_session {
+    std::unique_ptr<ModelSession> session;
+    uint64_t model_load_count = 0;
+    uint64_t completion_count = 0;
+};
 
 extern "C" {
 
 const char * ms_runtime_version(void) {
-    return "model-surgery-runtime/0.1";
+    return "model-surgery-runtime/0.2 chat-abi=2";
 }
 
 const char * ms_runtime_llama_system_info(void) {
@@ -1813,6 +2265,416 @@ int32_t ms_runtime_benchmark_recipe(
     } catch (...) {
         return fail("unknown native recipe benchmark error");
     }
+}
+
+int32_t ms_runtime_generate_recipe(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (prompt == nullptr || prompt[0] == '\0') {
+        return fail("generation prompt is empty");
+    }
+
+    if (out_text == nullptr || out_text_capacity == 0) {
+        return fail("generation text output buffer is null or empty");
+    }
+
+    if (out_benchmark == nullptr) {
+        return fail("benchmark output pointer is null");
+    }
+
+    try {
+        ensure_backend_initialized();
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        std::unique_ptr<ModelSession> session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens_for_generation(max_tokens));
+        if (session == nullptr) {
+            return -1;
+        }
+
+        const ms_chat_generation_params params = default_chat_generation_params(max_tokens);
+        std::string generated_text;
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        const int32_t result = run_session_generate(
+            *session,
+            prompt,
+            params,
+            std::vector<std::string>(),
+            generated_text,
+            out_benchmark,
+            finish_reason);
+        if (result != 0) {
+            return result;
+        }
+
+        if (generated_text.size() + 1 > out_text_capacity) {
+            return fail("generated text output buffer is too small");
+        }
+
+        std::memcpy(out_text, generated_text.c_str(), generated_text.size() + 1);
+        out_benchmark->copied_tensor_count = session->copied_tensors;
+        out_benchmark->converted_tensor_count = session->converted_tensors;
+        out_benchmark->converted_bytes_before = session->converted_bytes_before;
+        out_benchmark->converted_bytes_after = session->converted_bytes_after;
+        out_benchmark->requested_target_count = session->requested_target_count;
+        out_benchmark->verified_target_count = session->verified_target_count;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe generation error");
+    }
+}
+
+int32_t ms_runtime_generate_recipe_chat(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (messages == nullptr || message_count == 0) {
+        return fail("chat message set is empty");
+    }
+
+    if (out_text == nullptr || out_text_capacity == 0) {
+        return fail("generation text output buffer is null or empty");
+    }
+
+    if (out_benchmark == nullptr) {
+        return fail("benchmark output pointer is null");
+    }
+
+    try {
+        ensure_backend_initialized();
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        std::unique_ptr<ModelSession> session = open_recipe_session(
+            path,
+            std::move(target_types),
+            session_context_tokens_for_generation(max_tokens));
+        if (session == nullptr) {
+            return -1;
+        }
+
+        std::vector<std::pair<std::string, std::string>> chat_messages;
+        chat_messages.reserve(static_cast<size_t>(message_count));
+        for (uint64_t i = 0; i < message_count; ++i) {
+            if (messages[i].role == nullptr || messages[i].role[0] == '\0') {
+                return fail("chat message role is empty");
+            }
+            if (messages[i].content == nullptr) {
+                return fail("chat message content is null");
+            }
+            chat_messages.push_back({messages[i].role, messages[i].content});
+        }
+
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->chat_templates.get(),
+            chat_messages,
+            true);
+
+        const ms_chat_generation_params params = default_chat_generation_params(max_tokens);
+        std::string generated_text;
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        const int32_t result = run_session_generate(
+            *session,
+            chat_params.prompt.c_str(),
+            params,
+            chat_params.additional_stops,
+            generated_text,
+            out_benchmark,
+            finish_reason);
+        if (result != 0) {
+            return result;
+        }
+
+        if (generated_text.size() + 1 > out_text_capacity) {
+            return fail("generated text output buffer is too small");
+        }
+
+        std::memcpy(out_text, generated_text.c_str(), generated_text.size() + 1);
+        out_benchmark->copied_tensor_count = session->copied_tensors;
+        out_benchmark->converted_tensor_count = session->converted_tensors;
+        out_benchmark->converted_bytes_before = session->converted_bytes_before;
+        out_benchmark->converted_bytes_after = session->converted_bytes_after;
+        out_benchmark->requested_target_count = session->requested_target_count;
+        out_benchmark->verified_target_count = session->verified_target_count;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe chat generation error");
+    }
+}
+
+int32_t open_recipe_chat_session_impl(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    const RuntimeLogSink * log,
+    ms_runtime_chat_session ** out_session) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+
+    if (targets == nullptr && target_count > 0) {
+        return fail("recipe target pointer is null");
+    }
+
+    if (out_session == nullptr) {
+        return fail("chat session output pointer is null");
+    }
+
+    *out_session = nullptr;
+
+    try {
+        ensure_backend_initialized();
+        std::unordered_map<std::string, ggml_type> target_types;
+        if (!build_recipe_targets(targets, target_count, target_types)) {
+            return -1;
+        }
+
+        std::unique_ptr<ModelSession> model_session = open_recipe_session(
+            path,
+            std::move(target_types),
+            context_tokens,
+            log);
+        if (model_session == nullptr) {
+            return -1;
+        }
+
+        auto chat_session = std::make_unique<ms_runtime_chat_session>();
+        chat_session->model_load_count = 1;
+        chat_session->session = std::move(model_session);
+        *out_session = chat_session.release();
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe chat session open error");
+    }
+}
+
+int32_t ms_runtime_open_recipe_chat_session(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    ms_runtime_chat_session ** out_session) {
+    return open_recipe_chat_session_impl(
+        path,
+        targets,
+        target_count,
+        context_tokens,
+        nullptr,
+        out_session);
+}
+
+int32_t ms_runtime_open_recipe_chat_session_with_progress(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    ms_runtime_log_callback log_callback,
+    void * log_user_data,
+    ms_runtime_chat_session ** out_session) {
+    const RuntimeLogSink log{log_callback, log_user_data};
+    return open_recipe_chat_session_impl(
+        path,
+        targets,
+        target_count,
+        context_tokens,
+        log_callback == nullptr ? nullptr : &log,
+        out_session);
+}
+
+void ms_runtime_close_recipe_chat_session(ms_runtime_chat_session * session) {
+    delete session;
+}
+
+int32_t ms_runtime_generate_recipe_chat_session(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    char * out_text,
+    uint64_t out_text_capacity,
+    char * out_reasoning_text,
+    uint64_t out_reasoning_text_capacity,
+    ms_chat_generation_result * out_result) {
+    clear_error();
+
+    if (session == nullptr || session->session == nullptr) {
+        return fail("recipe chat session is null");
+    }
+
+    if (messages == nullptr || message_count == 0) {
+        return fail("chat message set is empty");
+    }
+
+    if (params == nullptr) {
+        return fail("chat generation params are null");
+    }
+
+    if (stop_strings == nullptr && stop_count > 0) {
+        return fail("chat stop string pointer is null");
+    }
+
+    if (out_text == nullptr || out_text_capacity == 0) {
+        return fail("generation text output buffer is null or empty");
+    }
+
+    if (out_reasoning_text == nullptr || out_reasoning_text_capacity == 0) {
+        return fail("generation reasoning output buffer is null or empty");
+    }
+
+    if (out_result == nullptr) {
+        return fail("chat generation result output pointer is null");
+    }
+
+    try {
+        std::vector<std::string> request_stops = collect_stop_strings(stop_strings, stop_count);
+        const std::map<std::string, std::string> chat_template_kwargs =
+            chat_template_kwargs_from_json(chat_template_kwargs_json);
+        const common_reasoning_format native_reasoning_format =
+            reasoning_format_from_request(reasoning_format);
+        std::vector<std::pair<std::string, std::string>> chat_messages;
+        chat_messages.reserve(static_cast<size_t>(message_count));
+        for (uint64_t i = 0; i < message_count; ++i) {
+            if (messages[i].role == nullptr || messages[i].role[0] == '\0') {
+                return fail("chat message role is empty");
+            }
+            if (messages[i].content == nullptr) {
+                return fail("chat message content is null");
+            }
+            chat_messages.push_back({messages[i].role, messages[i].content});
+        }
+
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->session->chat_templates.get(),
+            chat_messages,
+            params->add_generation_prompt != 0,
+            chat_template_kwargs,
+            native_reasoning_format);
+
+        const std::vector<std::string> all_stops = merge_stop_strings(
+            request_stops,
+            chat_params.additional_stops);
+        std::string generated_text;
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        ms_baseline_benchmark benchmark = {};
+        const int32_t result = run_session_generate(
+            *session->session,
+            chat_params.prompt.c_str(),
+            *params,
+            all_stops,
+            generated_text,
+            &benchmark,
+            finish_reason);
+        if (result != 0) {
+            return result;
+        }
+
+        const ParsedChatOutput parsed = parse_generated_chat_output(
+            generated_text,
+            chat_params,
+            native_reasoning_format,
+            finish_reason == MS_CHAT_FINISH_REASON_LENGTH);
+
+        if (parsed.visible_text.size() + 1 > out_text_capacity) {
+            return fail("generated text output buffer is too small");
+        }
+
+        if (parsed.reasoning_text.size() + 1 > out_reasoning_text_capacity) {
+            return fail("generated reasoning output buffer is too small");
+        }
+
+        std::memcpy(out_text, parsed.visible_text.c_str(), parsed.visible_text.size() + 1);
+        std::memcpy(
+            out_reasoning_text,
+            parsed.reasoning_text.c_str(),
+            parsed.reasoning_text.size() + 1);
+        benchmark.copied_tensor_count = session->session->copied_tensors;
+        benchmark.converted_tensor_count = session->session->converted_tensors;
+        benchmark.converted_bytes_before = session->session->converted_bytes_before;
+        benchmark.converted_bytes_after = session->session->converted_bytes_after;
+        benchmark.requested_target_count = session->session->requested_target_count;
+        benchmark.verified_target_count = session->session->verified_target_count;
+        out_result->benchmark = benchmark;
+        out_result->prompt_tokens = benchmark.prompt_tokens;
+        out_result->completion_tokens = benchmark.generated_tokens;
+        out_result->finish_reason = finish_reason;
+        session->completion_count += 1;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe chat session generation error");
+    }
+}
+
+int32_t ms_runtime_get_recipe_chat_session_counters(
+    const ms_runtime_chat_session * session,
+    ms_runtime_chat_session_counters * out_counters) {
+    clear_error();
+
+    if (session == nullptr || session->session == nullptr) {
+        return fail("recipe chat session is null");
+    }
+
+    if (out_counters == nullptr) {
+        return fail("chat session counter output pointer is null");
+    }
+
+    out_counters->model_load_count = session->model_load_count;
+    out_counters->context_reset_count = session->session->context_reset_count;
+    out_counters->completion_count = session->completion_count;
+    return 0;
 }
 
 int32_t ms_runtime_eval_recipe(

@@ -15,7 +15,9 @@ pub enum GgufError {
 }
 
 impl From<std::io::Error> for GgufError {
-    fn from(e: std::io::Error) -> Self { GgufError::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        GgufError::Io(e)
+    }
 }
 
 impl std::fmt::Display for GgufError {
@@ -81,11 +83,21 @@ fn extract_layer_index(name: &str) -> i32 {
 // 8=string 9=array 10=u64 11=i64 12=f64
 fn skip_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<(), GgufError> {
     match value_type {
-        0 | 1 | 7 => { reader.seek(SeekFrom::Current(1))?; }
-        2 | 3 => { reader.seek(SeekFrom::Current(2))?; }
-        4 | 5 | 6 => { reader.seek(SeekFrom::Current(4))?; }
-        10 | 11 | 12 => { reader.seek(SeekFrom::Current(8))?; }
-        8 => { let _ = read_string(reader)?; }
+        0 | 1 | 7 => {
+            reader.seek(SeekFrom::Current(1))?;
+        }
+        2 | 3 => {
+            reader.seek(SeekFrom::Current(2))?;
+        }
+        4 | 5 | 6 => {
+            reader.seek(SeekFrom::Current(4))?;
+        }
+        10 | 11 | 12 => {
+            reader.seek(SeekFrom::Current(8))?;
+        }
+        8 => {
+            let _ = read_string(reader)?;
+        }
         9 => {
             let elem_type = read_u32(reader)?;
             let count = read_u64(reader)? as usize;
@@ -100,25 +112,45 @@ fn skip_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<(), Ggu
 
 fn ggml_type_name(t: u32) -> &'static str {
     match t {
-        0 => "F32", 1 => "F16",
-        2 => "Q4_0", 3 => "Q4_1",
-        6 => "Q5_0", 7 => "Q5_1",
-        8 => "Q8_0", 9 => "Q8_1",
-        10 => "Q2_K", 11 => "Q3_K", 12 => "Q4_K",
-        13 => "Q5_K", 14 => "Q6_K", 15 => "Q8_K",
-        16 => "IQ2_XXS", 17 => "IQ2_XS", 18 => "IQ3_XXS",
-        19 => "IQ1_S", 20 => "IQ4_NL", 21 => "IQ3_S",
-        22 => "IQ2_S", 23 => "IQ4_XS",
-        24 => "I8", 25 => "I16", 26 => "I32", 27 => "I64",
-        28 => "F64", 29 => "IQ1_M", 30 => "BF16",
-        31 => "TQ1_0", 32 => "TQ2_0",
+        0 => "F32",
+        1 => "F16",
+        2 => "Q4_0",
+        3 => "Q4_1",
+        6 => "Q5_0",
+        7 => "Q5_1",
+        8 => "Q8_0",
+        9 => "Q8_1",
+        10 => "Q2_K",
+        11 => "Q3_K",
+        12 => "Q4_K",
+        13 => "Q5_K",
+        14 => "Q6_K",
+        15 => "Q8_K",
+        16 => "IQ2_XXS",
+        17 => "IQ2_XS",
+        18 => "IQ3_XXS",
+        19 => "IQ1_S",
+        20 => "IQ4_NL",
+        21 => "IQ3_S",
+        22 => "IQ2_S",
+        23 => "IQ4_XS",
+        24 => "I8",
+        25 => "I16",
+        26 => "I32",
+        27 => "I64",
+        28 => "F64",
+        29 => "IQ1_M",
+        30 => "BF16",
+        31 => "TQ1_0",
+        32 => "TQ2_0",
         _ => "unknown",
     }
 }
 
 fn ggml_type_bits(t: u32) -> f32 {
     match t {
-        0 => 32.0, 1 | 30 => 16.0,
+        0 => 32.0,
+        1 | 30 => 16.0,
         2 | 3 => 4.0,
         6 | 7 => 5.0,
         8 | 9 | 15 | 24 => 8.0,
@@ -265,7 +297,10 @@ mod tests {
     #[test]
     fn test_classify_tensor() {
         assert_eq!(classify_tensor("tok_embeddings.weight", -1), "embedding");
-        assert_eq!(classify_tensor("layers.0.attention.wq.weight", 0), "attention");
+        assert_eq!(
+            classify_tensor("layers.0.attention.wq.weight", 0),
+            "attention"
+        );
         assert_eq!(classify_tensor("output_norm.weight", -1), "output_norm");
         assert_eq!(classify_tensor("output.weight", -1), "output");
     }

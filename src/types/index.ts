@@ -134,6 +134,14 @@ export interface RecipeState {
 
 export type RecipeTestMode = "single" | "compare_baseline";
 export type RecipeEvalPreset = "quick" | "default";
+export type BenchmarkRunId =
+  | "ppl_check"
+  | "gpqa_diamond"
+  | "mmlu_pro"
+  | "mmlu_redux"
+  | "supergpqa"
+  | "claw_eval";
+export type GpqaShotMode = "zero_shot" | "five_shot_cot";
 
 // ---- Progress ----
 
@@ -146,6 +154,16 @@ export type ProgressStage =
 export interface ProgressEvent {
   stage: ProgressStage;
   percent: number;
+  message: string;
+}
+
+export interface BenchmarkOutputEvent {
+  message: string;
+}
+
+export interface BenchmarkOutputLine {
+  id: number;
+  timestamp: string;
   message: string;
 }
 
@@ -191,6 +209,39 @@ export interface HardwareSnapshot {
   gpuPowerW: number | null;
   cpuTemperatureC: number | null;
   cpuPowerW: number | null;
+}
+
+export interface ModelInspectorApiStatus {
+  running: boolean;
+  baseUrl: string | null;
+  apiKey: string | null;
+  modelId: string | null;
+}
+
+export interface GpqaDiamondStatus {
+  ready: boolean;
+  statusLabel: string;
+  python: string | null;
+  evalscope: string | null;
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+  detail: string;
+}
+
+export interface GpqaBenchmarkConfigInput {
+  contextWindow: string;
+  sampleLimit: string;
+  temperature: string;
+}
+
+export interface GpqaBenchmarkConfig {
+  contextWindow: number;
+  sampleLimit: number;
+  temperature: number;
 }
 
 export interface RecipeQualityEval {

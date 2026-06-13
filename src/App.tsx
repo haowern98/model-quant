@@ -1,34 +1,132 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import {
   EVAL_RESULTS_TAB_ID,
+  gpqaDatasetEditorTab,
+  gpqaDetailsEditorTab,
   layerEditorTab,
   type EditorTab,
 } from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
 import { useRecipe } from "./hooks/useRecipe";
 import { useProgress } from "./hooks/useProgress";
-import { isTauri } from "@tauri-apps/api/core";
+import { useBenchmarkOutputLog } from "./hooks/useBenchmarkOutputLog";
 import {
   testRecipe,
   cancelRecipeTest,
+  cancelOfficialBenchmark,
+  getGpqaDiamondStatus,
+  installGpqaDiamondHarness,
+  downloadGpqaDiamondDataset,
+  runGpqaDiamondBenchmark,
   saveRecipe,
   loadRecipe,
   exportGguf,
+  startModelInspectorApi,
+  stopModelInspectorApi,
 } from "./lib/tauri-bridge";
 import type {
+  BenchmarkRunId,
   BenchmarkResult,
+  GpqaBenchmarkConfig,
+  GpqaBenchmarkConfigInput,
+  GpqaDiamondStatus,
+  GpqaShotMode,
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 
+const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
+  ready: false,
+  statusLabel: "Needs harness",
+  python: null,
+  evalscope: null,
+  datasetReady: false,
+  datasetStatusLabel: "Missing",
+  datasetPath: null,
+  datasetHash: null,
+  datasetUrl: "AI-ModelScope/gpqa_diamond",
+  expectedDatasetHash: "EvalScope dataset cache marker",
+  detail: "GPQA Diamond readiness has not been checked yet.",
+};
+
+const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
+const GPQA_SAMPLE_COUNT = 198;
+const GPQA_DEFAULT_TEMPERATURE = 0;
+
+const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
+  contextWindow: "",
+  sampleLimit: "",
+  temperature: "0",
+};
+
+function parseOptionalIntegerField(
+  value: string,
+  defaultValue: number,
+  min: number,
+  max: number,
+  label: string,
+): number | string {
+  const trimmed = value.trim();
+  if (trimmed === "") return defaultValue;
+  if (!/^\d+$/.test(trimmed)) return `${label} must be a whole number.`;
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    return `${label} must be between ${min} and ${max}.`;
+  }
+  return parsed;
+}
+
+function resolveGpqaConfigInput(
+  input: GpqaBenchmarkConfigInput,
+): GpqaBenchmarkConfig | string {
+  const contextWindow = parseOptionalIntegerField(
+    input.contextWindow,
+    GPQA_DEFAULT_CONTEXT_WINDOW,
+    1,
+    Number.MAX_SAFE_INTEGER,
+    "GPQA context window",
+  );
+  if (typeof contextWindow === "string") return contextWindow;
+
+  const sampleLimit = parseOptionalIntegerField(
+    input.sampleLimit,
+    GPQA_SAMPLE_COUNT,
+    1,
+    GPQA_SAMPLE_COUNT,
+    "GPQA sample limit",
+  );
+  if (typeof sampleLimit === "string") return sampleLimit;
+
+  const temperatureText = input.temperature.trim();
+  const temperature =
+    temperatureText === "" ? GPQA_DEFAULT_TEMPERATURE : Number(temperatureText);
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+    return "GPQA temperature must be between 0 and 2.";
+  }
+
+  return {
+    contextWindow,
+    sampleLimit,
+    temperature,
+  };
+}
+
+function hasTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 // Auto-inject the mock bridge only in plain browser runs.
-if (typeof window !== "undefined" && !isTauri()) {
+if (typeof window !== "undefined" && !hasTauriRuntime()) {
   void import("../tests/mocks/tauri-bridge")
-    .then(({ createMockBridge }) => setMockInvoke(createMockBridge()))
+    .then(({ createMockBridge }) => {
+      setMockInvoke(createMockBridge());
+      (window as typeof window & { __MODEL_SURGERY_MOCK_READY__?: boolean })
+        .__MODEL_SURGERY_MOCK_READY__ = true;
+    })
     .catch(() => undefined);
 }
 
@@ -57,6 +155,7 @@ function App() {
     requestCancellation,
     endOperation,
   } = useProgress();
+  const { outputLines } = useBenchmarkOutputLog();
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
@@ -70,6 +169,37 @@ function App() {
     useState<RecipeTestMode>("single");
   const [recipeEvalPreset, setRecipeEvalPreset] =
     useState<RecipeEvalPreset>("default");
+  const [selectedRunIds, setSelectedRunIds] = useState<BenchmarkRunId[]>([
+    "ppl_check",
+  ]);
+  const [gpqaStatus, setGpqaStatus] =
+    useState<GpqaDiamondStatus>(DEFAULT_GPQA_STATUS);
+  const [gpqaShotMode, setGpqaShotMode] =
+    useState<GpqaShotMode>("five_shot_cot");
+  const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
+    DEFAULT_GPQA_CONFIG_INPUT,
+  );
+
+  const refreshGpqaStatus = useCallback(() => {
+    let cancelled = false;
+    getGpqaDiamondStatus()
+      .then((status) => {
+        if (!cancelled) setGpqaStatus(status);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setGpqaStatus({
+            ...DEFAULT_GPQA_STATUS,
+            detail: (error as Error).message,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => refreshGpqaStatus(), [refreshGpqaStatus, modelPath]);
 
   const resetForLoadedModel = useCallback(
     (path: string, loadedModel: NonNullable<typeof model>) => {
@@ -143,8 +273,63 @@ function App() {
     handleCloseEditor(EVAL_RESULTS_TAB_ID);
   }, [handleCloseEditor]);
 
+  const openEvalResults = useCallback((result: BenchmarkResult) => {
+    setBenchmarkResult(result);
+    setOpenEditors((current) =>
+      current.some((editor) => editor.id === EVAL_RESULTS_TAB_ID)
+        ? current
+        : [...current, { id: EVAL_RESULTS_TAB_ID, kind: "eval-results" }],
+    );
+    setActiveEditorId(EVAL_RESULTS_TAB_ID);
+  }, []);
+
+  const openEditorTab = useCallback((tab: EditorTab) => {
+    setOpenEditors((current) =>
+      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
+    );
+    setActiveEditorId(tab.id);
+  }, []);
+
+  const handleOpenGpqaDetails = useCallback(() => {
+    openEditorTab(gpqaDetailsEditorTab());
+  }, [openEditorTab]);
+
+  const handleOpenGpqaDataset = useCallback(() => {
+    openEditorTab(gpqaDatasetEditorTab());
+  }, [openEditorTab]);
+
+  const handleToggleRunTarget = useCallback(
+    (target: BenchmarkRunId) => {
+      if (target !== "ppl_check" && target !== "gpqa_diamond") return;
+      setSelectedRunIds((current) =>
+        current.includes(target)
+          ? current.filter((id) => id !== target)
+          : [...current, target],
+      );
+    },
+    [],
+  );
+
   const handleOpenModel = useCallback(async () => {
     let selected: string | null = null;
+
+    if (!hasTauriRuntime()) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".gguf";
+      input.style.display = "none";
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) {
+          const loadedModel = await openModel(file.name);
+          if (loadedModel) resetForLoadedModel(file.name, loadedModel);
+        }
+        input.remove();
+      };
+      document.body.appendChild(input);
+      input.click();
+      return;
+    }
 
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -178,28 +363,73 @@ function App() {
   }, [openModel, resetForLoadedModel]);
 
   const handleTest = useCallback(async () => {
-    if (!recipe) return;
+    if (!recipe || !modelPath) {
+      if (
+        selectedRunIds.includes("gpqa_diamond") &&
+        !selectedRunIds.includes("ppl_check")
+      ) {
+        setAppError("Open a GGUF model before running GPQA Diamond.");
+      } else if (selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond")) {
+        setAppError("Open a GGUF model before running selected tests.");
+      }
+      return;
+    }
     if (recipe.baseModel !== modelPath) {
       setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
       return;
     }
+    const runQueue = selectedRunIds.filter(
+      (id) => id === "ppl_check" || (id === "gpqa_diamond" && gpqaStatus.ready),
+    );
+    if (runQueue.length === 0) {
+      if (selectedRunIds.includes("gpqa_diamond") && !gpqaStatus.ready) {
+        setAppError(`GPQA Diamond is not ready. Current status: ${gpqaStatus.statusLabel}.`);
+      }
+      return;
+    }
+
     startOperation();
     try {
-      const result = await testRecipe(
-        recipe,
-        512,
-        recipeTestMode,
-        recipeEvalPreset,
-      );
-      setBenchmarkResult(result);
-      setOpenEditors((current) =>
-        current.some((editor) => editor.id === EVAL_RESULTS_TAB_ID)
-          ? current
-          : [...current, { id: EVAL_RESULTS_TAB_ID, kind: "eval-results" }],
-      );
-      setActiveEditorId(EVAL_RESULTS_TAB_ID);
+      let latestResult: BenchmarkResult | null = null;
+
+      if (runQueue.includes("ppl_check")) {
+        latestResult = await testRecipe(
+          recipe,
+          512,
+          recipeTestMode,
+          recipeEvalPreset,
+        );
+        openEvalResults(latestResult);
+        setProfile({ vramEstimate: latestResult.vramAllocatedMb, sizeSavedVsQ8: 0 });
+      }
+
+      if (runQueue.includes("gpqa_diamond")) {
+        const resolvedGpqaConfig = resolveGpqaConfigInput(gpqaConfig);
+        if (typeof resolvedGpqaConfig === "string") {
+          throw new Error(resolvedGpqaConfig);
+        }
+        const apiStatus = await startModelInspectorApi({
+          benchmarkLabel: "ModelInspector API",
+          contextWindow: resolvedGpqaConfig.contextWindow,
+        });
+        if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+          throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+        }
+        try {
+          latestResult = await runGpqaDiamondBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            gpqaShotMode,
+            resolvedGpqaConfig,
+          );
+          openEvalResults(latestResult);
+        } finally {
+          await stopModelInspectorApi();
+        }
+      }
+
       setAppError(null);
-      setProfile({ vramEstimate: result.vramAllocatedMb, sizeSavedVsQ8: 0 });
     } catch (e) {
       const message = (e as Error).message;
       if (!message.toLowerCase().includes("cancelled")) setAppError(message);
@@ -211,16 +441,51 @@ function App() {
     modelPath,
     recipeTestMode,
     recipeEvalPreset,
+    selectedRunIds,
+    gpqaStatus.ready,
+    gpqaShotMode,
+    gpqaConfig,
     startOperation,
     endOperation,
+    openEvalResults,
     setProfile,
   ]);
+
+  const handleInstallGpqaHarness = useCallback(async () => {
+    startOperation();
+    try {
+      const status = await installGpqaDiamondHarness();
+      setGpqaStatus(status);
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+      void refreshGpqaStatus();
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshGpqaStatus, startOperation]);
+
+  const handleDownloadGpqaDataset = useCallback(async () => {
+    startOperation();
+    try {
+      const status = await downloadGpqaDiamondDataset();
+      setGpqaStatus(status);
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+      void refreshGpqaStatus();
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshGpqaStatus, startOperation]);
 
   const handleCancelTest = useCallback(async () => {
     if (!running || cancelling) return;
     requestCancellation();
     try {
       await cancelRecipeTest();
+      await cancelOfficialBenchmark();
+      await stopModelInspectorApi();
     } catch (e) {
       setAppError((e as Error).message);
     }
@@ -298,8 +563,13 @@ function App() {
           running={running}
           cancelling={cancelling}
           progress={progress}
+          outputLines={outputLines}
           evalPreset={recipeEvalPreset}
           testMode={recipeTestMode}
+          selectedRunIds={selectedRunIds}
+          gpqaStatus={gpqaStatus}
+          gpqaShotMode={gpqaShotMode}
+          gpqaConfig={gpqaConfig}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
@@ -310,6 +580,14 @@ function App() {
           onAssignByPattern={assignByPattern}
           onEvalPresetChange={setRecipeEvalPreset}
           onTestModeChange={setRecipeTestMode}
+          onToggleRunTarget={handleToggleRunTarget}
+          onGpqaShotModeChange={setGpqaShotMode}
+          onGpqaConfigChange={setGpqaConfig}
+          onInstallGpqaHarness={handleInstallGpqaHarness}
+          onDownloadGpqaDataset={handleDownloadGpqaDataset}
+          onRefreshGpqaStatus={refreshGpqaStatus}
+          onOpenGpqaDetails={handleOpenGpqaDetails}
+          onOpenGpqaDataset={handleOpenGpqaDataset}
           onTest={handleTest}
           onCancelTest={handleCancelTest}
           onSaveRecipe={handleSaveRecipe}

@@ -8,6 +8,14 @@ import { toTargetQuant } from "../../src/types";
 
 export function createMockBridge() {
   let cancelRequested = false;
+  const mockState = window as Window & {
+    __MODEL_SURGERY_LAST_GPQA_ARGS__?: unknown;
+  };
+  mockState.__MODEL_SURGERY_LAST_GPQA_ARGS__ = null;
+  let gpqaReady =
+    typeof window === "undefined" ||
+    !new URLSearchParams(window.location.search).has("gpqaMissing");
+  let gpqaDatasetReady = gpqaReady;
   const allowedTargetQuants: QuantType[] = [
     "F32",
     "BF16",
@@ -352,6 +360,137 @@ export function createMockBridge() {
         cpuTemperatureC: null,
         cpuPowerW: null,
       }),
+      start_modelinspector_api: () => ({
+        running: true,
+        baseUrl: "http://127.0.0.1:12345/v1",
+        apiKey: "mock-modelinspector-token",
+        modelId: "mock-model.gguf",
+      }),
+      stop_modelinspector_api: () => ({
+        running: false,
+        baseUrl: null,
+        apiKey: null,
+        modelId: null,
+      }),
+      get_modelinspector_api_status: () => ({
+        running: false,
+        baseUrl: null,
+        apiKey: null,
+        modelId: null,
+      }),
+      get_gpqa_diamond_status: () => ({
+        ready: gpqaReady && gpqaDatasetReady,
+        statusLabel: gpqaReady ? (gpqaDatasetReady ? "Ready" : "Download") : "Install",
+        python: gpqaReady ? "3.11.8" : null,
+        evalscope: gpqaReady ? "1.8.0" : null,
+        datasetReady: gpqaDatasetReady,
+        datasetStatusLabel: gpqaDatasetReady ? "Verified" : "Missing",
+        datasetPath: gpqaDatasetReady ? "C:\\Users\\mock\\AppData\\Local\\MI\\g\\datasets\\gpqa_diamond_dataset_ready.json" : null,
+        datasetHash: gpqaDatasetReady ? "marker-v1" : null,
+        datasetUrl: "AI-ModelScope/gpqa_diamond",
+        expectedDatasetHash: "EvalScope dataset cache marker",
+        detail: gpqaReady && gpqaDatasetReady
+          ? "Mock EvalScope GPQA Diamond harness and dataset are ready."
+          : gpqaReady
+            ? "Mock GPQA dataset is not downloaded."
+          : "Mock GPQA harness is not installed.",
+      }),
+      install_gpqa_diamond_harness: async () => {
+        gpqaReady = true;
+        return {
+          ready: gpqaDatasetReady,
+          statusLabel: gpqaDatasetReady ? "Ready" : "Download",
+          python: "3.11.8",
+          evalscope: "1.8.0",
+          datasetReady: gpqaDatasetReady,
+          datasetStatusLabel: gpqaDatasetReady ? "Verified" : "Missing",
+          datasetPath: gpqaDatasetReady ? "C:\\Users\\mock\\AppData\\Local\\MI\\g\\datasets\\gpqa_diamond_dataset_ready.json" : null,
+          datasetHash: gpqaDatasetReady ? "marker-v1" : null,
+          datasetUrl: "AI-ModelScope/gpqa_diamond",
+          expectedDatasetHash: "EvalScope dataset cache marker",
+          detail: gpqaDatasetReady
+            ? "Mock EvalScope GPQA Diamond harness and dataset are ready."
+            : "Mock GPQA dataset is not downloaded.",
+        };
+      },
+      download_gpqa_diamond_dataset: async () => {
+        gpqaReady = true;
+        gpqaDatasetReady = true;
+        return {
+          ready: true,
+          statusLabel: "Ready",
+          python: "3.11.8",
+          evalscope: "1.8.0",
+          datasetReady: true,
+          datasetStatusLabel: "Verified",
+          datasetPath: "C:\\Users\\mock\\AppData\\Local\\MI\\g\\datasets\\gpqa_diamond_dataset_ready.json",
+          datasetHash: "marker-v1",
+          datasetUrl: "AI-ModelScope/gpqa_diamond",
+          expectedDatasetHash: "EvalScope dataset cache marker",
+          detail: "Mock EvalScope GPQA Diamond harness and dataset are ready.",
+        };
+      },
+      run_gpqa_diamond_benchmark: async (args) => {
+        mockState.__MODEL_SURGERY_LAST_GPQA_ARGS__ = args;
+        return {
+        promptEvalTps: 0,
+        tokenGenTps: 0,
+        ttftMs: 0,
+        promptEvalMs: 0,
+        generationMs: 0,
+        vramPeakMb: 0,
+        vramAllocatedMb: 0,
+        diskSizeMb: 0,
+        elapsedMs: 1000,
+        loadMs: 0,
+        testMode: "official_gpqa_diamond",
+        statusMessage: `Mock GPQA Diamond official harness completed with ${args?.shotMode === "zero_shot" ? "0-shot CoT" : "5-shot CoT"}.`,
+        nativeRuntime: "EvalScope GPQA Diamond mock report",
+        modelTensorCount: mockModel.tensors.length,
+        modelMetadataCount: 32,
+        copiedTensorCount: 0,
+        convertedTensorCount: 0,
+        convertedBytesBefore: 0,
+        convertedBytesAfter: 0,
+        requestedTargetCount: 0,
+        verifiedTargetCount: 0,
+        baselineBenchmark: null,
+        qualityEval: null,
+        standardEval: {
+          sampleCount: 198,
+          taskCount: 1,
+          baselineAccuracy: null,
+          recipeAccuracy: 0.631,
+          accuracyDelta: null,
+          correctToWrongCount: 0,
+          wrongToCorrectCount: 0,
+          baselineAvgMargin: null,
+          recipeAvgMargin: 0,
+          marginDelta: null,
+          tasks: [
+            {
+              task: "gpqa_diamond",
+              sampleCount: 198,
+              baselineCorrectCount: null,
+              recipeCorrectCount: 125,
+              correctToWrongCount: 0,
+              wrongToCorrectCount: 0,
+              samePredictionCount: 0,
+              baselineAccuracy: null,
+              recipeAccuracy: 0.631,
+              accuracyDelta: null,
+              baselineAvgMargin: null,
+              recipeAvgMargin: 0,
+              marginDelta: null,
+              baselineAvgCorrectNll: null,
+              recipeAvgCorrectNll: 0,
+            },
+          ],
+          sampleAudits: [],
+        },
+      };
+      },
+      cancel_official_benchmark: () => {},
       save_recipe: () => {
         recipe.status = "saved";
       },

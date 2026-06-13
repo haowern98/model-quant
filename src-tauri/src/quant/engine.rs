@@ -40,11 +40,7 @@ mod tests {
 /// Stub: apply recipe to produce a new GGUF. Full implementation requires
 /// llama.cpp linked for per-row quantize functions. This stub copies the
 /// source file as-is so the command pipeline can be tested end-to-end.
-pub fn apply_recipe_stub(
-    source: &Path,
-    dest: &Path,
-    _recipe: &RecipeState,
-) -> Result<(), String> {
+pub fn apply_recipe_stub(source: &Path, dest: &Path, _recipe: &RecipeState) -> Result<(), String> {
     std::fs::copy(source, dest)
         .map_err(|e| format!("Failed to copy GGUF: {}", e))
         .map(|_| ())

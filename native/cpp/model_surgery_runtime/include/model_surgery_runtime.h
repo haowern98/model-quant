@@ -48,6 +48,53 @@ typedef struct ms_recipe_tensor_target {
     const char * target_quant;
 } ms_recipe_tensor_target;
 
+typedef struct ms_chat_message {
+    const char * role;
+    const char * content;
+} ms_chat_message;
+
+typedef struct ms_chat_generation_params {
+    uint32_t max_tokens;
+    uint32_t add_generation_prompt;
+    uint32_t seed;
+    int32_t top_k;
+    int32_t repeat_last_n;
+    int32_t dry_allowed_length;
+    int32_t dry_penalty_last_n;
+    double temperature;
+    double top_p;
+    double min_p;
+    double typical_p;
+    double repeat_penalty;
+    double frequency_penalty;
+    double presence_penalty;
+    double dry_multiplier;
+    double dry_base;
+} ms_chat_generation_params;
+
+enum {
+    MS_CHAT_FINISH_REASON_STOP = 0,
+    MS_CHAT_FINISH_REASON_LENGTH = 1,
+    MS_CHAT_FINISH_REASON_EOS = 2
+};
+
+typedef struct ms_chat_generation_result {
+    ms_baseline_benchmark benchmark;
+    uint32_t prompt_tokens;
+    uint32_t completion_tokens;
+    uint32_t finish_reason;
+} ms_chat_generation_result;
+
+typedef struct ms_runtime_chat_session ms_runtime_chat_session;
+
+typedef void (*ms_runtime_log_callback)(const char * message, void * user_data);
+
+typedef struct ms_runtime_chat_session_counters {
+    uint64_t model_load_count;
+    uint64_t context_reset_count;
+    uint64_t completion_count;
+} ms_runtime_chat_session_counters;
+
 typedef struct ms_recipe_analysis {
     uint64_t tensor_count;
     uint64_t changed_count;
@@ -162,6 +209,57 @@ MS_RUNTIME_API int32_t ms_runtime_benchmark_recipe(
     const char * prompt,
     uint32_t max_tokens,
     ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const char * prompt,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    uint32_t max_tokens,
+    char * out_text,
+    uint64_t out_text_capacity,
+    ms_baseline_benchmark * out_benchmark);
+MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    ms_runtime_chat_session ** out_session);
+MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session_with_progress(
+    const char * path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    ms_runtime_log_callback log_callback,
+    void * log_user_data,
+    ms_runtime_chat_session ** out_session);
+MS_RUNTIME_API void ms_runtime_close_recipe_chat_session(ms_runtime_chat_session * session);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    char * out_text,
+    uint64_t out_text_capacity,
+    char * out_reasoning_text,
+    uint64_t out_reasoning_text_capacity,
+    ms_chat_generation_result * out_result);
+MS_RUNTIME_API int32_t ms_runtime_get_recipe_chat_session_counters(
+    const ms_runtime_chat_session * session,
+    ms_runtime_chat_session_counters * out_counters);
 MS_RUNTIME_API int32_t ms_runtime_eval_recipe(
     const char * path,
     const ms_recipe_tensor_target * targets,
