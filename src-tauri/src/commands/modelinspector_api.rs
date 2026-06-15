@@ -191,7 +191,7 @@ pub async fn start_modelinspector_api(
     let base_url = format!("http://{addr}/v1");
     let stop = Arc::new(AtomicBool::new(false));
     let targets = recipe_targets(&recipe);
-    crate::progress::emit_benchmark_output(
+    crate::progress::emit_api_output(
         &app,
         "ModelInspector API: loading in-process model session",
     );
@@ -205,7 +205,7 @@ pub async fn start_modelinspector_api(
         &targets,
         context_tokens,
         |message| {
-            crate::progress::emit_benchmark_output(&output_app, message);
+            crate::progress::emit_api_output(&output_app, message);
         },
     ) {
         Ok(session) => session,
@@ -266,7 +266,7 @@ pub async fn start_modelinspector_api(
         return Err("ModelInspector API startup cancelled".to_string());
     }
     if let Some(app) = server_state.app.as_ref() {
-        crate::progress::emit_benchmark_output(
+        crate::progress::emit_api_output(
             app,
             format!("ModelInspector API ready at {base_url}"),
         );
@@ -893,7 +893,7 @@ fn emit_completion_output(state: &HttpApiState, diagnostics: &ChatCompletionDiag
     };
     let count = state.completion_count.fetch_add(1, Ordering::SeqCst) + 1;
     if let Some(app) = state.app.as_ref() {
-        crate::progress::emit_benchmark_output(
+        crate::progress::emit_api_output(
             app,
             benchmark_completion_output(label, count, state.benchmark_sample_count, diagnostics),
         );
@@ -910,7 +910,7 @@ fn emit_thinking_override(
     let (Some(label), Some(app)) = (state.benchmark_label.as_deref(), state.app.as_ref()) else {
         return;
     };
-    crate::progress::emit_benchmark_output(
+    crate::progress::emit_api_output(
         app,
         &format!(
             "{label}: request chat_template_kwargs.enable_thinking={} overrides configured default={}",

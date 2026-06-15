@@ -16,6 +16,12 @@ pub struct BenchmarkOutputEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiOutputEvent {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub enum ProgressStage {
     #[serde(rename = "requantizing")]
     Requantizing,
@@ -85,4 +91,13 @@ pub fn emit_benchmark_output(app: &AppHandle, message: impl Into<String>) {
     }
 
     let _ = app.emit("benchmark-output", BenchmarkOutputEvent { message });
+}
+
+pub fn emit_api_output(app: &AppHandle, message: impl Into<String>) {
+    let message = message.into();
+    if message.trim().is_empty() {
+        return;
+    }
+
+    let _ = app.emit("api-output", ApiOutputEvent { message });
 }

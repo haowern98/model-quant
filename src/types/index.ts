@@ -190,6 +190,10 @@ export interface BenchmarkOutputEvent {
   message: string;
 }
 
+export interface ApiOutputEvent {
+  message: string;
+}
+
 export interface BenchmarkOutputLine {
   id: number;
   timestamp: string;

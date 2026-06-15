@@ -14,6 +14,7 @@ interface BottomPanelProps {
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
   outputLines: BenchmarkOutputLine[];
+  apiOutputLines: BenchmarkOutputLine[];
 }
 
 export function BottomPanel({
@@ -21,8 +22,10 @@ export function BottomPanel({
   assignments,
   profile,
   outputLines,
+  apiOutputLines,
 }: BottomPanelProps) {
-  const [activeTab, setActiveTab] = useState<"size" | "hardware" | "output">("size");
+  const [activeTab, setActiveTab] =
+    useState<"size" | "hardware" | "output" | "apiOutput">("size");
   const totalTargetBytes = tensors.reduce((sum, tensor) => {
     const quant = assignments[tensor.name] ?? toTargetQuant(tensor.currentQuant);
     const bits = QUANT_TYPES.find((item) => item.value === quant)?.bitsPerWeight ?? 4.5;
@@ -72,11 +75,31 @@ export function BottomPanel({
         >
           OUTPUT
         </button>
+        <button
+          type="button"
+          role="tab"
+          className={activeTab === "apiOutput" ? "active" : ""}
+          aria-label="API OUTPUT"
+          aria-selected={activeTab === "apiOutput"}
+          onClick={() => setActiveTab("apiOutput")}
+        >
+          API OUTPUT
+        </button>
       </div>
       {activeTab === "hardware" ? (
         <HardwarePanel />
       ) : activeTab === "output" ? (
-        <OutputPanel outputLines={outputLines} />
+        <OutputPanel
+          outputLines={outputLines}
+          ariaLabel="Benchmark output"
+          emptyMessage="No benchmark output yet."
+        />
+      ) : activeTab === "apiOutput" ? (
+        <OutputPanel
+          outputLines={apiOutputLines}
+          ariaLabel="API output"
+          emptyMessage="No API output yet."
+        />
       ) : (
         <div className="bottom-content">
           <Metric label="FP16" value={formatBytes(f16Size)} />
@@ -94,7 +117,15 @@ export function BottomPanel({
   );
 }
 
-function OutputPanel({ outputLines }: { outputLines: BenchmarkOutputLine[] }) {
+function OutputPanel({
+  outputLines,
+  ariaLabel,
+  emptyMessage,
+}: {
+  outputLines: BenchmarkOutputLine[];
+  ariaLabel: string;
+  emptyMessage: string;
+}) {
   const outputRef = useRef<HTMLDivElement | null>(null);
   const followTailRef = useRef(true);
 
@@ -109,7 +140,7 @@ function OutputPanel({ outputLines }: { outputLines: BenchmarkOutputLine[] }) {
       ref={outputRef}
       className="bottom-output"
       role="log"
-      aria-label="Benchmark output"
+      aria-label={ariaLabel}
       onScroll={(event) => {
         const output = event.currentTarget;
         followTailRef.current =
@@ -117,7 +148,7 @@ function OutputPanel({ outputLines }: { outputLines: BenchmarkOutputLine[] }) {
       }}
     >
       {outputLines.length === 0 ? (
-        <p className="bottom-output-empty">No benchmark output yet.</p>
+        <p className="bottom-output-empty">{emptyMessage}</p>
       ) : (
         outputLines.map((line) => (
           <div className="bottom-output-line" key={line.id}>

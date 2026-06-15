@@ -157,7 +157,7 @@ function App() {
     requestCancellation,
     endOperation,
   } = useProgress();
-  const { outputLines } = useBenchmarkOutputLog();
+  const { outputLines, apiOutputLines } = useBenchmarkOutputLog();
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
@@ -567,6 +567,7 @@ function App() {
           cancelling={cancelling}
           progress={progress}
           outputLines={outputLines}
+          apiOutputLines={apiOutputLines}
           evalPreset={recipeEvalPreset}
           testMode={recipeTestMode}
           selectedRunIds={selectedRunIds}

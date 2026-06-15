@@ -42,6 +42,7 @@ interface EditorPaneProps {
   cancelling: boolean;
   progress: ProgressEvent | null;
   outputLines: BenchmarkOutputLine[];
+  apiOutputLines: BenchmarkOutputLine[];
   openEditors: EditorTab[];
   activeEditorId: string | null;
   benchmarkResult: BenchmarkResult | null;
@@ -91,6 +92,7 @@ export function EditorPane({
   cancelling,
   progress,
   outputLines,
+  apiOutputLines,
   openEditors,
   activeEditorId,
   benchmarkResult,
@@ -281,6 +283,7 @@ export function EditorPane({
         assignments={assignments}
         profile={profile}
         outputLines={outputLines}
+        apiOutputLines={apiOutputLines}
       />
     </main>
   );
