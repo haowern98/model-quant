@@ -147,8 +147,16 @@ bool parse_quant_type(const char * value, ggml_type & out_type) {
         out_type = GGML_TYPE_Q6_K;
     } else if (quant == "Q5_K" || quant == "Q5_K_M") {
         out_type = GGML_TYPE_Q5_K;
+    } else if (quant == "Q5_1") {
+        out_type = GGML_TYPE_Q5_1;
+    } else if (quant == "Q5_0") {
+        out_type = GGML_TYPE_Q5_0;
     } else if (quant == "Q4_K" || quant == "Q4_K_M") {
         out_type = GGML_TYPE_Q4_K;
+    } else if (quant == "Q4_1") {
+        out_type = GGML_TYPE_Q4_1;
+    } else if (quant == "Q4_0") {
+        out_type = GGML_TYPE_Q4_0;
     } else if (quant == "Q3_K" || quant == "Q3_K_M") {
         out_type = GGML_TYPE_Q3_K;
     } else if (quant == "Q2_K") {
@@ -168,7 +176,11 @@ const char * display_quant_type(ggml_type type) {
         case GGML_TYPE_Q8_0: return "Q8_0";
         case GGML_TYPE_Q6_K: return "Q6_K";
         case GGML_TYPE_Q5_K: return "Q5_K";
+        case GGML_TYPE_Q5_1: return "Q5_1";
+        case GGML_TYPE_Q5_0: return "Q5_0";
         case GGML_TYPE_Q4_K: return "Q4_K";
+        case GGML_TYPE_Q4_1: return "Q4_1";
+        case GGML_TYPE_Q4_0: return "Q4_0";
         case GGML_TYPE_Q3_K: return "Q3_K";
         case GGML_TYPE_Q2_K: return "Q2_K";
         default: return ggml_type_name(type);
@@ -198,13 +210,71 @@ bool is_supported_recipe_target(ggml_type target_type) {
         case GGML_TYPE_Q8_0:
         case GGML_TYPE_Q6_K:
         case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q5_1:
+        case GGML_TYPE_Q5_0:
         case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q4_0:
         case GGML_TYPE_Q3_K:
         case GGML_TYPE_Q2_K:
             return true;
         default:
             return false;
     }
+}
+
+enum class RecipeQuantFamily {
+    Full,
+    Q8,
+    Legacy,
+    K,
+    Other,
+};
+
+RecipeQuantFamily recipe_quant_family(ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_F32:
+        case GGML_TYPE_BF16:
+        case GGML_TYPE_F16:
+            return RecipeQuantFamily::Full;
+        case GGML_TYPE_Q8_0:
+            return RecipeQuantFamily::Q8;
+        case GGML_TYPE_Q5_1:
+        case GGML_TYPE_Q5_0:
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q4_0:
+            return RecipeQuantFamily::Legacy;
+        case GGML_TYPE_Q6_K:
+        case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q3_K:
+        case GGML_TYPE_Q2_K:
+            return RecipeQuantFamily::K;
+        default:
+            return RecipeQuantFamily::Other;
+    }
+}
+
+bool recipe_quant_family_allows(ggml_type current_type, ggml_type target_type) {
+    const RecipeQuantFamily current_family = recipe_quant_family(current_type);
+    const RecipeQuantFamily target_family = recipe_quant_family(target_type);
+
+    switch (current_family) {
+        case RecipeQuantFamily::Full:
+            return target_family != RecipeQuantFamily::Other;
+        case RecipeQuantFamily::Q8:
+            return target_family == RecipeQuantFamily::Q8
+                || target_family == RecipeQuantFamily::Legacy
+                || target_family == RecipeQuantFamily::K;
+        case RecipeQuantFamily::Legacy:
+            return target_family == RecipeQuantFamily::Legacy;
+        case RecipeQuantFamily::K:
+            return target_family == RecipeQuantFamily::K;
+        case RecipeQuantFamily::Other:
+            return false;
+    }
+
+    return false;
 }
 
 bool can_decode_source_to_f32(ggml_type current_type) {
@@ -222,6 +292,10 @@ bool supports_recipe_conversion(std::string_view name, ggml_type current_type, g
     }
 
     if (estimate_type_size(1024, current_type, target_type) > 1024) {
+        return false;
+    }
+
+    if (!recipe_quant_family_allows(current_type, target_type)) {
         return false;
     }
 
