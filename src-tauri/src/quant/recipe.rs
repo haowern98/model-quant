@@ -10,8 +10,12 @@ pub enum QuantType {
     Q6_K,
     Q5_K,
     Q5_K_M,
+    Q5_1,
+    Q5_0,
     Q4_K,
     Q4_K_M,
+    Q4_1,
+    Q4_0,
     Q3_K,
     Q3_K_M,
     Q2_K,
@@ -27,8 +31,12 @@ impl QuantType {
             QuantType::Q6_K => 6.6,
             QuantType::Q5_K => 5.5,
             QuantType::Q5_K_M => 5.3,
+            QuantType::Q5_1 => 6.0,
+            QuantType::Q5_0 => 5.5,
             QuantType::Q4_K => 4.5,
             QuantType::Q4_K_M => 4.8,
+            QuantType::Q4_1 => 5.0,
+            QuantType::Q4_0 => 4.5,
             QuantType::Q3_K => 3.4,
             QuantType::Q3_K_M => 3.9,
             QuantType::Q2_K => 2.6,
@@ -156,8 +164,12 @@ fn is_quantized_target(quant_type: &QuantType) -> bool {
             | QuantType::Q6_K
             | QuantType::Q5_K
             | QuantType::Q5_K_M
+            | QuantType::Q5_1
+            | QuantType::Q5_0
             | QuantType::Q4_K
             | QuantType::Q4_K_M
+            | QuantType::Q4_1
+            | QuantType::Q4_0
             | QuantType::Q3_K
             | QuantType::Q3_K_M
             | QuantType::Q2_K

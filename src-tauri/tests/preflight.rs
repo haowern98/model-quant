@@ -49,7 +49,11 @@ fn preflight_allows_matrix_weights() {
             "Q8_0".to_string(),
             "Q6_K".to_string(),
             "Q5_K".to_string(),
+            "Q5_1".to_string(),
+            "Q5_0".to_string(),
             "Q4_K".to_string(),
+            "Q4_1".to_string(),
+            "Q4_0".to_string(),
             "Q3_K".to_string(),
             "Q2_K".to_string(),
         ]
@@ -73,7 +77,11 @@ fn preflight_filters_q8_tensor_to_q8_and_smaller_targets() {
             "Q8_0".to_string(),
             "Q6_K".to_string(),
             "Q5_K".to_string(),
+            "Q5_1".to_string(),
+            "Q5_0".to_string(),
             "Q4_K".to_string(),
+            "Q4_1".to_string(),
+            "Q4_0".to_string(),
             "Q3_K".to_string(),
             "Q2_K".to_string(),
         ]
@@ -93,6 +101,57 @@ fn preflight_filters_q4_tensor_to_q4_and_smaller_targets() {
     assert_eq!(
         result.allowed_target_quants,
         vec!["Q4_K".to_string(), "Q3_K".to_string(), "Q2_K".to_string()]
+    );
+}
+
+#[test]
+fn preflight_filters_legacy_q5_source_to_legacy_targets_only() {
+    let result = analyze_tensor_quant_preflight(&tensor_with_quant(
+        "layers.0.attn_q.weight",
+        vec![2048, 2048],
+        "attention",
+        "Q5_0",
+    ));
+
+    assert!(result.can_quantize);
+    assert_eq!(
+        result.allowed_target_quants,
+        vec!["Q5_0".to_string(), "Q4_1".to_string(), "Q4_0".to_string()]
+    );
+}
+
+#[test]
+fn preflight_filters_legacy_q4_source_to_legacy_targets_only() {
+    let result = analyze_tensor_quant_preflight(&tensor_with_quant(
+        "layers.0.attn_q.weight",
+        vec![2048, 2048],
+        "attention",
+        "Q4_0",
+    ));
+
+    assert!(result.can_quantize);
+    assert_eq!(result.allowed_target_quants, vec!["Q4_0".to_string()]);
+}
+
+#[test]
+fn preflight_filters_k_source_to_k_targets_only() {
+    let result = analyze_tensor_quant_preflight(&tensor_with_quant(
+        "layers.0.attn_q.weight",
+        vec![2048, 2048],
+        "attention",
+        "Q6_K",
+    ));
+
+    assert!(result.can_quantize);
+    assert_eq!(
+        result.allowed_target_quants,
+        vec![
+            "Q6_K".to_string(),
+            "Q5_K".to_string(),
+            "Q4_K".to_string(),
+            "Q3_K".to_string(),
+            "Q2_K".to_string(),
+        ]
     );
 }
 
@@ -137,12 +196,20 @@ fn preflight_checks_each_target_quant_block_size() {
     assert!(result.can_quantize);
     assert_eq!(
         result.allowed_target_quants,
-        vec!["BF16".to_string(), "F16".to_string(), "Q8_0".to_string(),]
+        vec![
+            "BF16".to_string(),
+            "F16".to_string(),
+            "Q8_0".to_string(),
+            "Q5_1".to_string(),
+            "Q5_0".to_string(),
+            "Q4_1".to_string(),
+            "Q4_0".to_string(),
+        ]
     );
 }
 
 #[test]
-fn preflight_keeps_only_current_quant_when_no_smaller_target_fits() {
+fn preflight_keeps_only_q8_and_legacy_targets_when_k_blocks_do_not_fit() {
     let result = analyze_tensor_quant_preflight(&tensor_with_quant(
         "layers.0.attn_q.weight",
         vec![128, 2048],
@@ -151,5 +218,14 @@ fn preflight_keeps_only_current_quant_when_no_smaller_target_fits() {
     ));
 
     assert!(result.can_quantize);
-    assert_eq!(result.allowed_target_quants, vec!["Q8_0".to_string()]);
+    assert_eq!(
+        result.allowed_target_quants,
+        vec![
+            "Q8_0".to_string(),
+            "Q5_1".to_string(),
+            "Q5_0".to_string(),
+            "Q4_1".to_string(),
+            "Q4_0".to_string(),
+        ]
+    );
 }
