@@ -61,6 +61,7 @@ const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
   contextWindow: "",
   sampleLimit: "",
   temperature: "0",
+  thinking: "off",
 };
 
 function parseOptionalIntegerField(
@@ -112,6 +113,7 @@ function resolveGpqaConfigInput(
     contextWindow,
     sampleLimit,
     temperature,
+    thinking: input.thinking,
   };
 }
 
@@ -411,6 +413,7 @@ function App() {
         const apiStatus = await startModelInspectorApi({
           benchmarkLabel: "ModelInspector API",
           contextWindow: resolvedGpqaConfig.contextWindow,
+          defaultEnableThinking: resolvedGpqaConfig.thinking === "on",
         });
         if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");

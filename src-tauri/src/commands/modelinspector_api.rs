@@ -147,6 +147,7 @@ pub async fn start_modelinspector_api(
     benchmark_label: Option<String>,
     benchmark_sample_count: Option<u64>,
     context_window: Option<u32>,
+    default_enable_thinking: Option<bool>,
     app: AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     recipe_state: State<'_, RecipeStore>,
@@ -231,6 +232,7 @@ pub async fn start_modelinspector_api(
         session: Some(Mutex::new(session)),
         benchmark_label,
         benchmark_sample_count,
+        default_enable_thinking,
         completion_count: AtomicU64::new(0),
         app: Some(app),
     });
@@ -326,6 +328,7 @@ struct HttpApiState {
     session: Option<Mutex<RecipeChatSession>>,
     benchmark_label: Option<String>,
     benchmark_sample_count: Option<u64>,
+    default_enable_thinking: Option<bool>,
     completion_count: AtomicU64,
     app: Option<AppHandle>,
 }
@@ -405,14 +408,59 @@ struct ChatGenerationConfig {
     seed: Option<i64>,
     add_generation_prompt: Option<bool>,
     chat_template_kwargs: Option<Value>,
+    thinking_override: Option<ChatTemplateThinkingOverride>,
     reasoning_format: Option<String>,
 }
 
-fn chat_generation_config(payload: &ChatCompletionRequest) -> ChatGenerationConfig {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChatTemplateThinkingOverride {
+    configured: bool,
+    requested: bool,
+}
+
+fn chat_template_kwargs_with_thinking_default(
+    request_kwargs: Option<&Value>,
+    default_enable_thinking: Option<bool>,
+) -> (Option<Value>, Option<ChatTemplateThinkingOverride>) {
+    let configured = default_enable_thinking.unwrap_or(false);
+    match request_kwargs {
+        Some(Value::Object(values)) => {
+            let mut values = values.clone();
+            let thinking_override = match values.get("enable_thinking") {
+                Some(value) => value.as_bool().and_then(|requested| {
+                    (requested != configured).then_some(ChatTemplateThinkingOverride {
+                        configured,
+                        requested,
+                    })
+                }),
+                None => {
+                    values.insert("enable_thinking".to_string(), Value::Bool(configured));
+                    None
+                }
+            };
+            (Some(Value::Object(values)), thinking_override)
+        }
+        Some(value) => (Some(value.clone()), None),
+        None => {
+            let mut values = serde_json::Map::new();
+            values.insert("enable_thinking".to_string(), Value::Bool(configured));
+            (Some(Value::Object(values)), None)
+        }
+    }
+}
+
+fn chat_generation_config(
+    payload: &ChatCompletionRequest,
+    default_enable_thinking: Option<bool>,
+) -> ChatGenerationConfig {
     let _accepted_but_ignored_token_limits = (
         payload.max_tokens,
         payload.max_completion_tokens,
         payload.n_predict,
+    );
+    let (chat_template_kwargs, thinking_override) = chat_template_kwargs_with_thinking_default(
+        payload.chat_template_kwargs.as_ref(),
+        default_enable_thinking,
     );
     ChatGenerationConfig {
         stop: stop_strings(payload.stop.as_ref()),
@@ -431,7 +479,8 @@ fn chat_generation_config(payload: &ChatCompletionRequest) -> ChatGenerationConf
         dry_penalty_last_n: payload.dry_penalty_last_n,
         seed: payload.seed,
         add_generation_prompt: payload.add_generation_prompt,
-        chat_template_kwargs: payload.chat_template_kwargs.clone(),
+        chat_template_kwargs,
+        thinking_override,
         reasoning_format: payload.reasoning_format.clone(),
     }
 }
@@ -706,7 +755,8 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         );
     }
 
-    let config = chat_generation_config(&payload);
+    let config = chat_generation_config(&payload, state.default_enable_thinking);
+    emit_thinking_override(state, config.thinking_override);
     let messages = match chat_messages_for_generation(payload.messages.as_deref()) {
         Ok(messages) => messages,
         Err(message) => {
@@ -848,6 +898,25 @@ fn emit_completion_output(state: &HttpApiState, diagnostics: &ChatCompletionDiag
             benchmark_completion_output(label, count, state.benchmark_sample_count, diagnostics),
         );
     }
+}
+
+fn emit_thinking_override(
+    state: &HttpApiState,
+    thinking_override: Option<ChatTemplateThinkingOverride>,
+) {
+    let Some(thinking_override) = thinking_override else {
+        return;
+    };
+    let (Some(label), Some(app)) = (state.benchmark_label.as_deref(), state.app.as_ref()) else {
+        return;
+    };
+    crate::progress::emit_benchmark_output(
+        app,
+        &format!(
+            "{label}: request chat_template_kwargs.enable_thinking={} overrides configured default={}",
+            thinking_override.requested, thinking_override.configured
+        ),
+    );
 }
 
 fn assistant_message_json(content: &str, reasoning_content: Option<&str>) -> Value {
@@ -1042,6 +1111,7 @@ mod tests {
             session: None,
             benchmark_label: None,
             benchmark_sample_count: None,
+            default_enable_thinking: None,
             completion_count: AtomicU64::new(0),
             app: None,
         }
@@ -1168,7 +1238,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = chat_generation_config(&payload);
+        let config = chat_generation_config(&payload, None);
 
         assert_eq!(config.stop, vec!["</s>", "<|im_end|>"]);
         assert_eq!(config.temperature, Some(0.2));
@@ -1217,7 +1287,7 @@ mod tests {
         }))
         .unwrap();
 
-        let params = chat_generation_config(&payload).to_native_params();
+        let params = chat_generation_config(&payload, None).to_native_params();
 
         assert_eq!(params.max_tokens, API_CHAT_UNTIL_CONTEXT_MAX_TOKENS);
         assert_eq!(params.add_generation_prompt, 0);
@@ -1253,7 +1323,7 @@ mod tests {
         }))
         .unwrap();
 
-        let config = chat_generation_config(&payload);
+        let config = chat_generation_config(&payload, None);
 
         assert_eq!(config.native_stop_strings(), vec!["</s>", "<|im_end|>"]);
     }
@@ -1268,13 +1338,73 @@ mod tests {
         }))
         .unwrap();
 
-        let config = chat_generation_config(&payload);
+        let config = chat_generation_config(&payload, None);
 
         assert_eq!(
             config.native_chat_template_kwargs_json().as_deref(),
             Some("{\"enable_thinking\":false}")
         );
         assert_eq!(config.native_reasoning_format(), Some("deepseek"));
+    }
+
+    #[test]
+    fn defaults_chat_template_thinking_to_disabled_when_request_omits_it() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}]
+        }))
+        .unwrap();
+
+        let config = chat_generation_config(&payload, None);
+        let kwargs: Value =
+            serde_json::from_str(config.native_chat_template_kwargs_json().unwrap().as_str())
+                .unwrap();
+
+        assert_eq!(kwargs["enable_thinking"], false);
+        assert_eq!(config.thinking_override, None);
+    }
+
+    #[test]
+    fn applies_configured_template_thinking_default_when_request_omits_it() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "chat_template_kwargs": {"foo": "bar"}
+        }))
+        .unwrap();
+
+        let config = chat_generation_config(&payload, Some(true));
+        let kwargs: Value =
+            serde_json::from_str(config.native_chat_template_kwargs_json().unwrap().as_str())
+                .unwrap();
+
+        assert_eq!(kwargs["foo"], "bar");
+        assert_eq!(kwargs["enable_thinking"], true);
+        assert_eq!(config.thinking_override, None);
+    }
+
+    #[test]
+    fn preserves_request_template_thinking_and_records_override() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "chat_template_kwargs": {"enable_thinking": false}
+        }))
+        .unwrap();
+
+        let config = chat_generation_config(&payload, Some(true));
+        let kwargs: Value =
+            serde_json::from_str(config.native_chat_template_kwargs_json().unwrap().as_str())
+                .unwrap();
+
+        assert_eq!(kwargs["enable_thinking"], false);
+        assert_eq!(
+            config.thinking_override,
+            Some(ChatTemplateThinkingOverride {
+                configured: true,
+                requested: false,
+            })
+        );
     }
 
     #[test]

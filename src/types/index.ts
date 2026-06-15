@@ -170,6 +170,7 @@ export type BenchmarkRunId =
   | "supergpqa"
   | "claw_eval";
 export type GpqaShotMode = "zero_shot" | "five_shot_cot";
+export type GpqaThinkingMode = "off" | "on";
 
 // ---- Progress ----
 
@@ -264,12 +265,14 @@ export interface GpqaBenchmarkConfigInput {
   contextWindow: string;
   sampleLimit: string;
   temperature: string;
+  thinking: GpqaThinkingMode;
 }
 
 export interface GpqaBenchmarkConfig {
   contextWindow: number;
   sampleLimit: number;
   temperature: number;
+  thinking: GpqaThinkingMode;
 }
 
 export interface RecipeQualityEval {

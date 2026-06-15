@@ -63,6 +63,20 @@ pub struct GpqaRunConfig {
     pub context_window: Option<u32>,
     pub sample_limit: Option<u64>,
     pub temperature: Option<f64>,
+    pub thinking: Option<GpqaThinkingMode>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum GpqaThinkingMode {
+    Off,
+    On,
+}
+
+impl GpqaThinkingMode {
+    fn enable_thinking(self) -> bool {
+        matches!(self, Self::On)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -70,6 +84,7 @@ struct EffectiveGpqaRunConfig {
     context_window: u32,
     sample_limit: u64,
     temperature: f64,
+    thinking: GpqaThinkingMode,
 }
 
 fn effective_gpqa_run_config(
@@ -79,6 +94,7 @@ fn effective_gpqa_run_config(
         context_window: None,
         sample_limit: None,
         temperature: None,
+        thinking: None,
     });
     let context_window = config.context_window.unwrap_or(GPQA_DEFAULT_CONTEXT_WINDOW);
     if context_window == 0 {
@@ -96,18 +112,23 @@ fn effective_gpqa_run_config(
     if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
         return Err("GPQA temperature must be between 0 and 2.".to_string());
     }
+    let thinking = config.thinking.unwrap_or(GpqaThinkingMode::Off);
 
     Ok(EffectiveGpqaRunConfig {
         context_window,
         sample_limit,
         temperature,
+        thinking,
     })
 }
 
 fn gpqa_generation_config(effective_config: &EffectiveGpqaRunConfig) -> serde_json::Value {
     json!({
         "temperature": effective_config.temperature,
-        "stream": false
+        "stream": false,
+        "chat_template_kwargs": {
+            "enable_thinking": effective_config.thinking.enable_thinking()
+        }
     })
 }
 
@@ -1229,6 +1250,7 @@ mod tests {
             context_window: None,
             sample_limit: None,
             temperature: None,
+            thinking: None,
         }))
         .unwrap();
 
@@ -1238,6 +1260,7 @@ mod tests {
                 context_window: 20_000,
                 sample_limit: 198,
                 temperature: 0.0,
+                thinking: GpqaThinkingMode::Off,
             }
         );
     }
@@ -1248,6 +1271,7 @@ mod tests {
             context_window: Some(20_000),
             sample_limit: Some(12),
             temperature: Some(0.2),
+            thinking: Some(GpqaThinkingMode::On),
         }))
         .unwrap();
 
@@ -1257,6 +1281,7 @@ mod tests {
                 context_window: 20_000,
                 sample_limit: 12,
                 temperature: 0.2,
+                thinking: GpqaThinkingMode::On,
             }
         );
     }
@@ -1267,18 +1292,21 @@ mod tests {
             context_window: Some(0),
             sample_limit: Some(198),
             temperature: Some(0.0),
+            thinking: None,
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
             sample_limit: Some(199),
             temperature: Some(0.0),
             context_window: Some(20_000),
+            thinking: None,
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
             context_window: Some(20_000),
             sample_limit: Some(198),
             temperature: Some(2.1),
+            thinking: None,
         }))
         .is_err());
     }
@@ -1289,14 +1317,36 @@ mod tests {
             context_window: 20_000,
             sample_limit: 10,
             temperature: 0.0,
+            thinking: GpqaThinkingMode::Off,
         };
 
         let generation_config = gpqa_generation_config(&config);
 
         assert_eq!(generation_config["temperature"], 0.0);
         assert_eq!(generation_config["stream"], false);
+        assert_eq!(
+            generation_config["chat_template_kwargs"]["enable_thinking"],
+            false
+        );
         assert!(generation_config.get("max_tokens").is_none());
         assert!(generation_config.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn evalscope_generation_config_can_enable_template_thinking() {
+        let config = EffectiveGpqaRunConfig {
+            context_window: 20_000,
+            sample_limit: 10,
+            temperature: 0.0,
+            thinking: GpqaThinkingMode::On,
+        };
+
+        let generation_config = gpqa_generation_config(&config);
+
+        assert_eq!(
+            generation_config["chat_template_kwargs"]["enable_thinking"],
+            true
+        );
     }
 
     #[test]

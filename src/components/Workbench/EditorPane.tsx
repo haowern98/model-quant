@@ -14,6 +14,7 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  GpqaThinkingMode,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -317,6 +318,9 @@ function GpqaDetailsView({
       onConfigChange({ ...config, temperature: value });
     }
   };
+  const updateThinking = (thinking: GpqaThinkingMode) => {
+    onConfigChange({ ...config, thinking });
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -350,6 +354,16 @@ function GpqaDetailsView({
             ]}
           />
           <BenchmarkInfoRow label="Reasoning" value="CoT" />
+          <BenchmarkSelectRow
+            label="Thinking"
+            selectLabel="GPQA Diamond thinking"
+            value={config.thinking}
+            onChange={updateThinking}
+            options={[
+              { value: "off", label: "Off" },
+              { value: "on", label: "On" },
+            ]}
+          />
           <BenchmarkInputRow
             label="Temperature"
             inputLabel="GPQA Diamond temperature"
@@ -520,7 +534,7 @@ function BenchmarkInputRow({
   );
 }
 
-function BenchmarkSelectRow({
+function BenchmarkSelectRow<T extends string>({
   label,
   selectLabel,
   value,
@@ -529,9 +543,9 @@ function BenchmarkSelectRow({
 }: {
   label: string;
   selectLabel: string;
-  value: GpqaShotMode;
-  onChange: (value: GpqaShotMode) => void;
-  options: { value: GpqaShotMode; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const selectedOption = options.find((option) => option.value === value) ?? options[0];
