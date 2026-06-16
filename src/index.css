@@ -775,14 +775,20 @@ body.resizing-bottom-panel * {
 }
 
 .benchmark-card-icon {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
-  border-radius: 5px;
-  background: #333333;
   color: var(--vscode-blue);
-  font-size: 16px;
+  font-size: 20px;
+}
+
+.benchmark-card-icon.codicon {
+  width: 22px;
+  height: 22px;
+  font-size: 22px;
+  line-height: 22px;
+  transform: translateX(4px);
 }
 
 .benchmark-card-copy {
