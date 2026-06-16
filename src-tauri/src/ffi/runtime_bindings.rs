@@ -87,7 +87,7 @@ impl Default for ChatGenerationParams {
             top_p: 0.95,
             min_p: 0.05,
             typical_p: 1.0,
-            repeat_penalty: 1.0,
+            repeat_penalty: 1.1,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
             dry_multiplier: 0.0,
