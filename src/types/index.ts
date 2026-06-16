@@ -192,6 +192,9 @@ export interface BenchmarkOutputEvent {
 
 export interface ApiOutputEvent {
   message: string;
+  mode?: "line" | "append";
+  stream?: "reasoning" | "visible" | null;
+  header?: string | null;
 }
 
 export interface BenchmarkOutputLine {
