@@ -16,6 +16,29 @@ pub struct BenchmarkOutputEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiOutputEvent {
+    pub message: String,
+    pub mode: ApiOutputMode,
+    pub stream: Option<ApiOutputStream>,
+    pub header: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApiOutputMode {
+    Line,
+    Append,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApiOutputStream {
+    Reasoning,
+    Visible,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub enum ProgressStage {
     #[serde(rename = "requantizing")]
     Requantizing,
@@ -85,4 +108,38 @@ pub fn emit_benchmark_output(app: &AppHandle, message: impl Into<String>) {
     }
 
     let _ = app.emit("benchmark-output", BenchmarkOutputEvent { message });
+}
+
+pub fn emit_api_output(app: &AppHandle, message: impl Into<String>) {
+    let message = message.into();
+    if message.trim().is_empty() {
+        return;
+    }
+
+    let _ = app.emit("api-output", api_output_event(message));
+}
+
+fn api_output_event(message: String) -> ApiOutputEvent {
+    if let Some((prefix, delta)) = message.split_once(" reasoning delta\n") {
+        return ApiOutputEvent {
+            message: delta.to_string(),
+            mode: ApiOutputMode::Append,
+            stream: Some(ApiOutputStream::Reasoning),
+            header: Some(format!("{prefix} reasoning output")),
+        };
+    }
+    if let Some((prefix, delta)) = message.split_once(" visible delta\n") {
+        return ApiOutputEvent {
+            message: delta.to_string(),
+            mode: ApiOutputMode::Append,
+            stream: Some(ApiOutputStream::Visible),
+            header: Some(format!("{prefix} visible output")),
+        };
+    }
+    ApiOutputEvent {
+        message,
+        mode: ApiOutputMode::Line,
+        stream: None,
+        header: None,
+    }
 }

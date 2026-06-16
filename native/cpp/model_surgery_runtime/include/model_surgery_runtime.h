@@ -88,6 +88,10 @@ typedef struct ms_chat_generation_result {
 typedef struct ms_runtime_chat_session ms_runtime_chat_session;
 
 typedef void (*ms_runtime_log_callback)(const char * message, void * user_data);
+typedef int32_t (*ms_chat_stream_callback)(
+    const char * text_delta,
+    const char * reasoning_delta,
+    void * user_data);
 
 typedef struct ms_runtime_chat_session_counters {
     uint64_t model_load_count;
@@ -256,6 +260,18 @@ MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session(
     uint64_t out_text_capacity,
     char * out_reasoning_text,
     uint64_t out_reasoning_text_capacity,
+    ms_chat_generation_result * out_result);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
     ms_chat_generation_result * out_result);
 MS_RUNTIME_API int32_t ms_runtime_get_recipe_chat_session_counters(
     const ms_runtime_chat_session * session,

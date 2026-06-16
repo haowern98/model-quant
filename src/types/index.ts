@@ -8,8 +8,12 @@ export type QuantType =
   | "Q6_K"
   | "Q5_K"
   | "Q5_K_M"
+  | "Q5_1"
+  | "Q5_0"
   | "Q4_K"
   | "Q4_K_M"
+  | "Q4_1"
+  | "Q4_0"
   | "Q3_K"
   | "Q3_K_M"
   | "Q2_K";
@@ -51,7 +55,31 @@ export const QUANT_TYPES: {
     quality: "Very high quality",
   },
   { value: "Q5_K", label: "Q5_K", bitsPerWeight: 5.5, quality: "High quality" },
+  {
+    value: "Q5_1",
+    label: "Q5_1",
+    bitsPerWeight: 6.0,
+    quality: "Legacy high quality",
+  },
+  {
+    value: "Q5_0",
+    label: "Q5_0",
+    bitsPerWeight: 5.5,
+    quality: "Legacy high quality",
+  },
   { value: "Q4_K", label: "Q4_K", bitsPerWeight: 4.5, quality: "Good" },
+  {
+    value: "Q4_1",
+    label: "Q4_1",
+    bitsPerWeight: 5.0,
+    quality: "Legacy good",
+  },
+  {
+    value: "Q4_0",
+    label: "Q4_0",
+    bitsPerWeight: 4.5,
+    quality: "Legacy good",
+  },
   { value: "Q3_K", label: "Q3_K", bitsPerWeight: 3.4, quality: "Passable" },
   {
     value: "Q2_K",
@@ -142,6 +170,7 @@ export type BenchmarkRunId =
   | "supergpqa"
   | "claw_eval";
 export type GpqaShotMode = "zero_shot" | "five_shot_cot";
+export type GpqaThinkingMode = "off" | "on";
 
 // ---- Progress ----
 
@@ -159,6 +188,13 @@ export interface ProgressEvent {
 
 export interface BenchmarkOutputEvent {
   message: string;
+}
+
+export interface ApiOutputEvent {
+  message: string;
+  mode?: "line" | "append";
+  stream?: "reasoning" | "visible" | null;
+  header?: string | null;
 }
 
 export interface BenchmarkOutputLine {
@@ -236,12 +272,24 @@ export interface GpqaBenchmarkConfigInput {
   contextWindow: string;
   sampleLimit: string;
   temperature: string;
+  thinking: GpqaThinkingMode;
+  topK: string;
+  repeatPenalty: string;
+  presencePenalty: string;
+  topP: string;
+  minP: string;
 }
 
 export interface GpqaBenchmarkConfig {
   contextWindow: number;
   sampleLimit: number;
   temperature: number;
+  thinking: GpqaThinkingMode;
+  topK?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  topP?: number;
+  minP?: number;
 }
 
 export interface RecipeQualityEval {

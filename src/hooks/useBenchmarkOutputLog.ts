@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { isTauri } from "@tauri-apps/api/core";
-import type { BenchmarkOutputEvent, BenchmarkOutputLine } from "../types";
+import type { ApiOutputEvent, BenchmarkOutputEvent, BenchmarkOutputLine } from "../types";
 
 function formatLogTimestamp(date: Date): string {
   const hours = date.getHours().toString().padStart(2, "0");
@@ -12,36 +12,68 @@ function formatLogTimestamp(date: Date): string {
 export function useBenchmarkOutputLog() {
   const nextId = useRef(1);
   const [outputLines, setOutputLines] = useState<BenchmarkOutputLine[]>([]);
+  const [apiOutputLines, setApiOutputLines] = useState<BenchmarkOutputLine[]>([]);
 
-  const appendOutput = (message: string) => {
+  const newOutputLine = (message: string): BenchmarkOutputLine => ({
+    id: nextId.current++,
+    timestamp: formatLogTimestamp(new Date()),
+    message,
+  });
+
+  const appendOutput = (
+    setLines: Dispatch<SetStateAction<BenchmarkOutputLine[]>>,
+    message: string,
+  ) => {
     const normalized = message.trimEnd();
     if (!normalized) return;
 
-    setOutputLines((current) => [
-      ...current,
-      {
-        id: nextId.current++,
-        timestamp: formatLogTimestamp(new Date()),
-        message: normalized,
-      },
-    ]);
+    setLines((current) => [...current, newOutputLine(normalized)]);
+  };
+
+  const appendApiOutput = (event: ApiOutputEvent) => {
+    if (event.mode !== "append") {
+      appendOutput(setApiOutputLines, event.message);
+      return;
+    }
+
+    const header = event.header ?? "";
+    setApiOutputLines((current) => {
+      const targetIndex = current.length - 1;
+      const target = current[targetIndex];
+      if (!header || !target?.message.startsWith(header)) {
+        return [...current, newOutputLine(`${header}\n${event.message}`)];
+      }
+
+      const next = [...current];
+      next[targetIndex] = {
+        ...target,
+        message: `${target.message}${event.message}`,
+      };
+      return next;
+    });
   };
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let unlistenBenchmark: (() => void) | undefined;
+    let unlistenApi: (() => void) | undefined;
     let cancelled = false;
 
     async function setup() {
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        const unlistenFn = await listen<BenchmarkOutputEvent>("benchmark-output", (event) => {
-          appendOutput(event.payload.message);
+        const unlistenBenchmarkFn = await listen<BenchmarkOutputEvent>("benchmark-output", (event) => {
+          appendOutput(setOutputLines, event.payload.message);
+        });
+        const unlistenApiFn = await listen<ApiOutputEvent>("api-output", (event) => {
+          appendApiOutput(event.payload);
         });
         if (cancelled) {
-          unlistenFn();
+          unlistenBenchmarkFn();
+          unlistenApiFn();
           return;
         }
-        unlisten = unlistenFn;
+        unlistenBenchmark = unlistenBenchmarkFn;
+        unlistenApi = unlistenApiFn;
       } catch {
         // Tauri event system is not available in browser-only runs.
       }
@@ -49,20 +81,28 @@ export function useBenchmarkOutputLog() {
 
     function handleBrowserOutput(event: Event) {
       const detail = (event as CustomEvent<BenchmarkOutputEvent>).detail;
-      if (detail?.message) appendOutput(detail.message);
+      if (detail?.message) appendOutput(setOutputLines, detail.message);
+    }
+
+    function handleBrowserApiOutput(event: Event) {
+      const detail = (event as CustomEvent<ApiOutputEvent>).detail;
+      if (detail?.message) appendApiOutput(detail);
     }
 
     if (isTauri()) {
       setup();
     } else {
       window.addEventListener("benchmark-output", handleBrowserOutput);
+      window.addEventListener("api-output", handleBrowserApiOutput);
     }
     return () => {
       cancelled = true;
       window.removeEventListener("benchmark-output", handleBrowserOutput);
-      unlisten?.();
+      window.removeEventListener("api-output", handleBrowserApiOutput);
+      unlistenBenchmark?.();
+      unlistenApi?.();
     };
   }, []);
 
-  return { outputLines };
+  return { outputLines, apiOutputLines };
 }

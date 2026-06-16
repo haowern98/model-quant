@@ -34,6 +34,42 @@ void test_k_quant_recipe_targets_are_supported() {
         GGML_TYPE_Q8_0));
 }
 
+void test_legacy_quant_recipe_targets_are_supported() {
+    ggml_type parsed = GGML_TYPE_COUNT;
+    assert(parse_quant_type("Q5_1", parsed));
+    assert(parsed == GGML_TYPE_Q5_1);
+    assert(parse_quant_type("Q5_0", parsed));
+    assert(parsed == GGML_TYPE_Q5_0);
+    assert(parse_quant_type("Q4_1", parsed));
+    assert(parsed == GGML_TYPE_Q4_1);
+    assert(parse_quant_type("Q4_0", parsed));
+    assert(parsed == GGML_TYPE_Q4_0);
+
+    assert(supports_recipe_conversion(
+        "layers.0.attn_q.weight",
+        GGML_TYPE_F16,
+        GGML_TYPE_Q4_0));
+    assert(supports_recipe_conversion(
+        "layers.0.attn_q.weight",
+        GGML_TYPE_Q8_0,
+        GGML_TYPE_Q4_1));
+    assert(supports_recipe_conversion(
+        "layers.0.attn_q.weight",
+        GGML_TYPE_Q5_1,
+        GGML_TYPE_Q5_0));
+}
+
+void test_recipe_conversion_rejects_cross_family_quant_targets() {
+    assert(!supports_recipe_conversion(
+        "layers.0.attn_q.weight",
+        GGML_TYPE_Q5_0,
+        GGML_TYPE_Q4_K));
+    assert(!supports_recipe_conversion(
+        "layers.0.attn_q.weight",
+        GGML_TYPE_Q6_K,
+        GGML_TYPE_Q4_0));
+}
+
 void test_quantized_source_rows_can_decode_to_f32() {
     constexpr int64_t n_per_row = 256;
     std::vector<float> source(n_per_row);
@@ -418,6 +454,8 @@ void test_persistent_chat_session_loads_once_and_resets_context_per_completion()
 
 int main() {
     test_k_quant_recipe_targets_are_supported();
+    test_legacy_quant_recipe_targets_are_supported();
+    test_recipe_conversion_rejects_cross_family_quant_targets();
     test_quantized_source_rows_can_decode_to_f32();
     test_recipe_target_verification_counts_matching_changed_targets();
     test_recipe_target_verification_reports_mismatch();

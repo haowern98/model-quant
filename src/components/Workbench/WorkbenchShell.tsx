@@ -42,6 +42,7 @@ interface WorkbenchShellProps {
   cancelling: boolean;
   progress: ProgressEvent | null;
   outputLines: BenchmarkOutputLine[];
+  apiOutputLines: BenchmarkOutputLine[];
   evalPreset: RecipeEvalPreset;
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
@@ -89,6 +90,7 @@ export function WorkbenchShell({
   cancelling,
   progress,
   outputLines,
+  apiOutputLines,
   evalPreset,
   testMode,
   selectedRunIds,
@@ -281,6 +283,7 @@ export function WorkbenchShell({
         cancelling={cancelling}
         progress={progress}
         outputLines={outputLines}
+        apiOutputLines={apiOutputLines}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
         benchmarkResult={benchmarkResult}

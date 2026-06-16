@@ -14,6 +14,7 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  GpqaThinkingMode,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -41,6 +42,7 @@ interface EditorPaneProps {
   cancelling: boolean;
   progress: ProgressEvent | null;
   outputLines: BenchmarkOutputLine[];
+  apiOutputLines: BenchmarkOutputLine[];
   openEditors: EditorTab[];
   activeEditorId: string | null;
   benchmarkResult: BenchmarkResult | null;
@@ -90,6 +92,7 @@ export function EditorPane({
   cancelling,
   progress,
   outputLines,
+  apiOutputLines,
   openEditors,
   activeEditorId,
   benchmarkResult,
@@ -280,6 +283,7 @@ export function EditorPane({
         assignments={assignments}
         profile={profile}
         outputLines={outputLines}
+        apiOutputLines={apiOutputLines}
       />
     </main>
   );
@@ -306,16 +310,29 @@ function GpqaDetailsView({
 }) {
   const harnessReady = status.python && status.evalscope;
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit") =>
+    (field: "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
     };
-  const updateTemperature = (event: ChangeEvent<HTMLInputElement>) => {
-    const value = event.currentTarget.value;
-    if (/^\d*(?:\.\d*)?$/.test(value)) {
-      onConfigChange({ ...config, temperature: value });
-    }
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) {
+        onConfigChange({ ...config, [field]: value });
+      }
+    };
+  const updateSignedDecimalField =
+    (field: "presencePenalty") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+        onConfigChange({ ...config, [field]: value });
+      }
+    };
+  const updateThinking = (thinking: GpqaThinkingMode) => {
+    onConfigChange({ ...config, thinking });
   };
 
   return (
@@ -350,13 +367,63 @@ function GpqaDetailsView({
             ]}
           />
           <BenchmarkInfoRow label="Reasoning" value="CoT" />
+          <BenchmarkSelectRow
+            label="Thinking"
+            selectLabel="GPQA Diamond thinking"
+            value={config.thinking}
+            onChange={updateThinking}
+            options={[
+              { value: "off", label: "Off" },
+              { value: "on", label: "On" },
+            ]}
+          />
           <BenchmarkInputRow
             label="Temperature"
             inputLabel="GPQA Diamond temperature"
             value={config.temperature}
             placeholder="0"
             inputMode="decimal"
-            onChange={updateTemperature}
+            onChange={updateDecimalField("temperature")}
+          />
+          <BenchmarkInputRow
+            label="Top K Sampling"
+            inputLabel="GPQA Diamond top K sampling"
+            value={config.topK}
+            placeholder="40"
+            inputMode="numeric"
+            onChange={updateIntegerField("topK")}
+          />
+          <BenchmarkInputRow
+            label="Repeat Penalty"
+            inputLabel="GPQA Diamond repeat penalty"
+            value={config.repeatPenalty}
+            placeholder="1.1"
+            inputMode="decimal"
+            onChange={updateDecimalField("repeatPenalty")}
+          />
+          <BenchmarkInputRow
+            label="Presence Penalty"
+            inputLabel="GPQA Diamond presence penalty"
+            value={config.presencePenalty}
+            placeholder="0"
+            inputMode="decimal"
+            onChange={updateSignedDecimalField("presencePenalty")}
+          />
+          <BenchmarkInputRow
+            label="Top P Sampling"
+            inputLabel="GPQA Diamond top P sampling"
+            value={config.topP}
+            placeholder="0.95"
+            inputMode="decimal"
+            onChange={updateDecimalField("topP")}
+          />
+          <BenchmarkInputRow
+            label="Min P Sampling"
+            inputLabel="GPQA Diamond min P sampling"
+            value={config.minP}
+            placeholder="0.05"
+            inputMode="decimal"
+            onChange={updateDecimalField("minP")}
           />
           <BenchmarkInputRow
             label="Context window"
@@ -520,7 +587,7 @@ function BenchmarkInputRow({
   );
 }
 
-function BenchmarkSelectRow({
+function BenchmarkSelectRow<T extends string>({
   label,
   selectLabel,
   value,
@@ -529,9 +596,9 @@ function BenchmarkSelectRow({
 }: {
   label: string;
   selectLabel: string;
-  value: GpqaShotMode;
-  onChange: (value: GpqaShotMode) => void;
-  options: { value: GpqaShotMode; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const selectedOption = options.find((option) => option.value === value) ?? options[0];

@@ -87,7 +87,7 @@ impl Default for ChatGenerationParams {
             top_p: 0.95,
             min_p: 0.05,
             typical_p: 1.0,
-            repeat_penalty: 1.0,
+            repeat_penalty: 1.1,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
             dry_multiplier: 0.0,
@@ -138,6 +138,8 @@ struct MsRuntimeChatSession {
 }
 
 type MsRuntimeLogCallback = Option<unsafe extern "C" fn(*const c_char, *mut c_void)>;
+type MsChatStreamCallback =
+    Option<unsafe extern "C" fn(*const c_char, *const c_char, *mut c_void) -> c_int>;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -336,6 +338,19 @@ extern "C" {
         out_text_capacity: u64,
         out_reasoning_text: *mut c_char,
         out_reasoning_text_capacity: u64,
+        out_result: *mut MsChatGenerationResult,
+    ) -> c_int;
+    fn ms_runtime_generate_recipe_chat_session_stream(
+        session: *mut MsRuntimeChatSession,
+        messages: *const MsChatMessage,
+        message_count: u64,
+        params: *const ChatGenerationParams,
+        stop_strings: *const *const c_char,
+        stop_count: u64,
+        chat_template_kwargs_json: *const c_char,
+        reasoning_format: *const c_char,
+        stream_callback: MsChatStreamCallback,
+        stream_user_data: *mut c_void,
         out_result: *mut MsChatGenerationResult,
     ) -> c_int;
     fn ms_runtime_get_recipe_chat_session_counters(
@@ -858,6 +873,60 @@ impl Drop for RecipeChatSession {
     }
 }
 
+struct ChatStreamCallbackState<'a, F>
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    on_delta: &'a mut F,
+    text: String,
+    reasoning_text: String,
+    error: Option<String>,
+}
+
+unsafe extern "C" fn recipe_chat_stream_trampoline<F>(
+    text_delta: *const c_char,
+    reasoning_delta: *const c_char,
+    user_data: *mut c_void,
+) -> c_int
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    if user_data.is_null() {
+        return 1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+        let text_delta = if text_delta.is_null() {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            unsafe { CStr::from_ptr(text_delta) }.to_string_lossy()
+        };
+        let reasoning_delta = if reasoning_delta.is_null() {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            unsafe { CStr::from_ptr(reasoning_delta) }.to_string_lossy()
+        };
+
+        state.text.push_str(&text_delta);
+        state.reasoning_text.push_str(&reasoning_delta);
+        if let Err(error) = (state.on_delta)(&text_delta, &reasoning_delta) {
+            state.error = Some(error);
+            return 1;
+        }
+        0
+    }));
+
+    match result {
+        Ok(status) => status,
+        Err(_) => {
+            let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+            state.error = Some("chat stream callback panicked".to_string());
+            1
+        }
+    }
+}
+
 impl RecipeChatSession {
     pub fn generate_chat(
         &mut self,
@@ -954,6 +1023,115 @@ impl RecipeChatSession {
             Ok(ChatGenerationOutput {
                 text,
                 reasoning_text: (!reasoning_text.is_empty()).then_some(reasoning_text),
+                benchmark: native_result.benchmark,
+                finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+            })
+        } else {
+            Err(unsafe { c_string(ms_runtime_last_error()) })
+        }
+    }
+
+    pub fn generate_chat_streaming<F>(
+        &mut self,
+        messages: &[(String, String)],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        mut on_delta: F,
+    ) -> Result<ChatGenerationOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<(), String>,
+    {
+        let c_roles = messages
+            .iter()
+            .map(|(role, _)| {
+                CString::new(role.as_str())
+                    .map_err(|_| format!("chat role contains an interior NUL byte: {}", role))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let c_contents = messages
+            .iter()
+            .map(|(_, content)| {
+                CString::new(content.as_str())
+                    .map_err(|_| "chat message content contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_messages = c_roles
+            .iter()
+            .zip(c_contents.iter())
+            .map(|(role, content)| MsChatMessage {
+                role: role.as_ptr(),
+                content: content.as_ptr(),
+            })
+            .collect::<Vec<_>>();
+        let c_stop_strings = stop_strings
+            .iter()
+            .map(|stop| {
+                CString::new(stop.as_str())
+                    .map_err(|_| "chat stop string contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_stop_strings = c_stop_strings
+            .iter()
+            .map(|stop| stop.as_ptr())
+            .collect::<Vec<_>>();
+        let c_chat_template_kwargs_json = chat_template_kwargs_json
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "chat_template_kwargs contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let c_reasoning_format = reasoning_format
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "reasoning_format contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let mut native_result = MsChatGenerationResult {
+            benchmark: empty_benchmark(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            finish_reason: ChatFinishReason::Stop as u32,
+        };
+        let mut callback_state = ChatStreamCallbackState {
+            on_delta: &mut on_delta,
+            text: String::new(),
+            reasoning_text: String::new(),
+            error: None,
+        };
+
+        let status = unsafe {
+            ms_runtime_generate_recipe_chat_session_stream(
+                self.ptr.as_ptr(),
+                native_messages.as_ptr(),
+                native_messages.len() as u64,
+                params,
+                native_stop_strings.as_ptr(),
+                native_stop_strings.len() as u64,
+                c_chat_template_kwargs_json
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                c_reasoning_format
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                Some(recipe_chat_stream_trampoline::<F>),
+                &mut callback_state as *mut ChatStreamCallbackState<F> as *mut c_void,
+                &mut native_result,
+            )
+        };
+
+        if let Some(error) = callback_state.error {
+            return Err(error);
+        }
+
+        if status == 0 {
+            Ok(ChatGenerationOutput {
+                text: callback_state.text,
+                reasoning_text: (!callback_state.reasoning_text.is_empty())
+                    .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
             })

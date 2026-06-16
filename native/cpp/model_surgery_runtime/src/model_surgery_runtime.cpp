@@ -147,8 +147,16 @@ bool parse_quant_type(const char * value, ggml_type & out_type) {
         out_type = GGML_TYPE_Q6_K;
     } else if (quant == "Q5_K" || quant == "Q5_K_M") {
         out_type = GGML_TYPE_Q5_K;
+    } else if (quant == "Q5_1") {
+        out_type = GGML_TYPE_Q5_1;
+    } else if (quant == "Q5_0") {
+        out_type = GGML_TYPE_Q5_0;
     } else if (quant == "Q4_K" || quant == "Q4_K_M") {
         out_type = GGML_TYPE_Q4_K;
+    } else if (quant == "Q4_1") {
+        out_type = GGML_TYPE_Q4_1;
+    } else if (quant == "Q4_0") {
+        out_type = GGML_TYPE_Q4_0;
     } else if (quant == "Q3_K" || quant == "Q3_K_M") {
         out_type = GGML_TYPE_Q3_K;
     } else if (quant == "Q2_K") {
@@ -168,7 +176,11 @@ const char * display_quant_type(ggml_type type) {
         case GGML_TYPE_Q8_0: return "Q8_0";
         case GGML_TYPE_Q6_K: return "Q6_K";
         case GGML_TYPE_Q5_K: return "Q5_K";
+        case GGML_TYPE_Q5_1: return "Q5_1";
+        case GGML_TYPE_Q5_0: return "Q5_0";
         case GGML_TYPE_Q4_K: return "Q4_K";
+        case GGML_TYPE_Q4_1: return "Q4_1";
+        case GGML_TYPE_Q4_0: return "Q4_0";
         case GGML_TYPE_Q3_K: return "Q3_K";
         case GGML_TYPE_Q2_K: return "Q2_K";
         default: return ggml_type_name(type);
@@ -198,13 +210,71 @@ bool is_supported_recipe_target(ggml_type target_type) {
         case GGML_TYPE_Q8_0:
         case GGML_TYPE_Q6_K:
         case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q5_1:
+        case GGML_TYPE_Q5_0:
         case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q4_0:
         case GGML_TYPE_Q3_K:
         case GGML_TYPE_Q2_K:
             return true;
         default:
             return false;
     }
+}
+
+enum class RecipeQuantFamily {
+    Full,
+    Q8,
+    Legacy,
+    K,
+    Other,
+};
+
+RecipeQuantFamily recipe_quant_family(ggml_type type) {
+    switch (type) {
+        case GGML_TYPE_F32:
+        case GGML_TYPE_BF16:
+        case GGML_TYPE_F16:
+            return RecipeQuantFamily::Full;
+        case GGML_TYPE_Q8_0:
+            return RecipeQuantFamily::Q8;
+        case GGML_TYPE_Q5_1:
+        case GGML_TYPE_Q5_0:
+        case GGML_TYPE_Q4_1:
+        case GGML_TYPE_Q4_0:
+            return RecipeQuantFamily::Legacy;
+        case GGML_TYPE_Q6_K:
+        case GGML_TYPE_Q5_K:
+        case GGML_TYPE_Q4_K:
+        case GGML_TYPE_Q3_K:
+        case GGML_TYPE_Q2_K:
+            return RecipeQuantFamily::K;
+        default:
+            return RecipeQuantFamily::Other;
+    }
+}
+
+bool recipe_quant_family_allows(ggml_type current_type, ggml_type target_type) {
+    const RecipeQuantFamily current_family = recipe_quant_family(current_type);
+    const RecipeQuantFamily target_family = recipe_quant_family(target_type);
+
+    switch (current_family) {
+        case RecipeQuantFamily::Full:
+            return target_family != RecipeQuantFamily::Other;
+        case RecipeQuantFamily::Q8:
+            return target_family == RecipeQuantFamily::Q8
+                || target_family == RecipeQuantFamily::Legacy
+                || target_family == RecipeQuantFamily::K;
+        case RecipeQuantFamily::Legacy:
+            return target_family == RecipeQuantFamily::Legacy;
+        case RecipeQuantFamily::K:
+            return target_family == RecipeQuantFamily::K;
+        case RecipeQuantFamily::Other:
+            return false;
+    }
+
+    return false;
 }
 
 bool can_decode_source_to_f32(ggml_type current_type) {
@@ -222,6 +292,10 @@ bool supports_recipe_conversion(std::string_view name, ggml_type current_type, g
     }
 
     if (estimate_type_size(1024, current_type, target_type) > 1024) {
+        return false;
+    }
+
+    if (!recipe_quant_family_allows(current_type, target_type)) {
         return false;
     }
 
@@ -1998,6 +2072,235 @@ int32_t run_session_generate(
     return 0;
 }
 
+bool has_prefix(const std::string & value, const std::string & prefix) {
+    return value.size() >= prefix.size()
+        && value.compare(0, prefix.size(), prefix) == 0;
+}
+
+int32_t emit_chat_stream_delta(
+    ms_chat_stream_callback callback,
+    void * user_data,
+    const std::string & visible_delta,
+    const std::string & reasoning_delta) {
+    if (visible_delta.empty() && reasoning_delta.empty()) {
+        return 0;
+    }
+    const int32_t status = callback(
+        visible_delta.c_str(),
+        reasoning_delta.c_str(),
+        user_data);
+    if (status != 0) {
+        return fail("chat stream callback aborted");
+    }
+    return 0;
+}
+
+int32_t emit_chat_stream_parse_delta(
+    const std::string & generated_text,
+    const common_chat_params & chat_params,
+    common_reasoning_format reasoning_format,
+    bool is_partial,
+    std::string & emitted_visible_text,
+    std::string & emitted_reasoning_text,
+    ms_chat_stream_callback callback,
+    void * user_data) {
+    const ParsedChatOutput parsed = parse_generated_chat_output(
+        generated_text,
+        chat_params,
+        reasoning_format,
+        is_partial);
+
+    std::string visible_delta;
+    if (has_prefix(parsed.visible_text, emitted_visible_text)) {
+        visible_delta = parsed.visible_text.substr(emitted_visible_text.size());
+    }
+
+    std::string reasoning_delta;
+    if (has_prefix(parsed.reasoning_text, emitted_reasoning_text)) {
+        reasoning_delta = parsed.reasoning_text.substr(emitted_reasoning_text.size());
+    }
+
+    const int32_t result = emit_chat_stream_delta(
+        callback,
+        user_data,
+        visible_delta,
+        reasoning_delta);
+    if (result != 0) {
+        return result;
+    }
+
+    if (!visible_delta.empty()) {
+        emitted_visible_text = parsed.visible_text;
+    }
+    if (!reasoning_delta.empty()) {
+        emitted_reasoning_text = parsed.reasoning_text;
+    }
+    return 0;
+}
+
+int32_t run_session_generate_stream(
+    ModelSession & session,
+    const char * prompt,
+    const ms_chat_generation_params & params,
+    const std::vector<std::string> & stop_strings,
+    const common_chat_params & chat_params,
+    common_reasoning_format reasoning_format,
+    ms_chat_stream_callback callback,
+    void * user_data,
+    ms_baseline_benchmark * out_benchmark,
+    uint32_t & out_finish_reason) {
+    out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+    const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
+    const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
+    int32_t token_count = llama_tokenize(vocab, prompt, prompt_len, nullptr, 0, true, true);
+    if (token_count == INT32_MIN) {
+        return fail("prompt tokenization overflowed");
+    }
+    if (token_count < 0) {
+        token_count = -token_count;
+    }
+    if (token_count <= 0) {
+        return fail("prompt produced no tokens");
+    }
+
+    std::vector<llama_token> prompt_tokens(static_cast<size_t>(token_count));
+    const int32_t actual_tokens = llama_tokenize(
+        vocab,
+        prompt,
+        prompt_len,
+        prompt_tokens.data(),
+        token_count,
+        true,
+        true);
+    if (actual_tokens <= 0) {
+        return fail("failed to tokenize prompt");
+    }
+    prompt_tokens.resize(static_cast<size_t>(actual_tokens));
+
+    reset_session_context(session);
+
+    const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
+    const uint32_t max_tokens = context_generation_room(context_tokens, prompt_tokens.size());
+    if (max_tokens == 0) {
+        return fail(
+            std::string("benchmark prompt exceeds context window: prompt tokens=")
+            + std::to_string(prompt_tokens.size())
+            + ", context tokens="
+            + std::to_string(context_tokens));
+    }
+
+    const auto prompt_start = std::chrono::steady_clock::now();
+    const int prompt_res = decode_prompt_tokens(
+        session,
+        prompt_tokens,
+        max_tokens,
+        "benchmark prompt");
+    if (prompt_res != 0) {
+        return prompt_res;
+    }
+    llama_synchronize(session.ctx.get());
+    const auto prompt_end = std::chrono::steady_clock::now();
+    session.vram.sample();
+
+    common_params_sampling sampling_params = common_sampling_from_chat_params(
+        params,
+        llama_n_ctx(session.ctx.get()));
+    common_sampler_ptr sampler(common_sampler_init(session.model.get(), sampling_params));
+    if (!sampler) {
+        return fail("failed to initialize llama.cpp common sampler");
+    }
+    for (const llama_token token : prompt_tokens) {
+        common_sampler_accept(sampler.get(), token, false);
+    }
+
+    uint32_t generated = 0;
+    std::string generated_text;
+    std::string emitted_visible_text;
+    std::string emitted_reasoning_text;
+    const auto generation_start = std::chrono::steady_clock::now();
+    for (uint32_t i = 0; i < max_tokens; ++i) {
+        throw_if_recipe_test_cancelled();
+        llama_token token = common_sampler_sample(sampler.get(), session.ctx.get(), -1);
+        if (llama_vocab_is_eog(vocab, token)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_EOS;
+            break;
+        }
+
+        generated_text += token_to_piece(vocab, token);
+        common_sampler_accept(sampler.get(), token, true);
+        ++generated;
+        if (consume_generated_stop_suffix(generated_text, stop_strings)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_STOP;
+        }
+
+        const int stream_res = emit_chat_stream_parse_delta(
+            generated_text,
+            chat_params,
+            reasoning_format,
+            true,
+            emitted_visible_text,
+            emitted_reasoning_text,
+            callback,
+            user_data);
+        if (stream_res != 0) {
+            return stream_res;
+        }
+
+        if (out_finish_reason == MS_CHAT_FINISH_REASON_STOP) {
+            break;
+        }
+
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        const int gen_res = llama_decode(session.ctx.get(), batch);
+        if (gen_res != 0) {
+            return fail("failed to decode generated token");
+        }
+        llama_synchronize(session.ctx.get());
+    }
+
+    const int final_stream_res = emit_chat_stream_parse_delta(
+        generated_text,
+        chat_params,
+        reasoning_format,
+        out_finish_reason == MS_CHAT_FINISH_REASON_LENGTH,
+        emitted_visible_text,
+        emitted_reasoning_text,
+        callback,
+        user_data);
+    if (final_stream_res != 0) {
+        return final_stream_res;
+    }
+
+    const auto generation_end = std::chrono::steady_clock::now();
+    session.vram.sample();
+
+    const double prompt_time_ms = elapsed_ms(prompt_start, prompt_end);
+    const double generation_time_ms = elapsed_ms(generation_start, generation_end);
+
+    out_benchmark->load_ms = session.load_ms;
+    out_benchmark->prompt_eval_ms = prompt_time_ms;
+    out_benchmark->generation_ms = generation_time_ms;
+    out_benchmark->prompt_eval_tps = prompt_time_ms > 0.0
+        ? (static_cast<double>(prompt_tokens.size()) * 1000.0 / prompt_time_ms)
+        : 0.0;
+    out_benchmark->token_gen_tps = generation_time_ms > 0.0
+        ? (static_cast<double>(generated) * 1000.0 / generation_time_ms)
+        : 0.0;
+    out_benchmark->ttft_ms = prompt_time_ms;
+    out_benchmark->vram_peak_mb = session.vram.peak_mb;
+    out_benchmark->vram_allocated_mb = session.vram.current_mb;
+    out_benchmark->prompt_tokens = static_cast<uint32_t>(prompt_tokens.size());
+    out_benchmark->generated_tokens = generated;
+    out_benchmark->copied_tensor_count = 0;
+    out_benchmark->converted_tensor_count = 0;
+    out_benchmark->converted_bytes_before = 0;
+    out_benchmark->converted_bytes_after = 0;
+    out_benchmark->requested_target_count = 0;
+    out_benchmark->verified_target_count = 0;
+
+    return 0;
+}
+
 } // namespace
 
 struct ms_runtime_chat_session {
@@ -2655,6 +2958,108 @@ int32_t ms_runtime_generate_recipe_chat_session(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native recipe chat session generation error");
+    }
+}
+
+int32_t ms_runtime_generate_recipe_chat_session_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
+    ms_chat_generation_result * out_result) {
+    clear_error();
+
+    if (session == nullptr || session->session == nullptr) {
+        return fail("recipe chat session is null");
+    }
+
+    if (messages == nullptr || message_count == 0) {
+        return fail("chat message set is empty");
+    }
+
+    if (params == nullptr) {
+        return fail("chat generation params are null");
+    }
+
+    if (stop_strings == nullptr && stop_count > 0) {
+        return fail("chat stop string pointer is null");
+    }
+
+    if (stream_callback == nullptr) {
+        return fail("chat stream callback is null");
+    }
+
+    if (out_result == nullptr) {
+        return fail("chat generation result output pointer is null");
+    }
+
+    try {
+        std::vector<std::string> request_stops = collect_stop_strings(stop_strings, stop_count);
+        const std::map<std::string, std::string> chat_template_kwargs =
+            chat_template_kwargs_from_json(chat_template_kwargs_json);
+        const common_reasoning_format native_reasoning_format =
+            reasoning_format_from_request(reasoning_format);
+        std::vector<std::pair<std::string, std::string>> chat_messages;
+        chat_messages.reserve(static_cast<size_t>(message_count));
+        for (uint64_t i = 0; i < message_count; ++i) {
+            if (messages[i].role == nullptr || messages[i].role[0] == '\0') {
+                return fail("chat message role is empty");
+            }
+            if (messages[i].content == nullptr) {
+                return fail("chat message content is null");
+            }
+            chat_messages.push_back({messages[i].role, messages[i].content});
+        }
+
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->session->chat_templates.get(),
+            chat_messages,
+            params->add_generation_prompt != 0,
+            chat_template_kwargs,
+            native_reasoning_format);
+
+        const std::vector<std::string> all_stops = merge_stop_strings(
+            request_stops,
+            chat_params.additional_stops);
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        ms_baseline_benchmark benchmark = {};
+        const int32_t result = run_session_generate_stream(
+            *session->session,
+            chat_params.prompt.c_str(),
+            *params,
+            all_stops,
+            chat_params,
+            native_reasoning_format,
+            stream_callback,
+            stream_user_data,
+            &benchmark,
+            finish_reason);
+        if (result != 0) {
+            return result;
+        }
+
+        benchmark.copied_tensor_count = session->session->copied_tensors;
+        benchmark.converted_tensor_count = session->session->converted_tensors;
+        benchmark.converted_bytes_before = session->session->converted_bytes_before;
+        benchmark.converted_bytes_after = session->session->converted_bytes_after;
+        benchmark.requested_target_count = session->session->requested_target_count;
+        benchmark.verified_target_count = session->session->verified_target_count;
+        out_result->benchmark = benchmark;
+        out_result->prompt_tokens = benchmark.prompt_tokens;
+        out_result->completion_tokens = benchmark.generated_tokens;
+        out_result->finish_reason = finish_reason;
+        session->completion_count += 1;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe chat session streaming error");
     }
 }
 
