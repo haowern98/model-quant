@@ -62,6 +62,11 @@ const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
   sampleLimit: "",
   temperature: "0",
   thinking: "off",
+  topK: "40",
+  repeatPenalty: "1.1",
+  presencePenalty: "0",
+  topP: "0.95",
+  minP: "0.05",
 };
 
 function parseOptionalIntegerField(
@@ -76,6 +81,37 @@ function parseOptionalIntegerField(
   if (!/^\d+$/.test(trimmed)) return `${label} must be a whole number.`;
   const parsed = Number(trimmed);
   if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    return `${label} must be between ${min} and ${max}.`;
+  }
+  return parsed;
+}
+
+function parseOptionalIntegerOverride(
+  value: string,
+  min: number,
+  max: number,
+  label: string,
+): number | undefined | string {
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  if (!/^\d+$/.test(trimmed)) return `${label} must be a whole number.`;
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    return `${label} must be between ${min} and ${max}.`;
+  }
+  return parsed;
+}
+
+function parseOptionalNumberOverride(
+  value: string,
+  min: number,
+  max: number,
+  label: string,
+): number | undefined | string {
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
     return `${label} must be between ${min} and ${max}.`;
   }
   return parsed;
@@ -109,11 +145,41 @@ function resolveGpqaConfigInput(
     return "GPQA temperature must be between 0 and 2.";
   }
 
+  const topK = parseOptionalIntegerOverride(input.topK, 0, 1000, "GPQA top K sampling");
+  if (typeof topK === "string") return topK;
+
+  const repeatPenalty = parseOptionalNumberOverride(
+    input.repeatPenalty,
+    0,
+    3,
+    "GPQA repeat penalty",
+  );
+  if (typeof repeatPenalty === "string") return repeatPenalty;
+
+  const presencePenalty = parseOptionalNumberOverride(
+    input.presencePenalty,
+    -2,
+    2,
+    "GPQA presence penalty",
+  );
+  if (typeof presencePenalty === "string") return presencePenalty;
+
+  const topP = parseOptionalNumberOverride(input.topP, 0, 1, "GPQA top P sampling");
+  if (typeof topP === "string") return topP;
+
+  const minP = parseOptionalNumberOverride(input.minP, 0, 1, "GPQA min P sampling");
+  if (typeof minP === "string") return minP;
+
   return {
     contextWindow,
     sampleLimit,
     temperature,
     thinking: input.thinking,
+    topK,
+    repeatPenalty,
+    presencePenalty,
+    topP,
+    minP,
   };
 }
 

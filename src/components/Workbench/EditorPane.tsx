@@ -310,17 +310,27 @@ function GpqaDetailsView({
 }) {
   const harnessReady = status.python && status.evalscope;
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit") =>
+    (field: "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
     };
-  const updateTemperature = (event: ChangeEvent<HTMLInputElement>) => {
-    const value = event.currentTarget.value;
-    if (/^\d*(?:\.\d*)?$/.test(value)) {
-      onConfigChange({ ...config, temperature: value });
-    }
-  };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) {
+        onConfigChange({ ...config, [field]: value });
+      }
+    };
+  const updateSignedDecimalField =
+    (field: "presencePenalty") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+        onConfigChange({ ...config, [field]: value });
+      }
+    };
   const updateThinking = (thinking: GpqaThinkingMode) => {
     onConfigChange({ ...config, thinking });
   };
@@ -373,7 +383,47 @@ function GpqaDetailsView({
             value={config.temperature}
             placeholder="0"
             inputMode="decimal"
-            onChange={updateTemperature}
+            onChange={updateDecimalField("temperature")}
+          />
+          <BenchmarkInputRow
+            label="Top K Sampling"
+            inputLabel="GPQA Diamond top K sampling"
+            value={config.topK}
+            placeholder="40"
+            inputMode="numeric"
+            onChange={updateIntegerField("topK")}
+          />
+          <BenchmarkInputRow
+            label="Repeat Penalty"
+            inputLabel="GPQA Diamond repeat penalty"
+            value={config.repeatPenalty}
+            placeholder="1.1"
+            inputMode="decimal"
+            onChange={updateDecimalField("repeatPenalty")}
+          />
+          <BenchmarkInputRow
+            label="Presence Penalty"
+            inputLabel="GPQA Diamond presence penalty"
+            value={config.presencePenalty}
+            placeholder="0"
+            inputMode="decimal"
+            onChange={updateSignedDecimalField("presencePenalty")}
+          />
+          <BenchmarkInputRow
+            label="Top P Sampling"
+            inputLabel="GPQA Diamond top P sampling"
+            value={config.topP}
+            placeholder="0.95"
+            inputMode="decimal"
+            onChange={updateDecimalField("topP")}
+          />
+          <BenchmarkInputRow
+            label="Min P Sampling"
+            inputLabel="GPQA Diamond min P sampling"
+            value={config.minP}
+            placeholder="0.05"
+            inputMode="decimal"
+            onChange={updateDecimalField("minP")}
           />
           <BenchmarkInputRow
             label="Context window"

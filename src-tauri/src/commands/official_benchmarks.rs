@@ -64,6 +64,11 @@ pub struct GpqaRunConfig {
     pub sample_limit: Option<u64>,
     pub temperature: Option<f64>,
     pub thinking: Option<GpqaThinkingMode>,
+    pub top_k: Option<i32>,
+    pub repeat_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub top_p: Option<f64>,
+    pub min_p: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -85,6 +90,11 @@ struct EffectiveGpqaRunConfig {
     sample_limit: u64,
     temperature: f64,
     thinking: GpqaThinkingMode,
+    top_k: Option<i32>,
+    repeat_penalty: Option<f64>,
+    presence_penalty: Option<f64>,
+    top_p: Option<f64>,
+    min_p: Option<f64>,
 }
 
 fn effective_gpqa_run_config(
@@ -95,6 +105,11 @@ fn effective_gpqa_run_config(
         sample_limit: None,
         temperature: None,
         thinking: None,
+        top_k: None,
+        repeat_penalty: None,
+        presence_penalty: None,
+        top_p: None,
+        min_p: None,
     });
     let context_window = config.context_window.unwrap_or(GPQA_DEFAULT_CONTEXT_WINDOW);
     if context_window == 0 {
@@ -113,23 +128,69 @@ fn effective_gpqa_run_config(
         return Err("GPQA temperature must be between 0 and 2.".to_string());
     }
     let thinking = config.thinking.unwrap_or(GpqaThinkingMode::Off);
+    if let Some(top_k) = config.top_k {
+        if !(0..=1000).contains(&top_k) {
+            return Err("GPQA top K sampling must be between 0 and 1000.".to_string());
+        }
+    }
+    if let Some(repeat_penalty) = config.repeat_penalty {
+        if !repeat_penalty.is_finite() || !(0.0..=3.0).contains(&repeat_penalty) {
+            return Err("GPQA repeat penalty must be between 0 and 3.".to_string());
+        }
+    }
+    if let Some(presence_penalty) = config.presence_penalty {
+        if !presence_penalty.is_finite() || !(-2.0..=2.0).contains(&presence_penalty) {
+            return Err("GPQA presence penalty must be between -2 and 2.".to_string());
+        }
+    }
+    if let Some(top_p) = config.top_p {
+        if !top_p.is_finite() || !(0.0..=1.0).contains(&top_p) {
+            return Err("GPQA top P sampling must be between 0 and 1.".to_string());
+        }
+    }
+    if let Some(min_p) = config.min_p {
+        if !min_p.is_finite() || !(0.0..=1.0).contains(&min_p) {
+            return Err("GPQA min P sampling must be between 0 and 1.".to_string());
+        }
+    }
 
     Ok(EffectiveGpqaRunConfig {
         context_window,
         sample_limit,
         temperature,
         thinking,
+        top_k: config.top_k,
+        repeat_penalty: config.repeat_penalty,
+        presence_penalty: config.presence_penalty,
+        top_p: config.top_p,
+        min_p: config.min_p,
     })
 }
 
 fn gpqa_generation_config(effective_config: &EffectiveGpqaRunConfig) -> serde_json::Value {
-    json!({
+    let mut generation_config = json!({
         "temperature": effective_config.temperature,
         "stream": false,
         "chat_template_kwargs": {
             "enable_thinking": effective_config.thinking.enable_thinking()
         }
-    })
+    });
+    if let Some(top_k) = effective_config.top_k {
+        generation_config["top_k"] = json!(top_k);
+    }
+    if let Some(repeat_penalty) = effective_config.repeat_penalty {
+        generation_config["repeat_penalty"] = json!(repeat_penalty);
+    }
+    if let Some(presence_penalty) = effective_config.presence_penalty {
+        generation_config["presence_penalty"] = json!(presence_penalty);
+    }
+    if let Some(top_p) = effective_config.top_p {
+        generation_config["top_p"] = json!(top_p);
+    }
+    if let Some(min_p) = effective_config.min_p {
+        generation_config["min_p"] = json!(min_p);
+    }
+    generation_config
 }
 
 #[derive(Clone)]
@@ -1251,6 +1312,11 @@ mod tests {
             sample_limit: None,
             temperature: None,
             thinking: None,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         }))
         .unwrap();
 
@@ -1261,6 +1327,11 @@ mod tests {
                 sample_limit: 198,
                 temperature: 0.0,
                 thinking: GpqaThinkingMode::Off,
+                top_k: None,
+                repeat_penalty: None,
+                presence_penalty: None,
+                top_p: None,
+                min_p: None,
             }
         );
     }
@@ -1272,6 +1343,11 @@ mod tests {
             sample_limit: Some(12),
             temperature: Some(0.2),
             thinking: Some(GpqaThinkingMode::On),
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         }))
         .unwrap();
 
@@ -1282,6 +1358,11 @@ mod tests {
                 sample_limit: 12,
                 temperature: 0.2,
                 thinking: GpqaThinkingMode::On,
+                top_k: None,
+                repeat_penalty: None,
+                presence_penalty: None,
+                top_p: None,
+                min_p: None,
             }
         );
     }
@@ -1293,6 +1374,11 @@ mod tests {
             sample_limit: Some(198),
             temperature: Some(0.0),
             thinking: None,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
@@ -1300,6 +1386,11 @@ mod tests {
             temperature: Some(0.0),
             context_window: Some(20_000),
             thinking: None,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
@@ -1307,6 +1398,11 @@ mod tests {
             sample_limit: Some(198),
             temperature: Some(2.1),
             thinking: None,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         }))
         .is_err());
     }
@@ -1318,6 +1414,11 @@ mod tests {
             sample_limit: 10,
             temperature: 0.0,
             thinking: GpqaThinkingMode::Off,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         };
 
         let generation_config = gpqa_generation_config(&config);
@@ -1333,12 +1434,41 @@ mod tests {
     }
 
     #[test]
+    fn evalscope_generation_config_includes_sampler_overrides() {
+        let config = effective_gpqa_run_config(Some(GpqaRunConfig {
+            context_window: Some(20_000),
+            sample_limit: Some(10),
+            temperature: Some(0.0),
+            thinking: Some(GpqaThinkingMode::Off),
+            top_k: Some(40),
+            repeat_penalty: Some(1.1),
+            presence_penalty: Some(0.2),
+            top_p: Some(0.95),
+            min_p: Some(0.05),
+        }))
+        .unwrap();
+
+        let generation_config = gpqa_generation_config(&config);
+
+        assert_eq!(generation_config["top_k"], 40);
+        assert_eq!(generation_config["repeat_penalty"], 1.1);
+        assert_eq!(generation_config["presence_penalty"], 0.2);
+        assert_eq!(generation_config["top_p"], 0.95);
+        assert_eq!(generation_config["min_p"], 0.05);
+    }
+
+    #[test]
     fn evalscope_generation_config_can_enable_template_thinking() {
         let config = EffectiveGpqaRunConfig {
             context_window: 20_000,
             sample_limit: 10,
             temperature: 0.0,
             thinking: GpqaThinkingMode::On,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
         };
 
         let generation_config = gpqa_generation_config(&config);

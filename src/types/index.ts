@@ -273,6 +273,11 @@ export interface GpqaBenchmarkConfigInput {
   sampleLimit: string;
   temperature: string;
   thinking: GpqaThinkingMode;
+  topK: string;
+  repeatPenalty: string;
+  presencePenalty: string;
+  topP: string;
+  minP: string;
 }
 
 export interface GpqaBenchmarkConfig {
@@ -280,6 +285,11 @@ export interface GpqaBenchmarkConfig {
   sampleLimit: number;
   temperature: number;
   thinking: GpqaThinkingMode;
+  topK?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  topP?: number;
+  minP?: number;
 }
 
 export interface RecipeQualityEval {
