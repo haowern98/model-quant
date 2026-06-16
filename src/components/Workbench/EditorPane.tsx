@@ -30,6 +30,7 @@ import { editorTabLabel, type EditorTab } from "./editorTabModel";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
+type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -133,7 +134,7 @@ export function EditorPane({
     activeEditor?.kind === "eval-results"
       ? "Eval Results"
       : activeEditor?.kind === "gpqa-details"
-        ? "GPQA Diamond Details"
+        ? "GPQA Diamond"
         : activeEditor?.kind === "gpqa-dataset"
           ? "GPQA Diamond Dataset"
       : layerTitle(activeLayerIndex);
@@ -141,6 +142,7 @@ export function EditorPane({
   const showingResults = activeEditor?.kind === "eval-results" && benchmarkResult;
   const showingGpqaDetails = activeEditor?.kind === "gpqa-details";
   const showingGpqaDataset = activeEditor?.kind === "gpqa-dataset";
+  const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -204,7 +206,7 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>{showingResults ? "benchmark" : "tensors"}</span>
+        <span>{showingResults || showingGpqaBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
       {showingResults ? (
@@ -214,23 +216,20 @@ export function EditorPane({
           onExport={onExport}
           onDiscard={onDiscardResults}
         />
-      ) : showingGpqaDetails ? (
-        <GpqaDetailsView
+      ) : showingGpqaBenchmark ? (
+        <GpqaBenchmarkView
+          key={activeEditor?.kind}
+          initialTab={showingGpqaDataset ? "dataset" : "details"}
           status={gpqaStatus}
           shotMode={gpqaShotMode}
           config={gpqaConfig}
           running={running}
           onInstallHarness={onInstallGpqaHarness}
+          onDownloadDataset={onDownloadGpqaDataset}
           onRefreshStatus={onRefreshGpqaStatus}
           onShotModeChange={onGpqaShotModeChange}
           onConfigChange={onGpqaConfigChange}
-        />
-      ) : showingGpqaDataset ? (
-        <GpqaDatasetView
-          status={gpqaStatus}
-          running={running}
-          onDownloadDataset={onDownloadGpqaDataset}
-          onRefreshStatus={onRefreshGpqaStatus}
+          onRunBenchmark={onTest}
         />
       ) : (
         <section className="tensor-editor-surface">
@@ -289,25 +288,32 @@ export function EditorPane({
   );
 }
 
-function GpqaDetailsView({
+function GpqaBenchmarkView({
+  initialTab,
   status,
   shotMode,
   config,
   running,
   onInstallHarness,
+  onDownloadDataset,
   onRefreshStatus,
   onShotModeChange,
   onConfigChange,
+  onRunBenchmark,
 }: {
+  initialTab: GpqaBenchmarkTab;
   status: GpqaDiamondStatus;
   shotMode: GpqaShotMode;
   config: GpqaBenchmarkConfigInput;
   running: boolean;
   onInstallHarness: () => void;
+  onDownloadDataset: () => void;
   onRefreshStatus: () => void;
   onShotModeChange: (mode: GpqaShotMode) => void;
   onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onRunBenchmark: () => void;
 }) {
+  const [activeTab, setActiveTab] = useState<GpqaBenchmarkTab>(initialTab);
   const harnessReady = status.python && status.evalscope;
   const updateIntegerField =
     (field: "contextWindow" | "sampleLimit" | "topK") =>
@@ -337,197 +343,228 @@ function GpqaDetailsView({
 
   return (
     <section className="benchmark-editor-surface">
-      <div className="benchmark-editor-content">
-        <div className="tensor-editor-title">
-          <div>
-            <h1>GPQA Diamond Details</h1>
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-icon" aria-hidden="true">
+              <span className="codicon codicon-beaker" />
+            </div>
+            <div className="benchmark-page-title">
+              <h1>GPQA Diamond</h1>
+              <div className="benchmark-page-meta">
+                <span>EvalScope</span>
+                <span className="codicon codicon-verified-filled" aria-hidden="true" />
+                <span>gpqa_diamond</span>
+                <span className="codicon codicon-cloud-download" aria-hidden="true" />
+                <span>198 samples</span>
+              </div>
+              <p>Official GPQA Diamond harness for comparing local GGUF model behavior through the in-process chat API.</p>
+              <div className="benchmark-page-actions">
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running || status.datasetReady || !harnessReady}
+                  onClick={onDownloadDataset}
+                >
+                  Download dataset
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running}
+                  onClick={onRefreshStatus}
+                >
+                  Verify hash
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running || Boolean(harnessReady)}
+                  onClick={onInstallHarness}
+                >
+                  Install harness
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running}
+                  onClick={onRefreshStatus}
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={running || !status.ready}
+                  onClick={onRunBenchmark}
+                >
+                  Run Benchmark
+                </button>
+                <button type="button" className="benchmark-icon-button" aria-label="GPQA settings">
+                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="GPQA Diamond sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
           </div>
         </div>
-        <BenchmarkInfoSection title="Status">
-          <BenchmarkInfoRow label="Run state" value={status.statusLabel} />
-          <BenchmarkInfoRow label="Readiness" value={status.ready ? "Ready" : "Not ready"} />
-        </BenchmarkInfoSection>
-        <BenchmarkInfoSection title="Harness">
-          <BenchmarkInfoRow label="Framework" value="EvalScope" />
-          <BenchmarkInfoRow label="Dataset" value="gpqa_diamond" />
-          <BenchmarkInfoRow label="Metric" value="acc" />
-          <BenchmarkInfoRow label="Status" value={harnessReady ? "Installed" : status.statusLabel} />
-          <BenchmarkInfoRow label="Python" value={status.python ?? "Unavailable"} />
-          <BenchmarkInfoRow label="EvalScope" value={status.evalscope ?? "Unavailable"} />
-        </BenchmarkInfoSection>
-        <BenchmarkInfoSection title="Configuration">
-          <BenchmarkSelectRow
-            label="Shots"
-            selectLabel="GPQA Diamond shots"
-            value={shotMode}
-            onChange={onShotModeChange}
-            options={[
-              { value: "five_shot_cot", label: "5-shot CoT" },
-              { value: "zero_shot", label: "0-shot CoT" },
-            ]}
-          />
-          <BenchmarkInfoRow label="Reasoning" value="CoT" />
-          <BenchmarkSelectRow
-            label="Thinking"
-            selectLabel="GPQA Diamond thinking"
-            value={config.thinking}
-            onChange={updateThinking}
-            options={[
-              { value: "off", label: "Off" },
-              { value: "on", label: "On" },
-            ]}
-          />
-          <BenchmarkInputRow
-            label="Temperature"
-            inputLabel="GPQA Diamond temperature"
-            value={config.temperature}
-            placeholder="0"
-            inputMode="decimal"
-            onChange={updateDecimalField("temperature")}
-          />
-          <BenchmarkInputRow
-            label="Top K Sampling"
-            inputLabel="GPQA Diamond top K sampling"
-            value={config.topK}
-            placeholder="40"
-            inputMode="numeric"
-            onChange={updateIntegerField("topK")}
-          />
-          <BenchmarkInputRow
-            label="Repeat Penalty"
-            inputLabel="GPQA Diamond repeat penalty"
-            value={config.repeatPenalty}
-            placeholder="1.1"
-            inputMode="decimal"
-            onChange={updateDecimalField("repeatPenalty")}
-          />
-          <BenchmarkInputRow
-            label="Presence Penalty"
-            inputLabel="GPQA Diamond presence penalty"
-            value={config.presencePenalty}
-            placeholder="0"
-            inputMode="decimal"
-            onChange={updateSignedDecimalField("presencePenalty")}
-          />
-          <BenchmarkInputRow
-            label="Top P Sampling"
-            inputLabel="GPQA Diamond top P sampling"
-            value={config.topP}
-            placeholder="0.95"
-            inputMode="decimal"
-            onChange={updateDecimalField("topP")}
-          />
-          <BenchmarkInputRow
-            label="Min P Sampling"
-            inputLabel="GPQA Diamond min P sampling"
-            value={config.minP}
-            placeholder="0.05"
-            inputMode="decimal"
-            onChange={updateDecimalField("minP")}
-          />
-          <BenchmarkInputRow
-            label="Context window"
-            inputLabel="GPQA Diamond context window"
-            value={config.contextWindow}
-            placeholder="20000"
-            inputMode="numeric"
-            onChange={updateIntegerField("contextWindow")}
-          />
-          <BenchmarkInfoRow label="Batch size" value="1" />
-          <BenchmarkInputRow
-            label="Samples"
-            inputLabel="GPQA Diamond samples"
-            value={config.sampleLimit}
-            placeholder="198"
-            inputMode="numeric"
-            onChange={updateIntegerField("sampleLimit")}
-          />
-        </BenchmarkInfoSection>
-        <BenchmarkInfoSection title="Comparability">
-          <BenchmarkInfoRow
-            label="Selected mode"
-            value={shotMode === "five_shot_cot" ? "5-shot CoT" : "0-shot CoT"}
-          />
-          <BenchmarkInfoRow label="Formal run" value="Full 198 sample dataset" />
-        </BenchmarkInfoSection>
-        <BenchmarkActions>
-          <button
-            type="button"
-            className="benchmark-action-button"
-            disabled={running || Boolean(harnessReady)}
-            onClick={onInstallHarness}
-          >
-            Install harness
-          </button>
-          <button
-            type="button"
-            className="benchmark-action-button secondary"
-            disabled={running}
-            onClick={onRefreshStatus}
-          >
-            Refresh
-          </button>
-        </BenchmarkActions>
-        <p className="benchmark-detail-text">{status.detail}</p>
-      </div>
-    </section>
-  );
-}
-
-function GpqaDatasetView({
-  status,
-  running,
-  onDownloadDataset,
-  onRefreshStatus,
-}: {
-  status: GpqaDiamondStatus;
-  running: boolean;
-  onDownloadDataset: () => void;
-  onRefreshStatus: () => void;
-}) {
-  const harnessReady = status.python && status.evalscope;
-
-  return (
-    <section className="benchmark-editor-surface">
-      <div className="benchmark-editor-content">
-        <div className="tensor-editor-title">
-          <div>
-            <h1>GPQA Diamond Dataset</h1>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Harness</h2>
+                <p>
+                  GPQA Diamond evaluates graduate-level science reasoning through EvalScope using the
+                  app&apos;s in-process OpenAI-compatible chat API. It is intended for repeatable local
+                  checks against GGUF models without launching a separate llama-server process.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains multiple-choice science questions with expert-written answers.
+                  Each run asks the model to produce a clean final answer that the harness can score
+                  against the expected choice.
+                </p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                <BenchmarkInfoSection title="Sample Row">
+                  <BenchmarkInfoRow
+                    label="Question"
+                    value="Which energy difference allows two quantum states to be clearly resolved?"
+                  />
+                  <BenchmarkInfoRow label="Choices" value="A, B, C, D multiple-choice answer set" />
+                  <BenchmarkInfoRow label="Expected output" value="ANSWER: A-D" />
+                </BenchmarkInfoSection>
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Shots"
+                    selectLabel="GPQA Diamond shots"
+                    value={shotMode}
+                    onChange={onShotModeChange}
+                    options={[
+                      { value: "five_shot_cot", label: "5-shot CoT" },
+                      { value: "zero_shot", label: "0-shot CoT" },
+                    ]}
+                  />
+                  <BenchmarkInfoRow label="Reasoning" value="CoT" />
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="GPQA Diamond thinking"
+                    value={config.thinking}
+                    onChange={updateThinking}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="GPQA Diamond temperature"
+                    value={config.temperature}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("temperature")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="GPQA Diamond top K sampling"
+                    value={config.topK}
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("topK")}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="GPQA Diamond repeat penalty"
+                    value={config.repeatPenalty}
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("repeatPenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="GPQA Diamond presence penalty"
+                    value={config.presencePenalty}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateSignedDecimalField("presencePenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="GPQA Diamond top P sampling"
+                    value={config.topP}
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("topP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="GPQA Diamond min P sampling"
+                    value={config.minP}
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("minP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="GPQA Diamond context window"
+                    value={config.contextWindow}
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("contextWindow")}
+                  />
+                  <BenchmarkInfoRow label="Batch size" value="1" />
+                  <BenchmarkInputRow
+                    label="Samples"
+                    inputLabel="GPQA Diamond samples"
+                    value={config.sampleLimit}
+                    placeholder="198"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("sampleLimit")}
+                  />
+                </BenchmarkInfoSection>
+              </div>
+            )}
           </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">{status.detail}</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="EvalScope" />
+              <BenchmarkInfoRow label="Dataset" value="gpqa_diamond" />
+              <BenchmarkInfoRow label="Metric" value="acc" />
+              <BenchmarkInfoRow label="Status" value={harnessReady ? "Installed" : status.statusLabel} />
+              <BenchmarkInfoRow label="Python" value={status.python ?? "Unavailable"} />
+              <BenchmarkInfoRow label="EvalScope" value={status.evalscope ?? "Unavailable"} />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="GPQA Diamond Dataset">
+              <BenchmarkInfoRow label="Downloaded" value={status.datasetPath ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={status.datasetReady ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Samples" value="198" />
+              <BenchmarkInfoRow label="License" value="CC-BY-4.0" />
+              <BenchmarkInfoRow label="Official asset" value={status.datasetUrl} />
+              <BenchmarkInfoRow label="Cache path" value={status.datasetPath ?? "Not downloaded"} />
+              <BenchmarkInfoRow label="SHA256" value={status.datasetHash ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Expected SHA256" value={status.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
         </div>
-        <BenchmarkInfoSection title="Status">
-          <BenchmarkInfoRow label="Downloaded" value={status.datasetPath ? "Yes" : "No"} />
-          <BenchmarkInfoRow label="Verified" value={status.datasetReady ? "Yes" : "No"} />
-          <BenchmarkInfoRow label="Samples" value="198" />
-          <BenchmarkInfoRow label="License" value="CC-BY-4.0" />
-        </BenchmarkInfoSection>
-        <BenchmarkInfoSection title="Source">
-          <BenchmarkInfoRow label="Official asset" value={status.datasetUrl} />
-          <BenchmarkInfoRow label="Cache path" value={status.datasetPath ?? "Not downloaded"} />
-          <BenchmarkInfoRow label="SHA256" value={status.datasetHash ?? "Unavailable"} />
-          <BenchmarkInfoRow label="Expected SHA256" value={status.expectedDatasetHash} />
-        </BenchmarkInfoSection>
-        <BenchmarkActions>
-          <button
-            type="button"
-            className="benchmark-action-button"
-            disabled={running || status.datasetReady || !harnessReady}
-            onClick={onDownloadDataset}
-          >
-            Download dataset
-          </button>
-          <button
-            type="button"
-            className="benchmark-action-button secondary"
-            disabled={running}
-            onClick={onRefreshStatus}
-          >
-            Verify hash
-          </button>
-        </BenchmarkActions>
-        <p className="benchmark-detail-text">
-          Dataset status: {status.datasetStatusLabel}. {status.detail}
-        </p>
       </div>
     </section>
   );
@@ -650,6 +687,3 @@ function BenchmarkSelectRow<T extends string>({
   );
 }
 
-function BenchmarkActions({ children }: { children: ReactNode }) {
-  return <div className="benchmark-actions">{children}</div>;
-}

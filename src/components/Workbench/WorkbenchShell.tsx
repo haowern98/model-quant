@@ -127,6 +127,8 @@ export function WorkbenchShell({
   const [activeActivity, setActiveActivity] = useState<ActivityId>("gguf");
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
   const sidePanelVisible = explorerWidth > 0;
+  const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
+  const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
 
   const explorerMaxWidth = () => {
     const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
@@ -221,6 +223,7 @@ export function WorkbenchShell({
           testMode={testMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          gpqaEditorActive={gpqaEditorActive}
           onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}

@@ -45,7 +45,7 @@ export function gpqaDatasetEditorTab(): EditorTab {
 
 export function editorTabLabel(tab: EditorTab): string {
   if (tab.kind === "eval-results") return "Eval Results";
-  if (tab.kind === "gpqa-details") return "GPQA Diamond Details";
+  if (tab.kind === "gpqa-details") return "GPQA Diamond";
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";
   if (tab.layerIndex < 0) return "Global tensors";
   return `Layer ${tab.layerIndex}`;
