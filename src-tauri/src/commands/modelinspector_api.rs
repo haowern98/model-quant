@@ -191,10 +191,7 @@ pub async fn start_modelinspector_api(
     let base_url = format!("http://{addr}/v1");
     let stop = Arc::new(AtomicBool::new(false));
     let targets = recipe_targets(&recipe);
-    crate::progress::emit_api_output(
-        &app,
-        "ModelInspector API: loading in-process model session",
-    );
+    crate::progress::emit_api_output(&app, "ModelInspector API: loading in-process model session");
     let output_app = app.clone();
     let context_tokens = context_window.unwrap_or(API_CHAT_CONTEXT_TOKENS);
     if context_tokens == 0 {
@@ -266,10 +263,7 @@ pub async fn start_modelinspector_api(
         return Err("ModelInspector API startup cancelled".to_string());
     }
     if let Some(app) = server_state.app.as_ref() {
-        crate::progress::emit_api_output(
-            app,
-            format!("ModelInspector API ready at {base_url}"),
-        );
+        crate::progress::emit_api_output(app, format!("ModelInspector API ready at {base_url}"));
     }
 
     Ok(ModelInspectorApiStatus {
@@ -611,6 +605,28 @@ fn handle_connection(stream: &mut TcpStream, state: &HttpApiState) -> Result<(),
 
     let raw = String::from_utf8_lossy(&buffer);
     let request = parse_request(&raw)?;
+    if !is_public_route(&request) && !authorized(&request, &state.token) {
+        return write_response(
+            stream,
+            json_response(
+                401,
+                "Unauthorized",
+                json!({
+                    "error": {
+                        "message": "Missing or invalid bearer token",
+                        "type": "authentication_error"
+                    }
+                }),
+            ),
+        );
+    }
+    if request.method == "POST"
+        && request.path == "/v1/chat/completions"
+        && request_wants_streaming_chat_completion(&request)
+    {
+        return chat_completions_stream(stream, &request, state);
+    }
+
     let response = handle_request(&request, state);
     write_response(stream, response)
 }
@@ -725,6 +741,12 @@ fn authorized(request: &HttpRequest, token: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn request_wants_streaming_chat_completion(request: &HttpRequest) -> bool {
+    serde_json::from_str::<ChatCompletionRequest>(&request.body)
+        .map(|payload| payload.stream.unwrap_or(false))
+        .unwrap_or(false)
+}
+
 fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse {
     let payload = match serde_json::from_str::<ChatCompletionRequest>(&request.body) {
         Ok(payload) => payload,
@@ -791,41 +813,58 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         );
     }
 
+    let completion_count = prospective_completion_count(state);
     let (mut content, reasoning_content, benchmark, mut finish_reason) = match state
         .session
         .as_ref()
     {
-        Some(session) => match session
-            .lock()
-            .map_err(|e| e.to_string())
-            .and_then(|mut session| {
-                session.generate_chat(
-                    &messages,
-                    &native_params,
-                    &config.native_stop_strings(),
-                    config.native_chat_template_kwargs_json().as_deref(),
-                    config.native_reasoning_format(),
-                )
-            }) {
-            Ok(output) => (
-                output.text,
-                output.reasoning_text,
-                output.benchmark,
-                chat_finish_reason_label(output.finish_reason),
-            ),
-            Err(error) => {
-                return json_response(
-                    500,
-                    "Internal Server Error",
-                    json!({
-                        "error": {
-                            "message": format!("Native generation failed: {error}"),
-                            "type": "server_error"
-                        }
-                    }),
-                )
+        Some(session) => {
+            let app = state.app.clone();
+            let benchmark_label = state.benchmark_label.clone();
+            let benchmark_sample_count = state.benchmark_sample_count;
+            match session
+                .lock()
+                .map_err(|e| e.to_string())
+                .and_then(|mut session| {
+                    session.generate_chat_streaming(
+                        &messages,
+                        &native_params,
+                        &config.native_stop_strings(),
+                        config.native_chat_template_kwargs_json().as_deref(),
+                        config.native_reasoning_format(),
+                        |visible_delta, reasoning_delta| {
+                            emit_streaming_completion_delta(
+                                app.as_ref(),
+                                benchmark_label.as_deref(),
+                                completion_count,
+                                benchmark_sample_count,
+                                visible_delta,
+                                reasoning_delta,
+                            );
+                            Ok(())
+                        },
+                    )
+                }) {
+                Ok(output) => (
+                    output.text,
+                    output.reasoning_text,
+                    output.benchmark,
+                    chat_finish_reason_label(output.finish_reason),
+                ),
+                Err(error) => {
+                    return json_response(
+                        500,
+                        "Internal Server Error",
+                        json!({
+                            "error": {
+                                "message": format!("Native generation failed: {error}"),
+                                "type": "server_error"
+                            }
+                        }),
+                    )
+                }
             }
-        },
+        }
         None => {
             let prompt_chars = messages
                 .iter()
@@ -853,7 +892,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         visible_content: content.clone(),
         reasoning_content: reasoning_content.clone(),
     };
-    emit_completion_output(state, &diagnostics);
+    emit_completion_output(state, completion_count, &diagnostics);
 
     json_response(200, "OK", {
         let assistant_message = assistant_message_json(&content, reasoning_content.as_deref());
@@ -876,6 +915,185 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
     })
 }
 
+fn chat_completions_stream(
+    stream: &mut TcpStream,
+    request: &HttpRequest,
+    state: &HttpApiState,
+) -> Result<(), String> {
+    let payload = match serde_json::from_str::<ChatCompletionRequest>(&request.body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            return write_response(
+                stream,
+                json_response(
+                    400,
+                    "Bad Request",
+                    json!({
+                        "error": {
+                            "message": format!("Invalid chat completion request: {error}"),
+                            "type": "invalid_request_error"
+                        }
+                    }),
+                ),
+            )
+        }
+    };
+
+    let config = chat_generation_config(&payload, state.default_enable_thinking);
+    emit_thinking_override(state, config.thinking_override);
+    let messages = match chat_messages_for_generation(payload.messages.as_deref()) {
+        Ok(messages) => messages,
+        Err(message) => {
+            return write_response(
+                stream,
+                json_response(
+                    400,
+                    "Bad Request",
+                    json!({
+                        "error": {
+                            "message": message,
+                            "type": "invalid_request_error"
+                        }
+                    }),
+                ),
+            );
+        }
+    };
+    let native_params = config.to_native_params();
+    let model = payload.model.unwrap_or_else(|| state.model_id.clone());
+    if messages.is_empty()
+        || messages
+            .iter()
+            .all(|(_, content)| content.trim().is_empty())
+    {
+        return write_response(
+            stream,
+            json_response(
+                400,
+                "Bad Request",
+                json!({
+                    "error": {
+                        "message": "Chat completion request must include at least one message",
+                        "type": "invalid_request_error"
+                    }
+                }),
+            ),
+        );
+    }
+
+    let id = format!("chatcmpl-{}", unix_millis());
+    let created = unix_seconds();
+    let completion_count = prospective_completion_count(state);
+    let final_result = match state.session.as_ref() {
+        Some(session) => {
+            let mut session = match session.lock().map_err(|e| e.to_string()) {
+                Ok(session) => session,
+                Err(error) => {
+                    return write_response(
+                        stream,
+                        json_response(
+                            500,
+                            "Internal Server Error",
+                            json!({
+                                "error": {
+                                    "message": format!("Native generation failed: {error}"),
+                                    "type": "server_error"
+                                }
+                            }),
+                        ),
+                    )
+                }
+            };
+            write_sse_headers(stream)?;
+            let app = state.app.clone();
+            let benchmark_label = state.benchmark_label.clone();
+            let benchmark_sample_count = state.benchmark_sample_count;
+            match session.generate_chat_streaming(
+                &messages,
+                &native_params,
+                &config.native_stop_strings(),
+                config.native_chat_template_kwargs_json().as_deref(),
+                config.native_reasoning_format(),
+                |visible_delta, reasoning_delta| {
+                    emit_streaming_completion_delta(
+                        app.as_ref(),
+                        benchmark_label.as_deref(),
+                        completion_count,
+                        benchmark_sample_count,
+                        visible_delta,
+                        reasoning_delta,
+                    );
+                    write_chat_completion_stream_delta(
+                        stream,
+                        &id,
+                        created,
+                        &model,
+                        visible_delta,
+                        reasoning_delta,
+                    )
+                },
+            ) {
+                Ok(output) => Ok((
+                    output.text,
+                    output.reasoning_text,
+                    output.benchmark,
+                    chat_finish_reason_label(output.finish_reason),
+                )),
+                Err(error) => Err(error),
+            }
+        }
+        None => {
+            write_sse_headers(stream)?;
+            let prompt_chars = messages
+                .iter()
+                .map(|(_, content)| content.chars().count())
+                .sum::<usize>();
+            let mut content = format!(
+                "Model Inspector API smoke response for {model}. Received {prompt_chars} prompt character(s)."
+            );
+            let finish_reason = apply_stop_strings(&mut content, &config.stop);
+            write_chat_completion_stream_delta(stream, &id, created, &model, &content, "")?;
+            Ok((content, None, empty_benchmark(), finish_reason))
+        }
+    };
+
+    match final_result {
+        Ok((content, reasoning_content, benchmark, finish_reason)) => {
+            let diagnostics = ChatCompletionDiagnostics {
+                model: model.clone(),
+                finish_reason,
+                prompt_tokens: benchmark.prompt_tokens,
+                completion_tokens: benchmark.generated_tokens,
+                total_tokens: benchmark.prompt_tokens + benchmark.generated_tokens,
+                visible_content: content,
+                reasoning_content,
+            };
+            emit_completion_output(state, completion_count, &diagnostics);
+            write_chat_completion_stream_finish(
+                stream,
+                &id,
+                created,
+                &model,
+                finish_reason,
+                &benchmark,
+            )?;
+            write_sse_done(stream)
+        }
+        Err(error) => {
+            write_sse_data(
+                stream,
+                &json!({
+                    "error": {
+                        "message": format!("Native generation failed: {error}"),
+                        "type": "server_error"
+                    }
+                }),
+            )?;
+            write_sse_done(stream)
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ChatCompletionDiagnostics {
     model: String,
@@ -887,17 +1105,72 @@ struct ChatCompletionDiagnostics {
     reasoning_content: Option<String>,
 }
 
-fn emit_completion_output(state: &HttpApiState, diagnostics: &ChatCompletionDiagnostics) {
+fn next_completion_count(state: &HttpApiState) -> u64 {
+    state.completion_count.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn prospective_completion_count(state: &HttpApiState) -> u64 {
+    state.completion_count.load(Ordering::SeqCst) + 1
+}
+
+fn emit_completion_output(
+    state: &HttpApiState,
+    expected_count: u64,
+    diagnostics: &ChatCompletionDiagnostics,
+) {
     let Some(label) = state.benchmark_label.as_deref() else {
         return;
     };
-    let count = state.completion_count.fetch_add(1, Ordering::SeqCst) + 1;
+    let count = next_completion_count(state);
+    debug_assert_eq!(count, expected_count);
     if let Some(app) = state.app.as_ref() {
         crate::progress::emit_api_output(
             app,
             benchmark_completion_output(label, count, state.benchmark_sample_count, diagnostics),
         );
     }
+}
+
+fn emit_streaming_completion_delta(
+    app: Option<&AppHandle>,
+    label: Option<&str>,
+    count: u64,
+    total: Option<u64>,
+    visible_delta: &str,
+    reasoning_delta: &str,
+) {
+    let (Some(app), Some(label)) = (app, label) else {
+        return;
+    };
+    for message in
+        streaming_completion_delta_outputs(label, count, total, visible_delta, reasoning_delta)
+    {
+        crate::progress::emit_api_output(app, message);
+    }
+}
+
+fn streaming_completion_delta_outputs(
+    label: &str,
+    count: u64,
+    total: Option<u64>,
+    visible_delta: &str,
+    reasoning_delta: &str,
+) -> Vec<String> {
+    let progress = total
+        .map(|total| format!(" {count}/{total}"))
+        .unwrap_or_else(|| format!(" {count}"));
+    let mut output = Vec::new();
+    if !reasoning_delta.is_empty() {
+        output.push(format!(
+            "{label}: chat completion request{progress} reasoning delta\n{reasoning_delta}"
+        ));
+    }
+    if !visible_delta.is_empty() {
+        output.push(format!(
+            "{label}: chat completion request{progress} visible delta\n{visible_delta}"
+        ));
+    }
+    output
 }
 
 fn emit_thinking_override(
@@ -942,17 +1215,17 @@ fn benchmark_completion_output(
     let reasoning = diagnostics.reasoning_content.as_deref().unwrap_or("");
     format!(
         "{label}: chat completion request{progress} completed model={} finish={} prompt_tokens={} completion_tokens={} total_tokens={}\n\
-         {label}: visible output ({} chars)\n{}\n\
-         {label}: reasoning output ({} chars)\n{}",
+         {label}: reasoning output ({} chars)\n{}\n\
+         {label}: visible output ({} chars)\n{}",
         diagnostics.model,
         diagnostics.finish_reason,
         diagnostics.prompt_tokens,
         diagnostics.completion_tokens,
         diagnostics.total_tokens,
-        diagnostics.visible_content.chars().count(),
-        diagnostic_excerpt(&diagnostics.visible_content),
         reasoning.chars().count(),
         diagnostic_excerpt(reasoning),
+        diagnostics.visible_content.chars().count(),
+        diagnostic_excerpt(&diagnostics.visible_content),
     )
 }
 
@@ -1036,6 +1309,115 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> Result<(), 
     stream
         .write_all(response_text.as_bytes())
         .map_err(|e| e.to_string())
+}
+
+fn write_sse_headers(stream: &mut TcpStream) -> Result<(), String> {
+    stream
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        )
+        .map_err(|e| e.to_string())?;
+    stream.flush().map_err(|e| e.to_string())
+}
+
+fn write_sse_data(stream: &mut TcpStream, value: &Value) -> Result<(), String> {
+    let body = serde_json::to_string(value).map_err(|e| e.to_string())?;
+    stream
+        .write_all(format!("data: {body}\n\n").as_bytes())
+        .map_err(|e| e.to_string())?;
+    stream.flush().map_err(|e| e.to_string())
+}
+
+fn write_sse_done(stream: &mut TcpStream) -> Result<(), String> {
+    stream
+        .write_all(b"data: [DONE]\n\n")
+        .map_err(|e| e.to_string())?;
+    stream.flush().map_err(|e| e.to_string())
+}
+
+fn write_chat_completion_stream_delta(
+    stream: &mut TcpStream,
+    id: &str,
+    created: u64,
+    model: &str,
+    visible_delta: &str,
+    reasoning_delta: &str,
+) -> Result<(), String> {
+    if visible_delta.is_empty() && reasoning_delta.is_empty() {
+        return Ok(());
+    }
+    write_sse_data(
+        stream,
+        &chat_completion_stream_delta_chunk(id, created, model, visible_delta, reasoning_delta),
+    )
+}
+
+fn write_chat_completion_stream_finish(
+    stream: &mut TcpStream,
+    id: &str,
+    created: u64,
+    model: &str,
+    finish_reason: &str,
+    benchmark: &crate::ffi::runtime_bindings::MsBaselineBenchmark,
+) -> Result<(), String> {
+    write_sse_data(
+        stream,
+        &chat_completion_stream_finish_chunk(id, created, model, finish_reason, benchmark),
+    )
+}
+
+fn chat_completion_stream_delta_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    visible_delta: &str,
+    reasoning_delta: &str,
+) -> Value {
+    let mut delta = json!({
+        "role": "assistant"
+    });
+    if !visible_delta.is_empty() {
+        delta["content"] = json!(visible_delta);
+    }
+    if !reasoning_delta.is_empty() {
+        delta["reasoning_content"] = json!(reasoning_delta);
+    }
+    json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": delta,
+            "finish_reason": Value::Null
+        }]
+    })
+}
+
+fn chat_completion_stream_finish_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    finish_reason: &str,
+    benchmark: &crate::ffi::runtime_bindings::MsBaselineBenchmark,
+) -> Value {
+    json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": finish_reason
+        }],
+        "usage": {
+            "prompt_tokens": benchmark.prompt_tokens,
+            "completion_tokens": benchmark.generated_tokens,
+            "total_tokens": benchmark.prompt_tokens + benchmark.generated_tokens
+        }
+    })
 }
 
 fn model_id_from_path(path: &str) -> String {
@@ -1196,24 +1578,33 @@ mod tests {
     }
 
     #[test]
-    fn rejects_streaming_until_it_is_supported() {
+    fn detects_streaming_chat_completion_requests() {
         let body = json!({
             "model": "Qwen3.5-9B-Q4_K_M.gguf",
             "messages": [{"role": "user", "content": "Say hello"}],
             "stream": true
         })
         .to_string();
-        let response = handle_request(
-            &request("POST", "/v1/chat/completions", Some("test-token"), &body),
-            &state(),
+        let request = request("POST", "/v1/chat/completions", Some("test-token"), &body);
+
+        assert!(request_wants_streaming_chat_completion(&request));
+    }
+
+    #[test]
+    fn formats_openai_compatible_streaming_delta_chunk() {
+        let chunk = chat_completion_stream_delta_chunk(
+            "chatcmpl-test",
+            123,
+            "model.gguf",
+            "visible",
+            "reason",
         );
 
-        assert_eq!(response.status, 400);
-        assert_eq!(response.body["error"]["type"], "invalid_request_error");
-        assert!(response.body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Streaming"));
+        assert_eq!(chunk["object"], "chat.completion.chunk");
+        assert_eq!(chunk["choices"][0]["delta"]["role"], "assistant");
+        assert_eq!(chunk["choices"][0]["delta"]["content"], "visible");
+        assert_eq!(chunk["choices"][0]["delta"]["reasoning_content"], "reason");
+        assert!(chunk["choices"][0]["finish_reason"].is_null());
     }
 
     #[test]
@@ -1461,6 +1852,52 @@ mod tests {
     }
 
     #[test]
+    fn smoke_streams_chat_completion_over_loopback_tcp() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_state = Arc::new(state());
+        let thread_stop = stop.clone();
+        let thread_state = server_state.clone();
+        let handle = thread::spawn(move || run_server(listener, thread_stop, thread_state));
+        let body = json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{"role": "user", "content": "Say hello"}],
+            "stream": true
+        })
+        .to_string();
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\n\
+             Host: 127.0.0.1\r\n\
+             Authorization: Bearer test-token\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\
+             Connection: close\r\n\
+             \r\n\
+             {}",
+            body.as_bytes().len(),
+            body
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+
+        stop.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(addr);
+        handle.join().unwrap();
+
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/event-stream"));
+        assert!(response.contains("data: {"));
+        assert!(response.contains("\"object\":\"chat.completion.chunk\""));
+        assert!(response.contains("\"content\":"));
+        assert!(response.contains("\"finish_reason\":\"stop\""));
+        assert!(response.contains("data: [DONE]"));
+    }
+
+    #[test]
     fn formats_benchmark_completion_output_as_api_diagnostic_only() {
         let diagnostics = ChatCompletionDiagnostics {
             model: "gemma".to_string(),
@@ -1480,6 +1917,21 @@ mod tests {
         assert!(output.contains("ANSWER: C"));
         assert!(output.contains("reasoning output"));
         assert!(output.contains("private reasoning"));
+        assert!(output.find("reasoning output").unwrap() < output.find("visible output").unwrap());
+    }
+
+    #[test]
+    fn formats_streaming_delta_output_with_reasoning_before_visible() {
+        let output =
+            streaming_completion_delta_outputs("ModelInspector API", 3, Some(10), "ANSWER", "why");
+
+        assert_eq!(
+            output,
+            vec![
+                "ModelInspector API: chat completion request 3/10 reasoning delta\nwhy",
+                "ModelInspector API: chat completion request 3/10 visible delta\nANSWER",
+            ]
+        );
     }
 
     #[test]
