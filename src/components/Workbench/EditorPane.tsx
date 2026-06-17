@@ -346,16 +346,13 @@ function GpqaBenchmarkView({
       <div className="benchmark-page">
         <div className="benchmark-page-header">
           <div className="benchmark-page-hero">
-            <div className="benchmark-page-icon" aria-hidden="true">
-              <span className="codicon codicon-beaker" />
-            </div>
             <div className="benchmark-page-title">
               <h1>GPQA Diamond</h1>
               <div className="benchmark-page-meta">
                 <span>EvalScope</span>
-                <span className="codicon codicon-verified-filled" aria-hidden="true" />
+                <span>|</span>
                 <span>gpqa_diamond</span>
-                <span className="codicon codicon-cloud-download" aria-hidden="true" />
+                <span>|</span>
                 <span>198 samples</span>
               </div>
               <p>Official GPQA Diamond harness for comparing local GGUF model behavior through the in-process chat API.</p>

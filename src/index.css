@@ -202,8 +202,8 @@ button {
 
 .app-error-toast {
   position: absolute;
-  left: 12px;
-  top: 12px;
+  right: 16px;
+  bottom: 16px;
   z-index: 20;
   max-width: min(640px, calc(100vw - 32px));
   min-height: 48px;
@@ -1571,21 +1571,7 @@ body.resizing-bottom-panel * {
 }
 
 .benchmark-page-hero {
-  display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 22px;
-  align-items: center;
-}
-
-.benchmark-page-icon {
-  width: 104px;
-  height: 104px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: #0e639c;
-  color: #ffffff;
-  font-size: 56px;
+  min-width: 0;
 }
 
 .benchmark-page-title h1 {
@@ -1603,10 +1589,6 @@ body.resizing-bottom-panel * {
   margin-bottom: 8px;
   color: #cccccc;
   font-size: 13px;
-}
-
-.benchmark-page-meta .codicon {
-  color: var(--vscode-blue);
 }
 
 .benchmark-page-title p {

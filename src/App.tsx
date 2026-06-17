@@ -233,7 +233,6 @@ function App() {
   const [benchmarkResult, setBenchmarkResult] =
     useState<BenchmarkResult | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
-  const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
   const [recipeEvalPreset, setRecipeEvalPreset] =
@@ -610,13 +609,12 @@ function App() {
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
   const visibleError = modelError ?? appError;
-  const showErrorToast = visibleError && visibleError !== dismissedError;
 
   return (
     <div className="app-root">
       <TitleBar modelPath={modelPath} onOpenModel={handleOpenModel} />
       <div className="app-body">
-        {showErrorToast && (
+        {visibleError && (
           <div className="app-error-toast" role="alert">
             <span className="codicon codicon-error app-error-toast-icon" aria-hidden="true" />
             <span className="app-error-toast-message">{visibleError}</span>
@@ -625,7 +623,6 @@ function App() {
               className="app-error-toast-close"
               aria-label="Dismiss error"
               onClick={() => {
-                setDismissedError(visibleError);
                 setAppError(null);
               }}
             >
