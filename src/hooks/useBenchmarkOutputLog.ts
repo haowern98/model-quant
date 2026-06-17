@@ -2,11 +2,29 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { isTauri } from "@tauri-apps/api/core";
 import type { ApiOutputEvent, BenchmarkOutputEvent, BenchmarkOutputLine } from "../types";
 
+const MAX_OUTPUT_LINES = 1000;
+const MAX_API_OUTPUT_CHARS = 300_000;
+
 function formatLogTimestamp(date: Date): string {
   const hours = date.getHours().toString().padStart(2, "0");
   const minutes = date.getMinutes().toString().padStart(2, "0");
   const seconds = date.getSeconds().toString().padStart(2, "0");
   return `${hours}:${minutes}:${seconds}`;
+}
+
+function trimOutputLines(lines: BenchmarkOutputLine[]): BenchmarkOutputLine[] {
+  return lines.length > MAX_OUTPUT_LINES ? lines.slice(-MAX_OUTPUT_LINES) : lines;
+}
+
+function trimApiMessage(message: string, header = ""): string {
+  if (!header || !message.startsWith(header)) {
+    return message.length > MAX_API_OUTPUT_CHARS ? message.slice(-MAX_API_OUTPUT_CHARS) : message;
+  }
+
+  const body = message.slice(header.length);
+  return body.length > MAX_API_OUTPUT_CHARS
+    ? `${header}${body.slice(-MAX_API_OUTPUT_CHARS)}`
+    : message;
 }
 
 export function useBenchmarkOutputLog() {
@@ -23,16 +41,17 @@ export function useBenchmarkOutputLog() {
   const appendOutput = (
     setLines: Dispatch<SetStateAction<BenchmarkOutputLine[]>>,
     message: string,
+    capMessage?: (message: string) => string,
   ) => {
     const normalized = message.trimEnd();
     if (!normalized) return;
 
-    setLines((current) => [...current, newOutputLine(normalized)]);
+    setLines((current) => trimOutputLines([...current, newOutputLine(capMessage?.(normalized) ?? normalized)]));
   };
 
   const appendApiOutput = (event: ApiOutputEvent) => {
     if (event.mode !== "append") {
-      appendOutput(setApiOutputLines, event.message);
+      appendOutput(setApiOutputLines, event.message, trimApiMessage);
       return;
     }
 
@@ -41,15 +60,18 @@ export function useBenchmarkOutputLog() {
       const targetIndex = current.length - 1;
       const target = current[targetIndex];
       if (!header || !target?.message.startsWith(header)) {
-        return [...current, newOutputLine(`${header}\n${event.message}`)];
+        return trimOutputLines([
+          ...current,
+          newOutputLine(trimApiMessage(`${header}\n${event.message}`, header)),
+        ]);
       }
 
       const next = [...current];
       next[targetIndex] = {
         ...target,
-        message: `${target.message}${event.message}`,
+        message: trimApiMessage(`${target.message}${event.message}`, header),
       };
-      return next;
+      return trimOutputLines(next);
     });
   };
 
