@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -12,6 +13,7 @@ import type {
   BenchmarkOutputLine,
   BenchmarkRunId,
   GpqaBenchmarkConfigInput,
+  GpqaDatasetRow,
   GpqaDiamondStatus,
   GpqaShotMode,
   GpqaThinkingMode,
@@ -27,6 +29,7 @@ import { BottomPanel } from "./BottomPanel";
 import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
+import { getGpqaDiamondDatasetRows } from "../../lib/tauri-bridge";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
@@ -314,7 +317,41 @@ function GpqaBenchmarkView({
   onRunBenchmark: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<GpqaBenchmarkTab>(initialTab);
+  const [datasetRows, setDatasetRows] = useState<GpqaDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const harnessReady = status.python && status.evalscope;
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !status.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getGpqaDiamondDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, status.datasetReady]);
+
   const updateIntegerField =
     (field: "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -360,7 +397,7 @@ function GpqaBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={running || status.datasetReady || !harnessReady}
+                  disabled={running || !harnessReady}
                   onClick={onDownloadDataset}
                 >
                   Download dataset
@@ -438,14 +475,32 @@ function GpqaBenchmarkView({
             ) : activeTab === "dataset" ? (
               <div className="benchmark-copy">
                 <h2>Dataset Preview</h2>
-                <BenchmarkInfoSection title="Sample Row">
-                  <BenchmarkInfoRow
-                    label="Question"
-                    value="Which energy difference allows two quantum states to be clearly resolved?"
-                  />
-                  <BenchmarkInfoRow label="Choices" value="A, B, C, D multiple-choice answer set" />
-                  <BenchmarkInfoRow label="Expected output" value="ANSWER: A-D" />
-                </BenchmarkInfoSection>
+                {!status.datasetReady ? (
+                  <p>Download and verify the dataset to preview rows.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset rows...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset rows found.</p>
+                ) : (
+                  <div className="benchmark-dataset-table" role="table" aria-label="GPQA Diamond dataset rows">
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Question</span>
+                      <span role="columnheader">Choices</span>
+                      <span role="columnheader">Answer</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.index}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">{row.question || "Unavailable"}</span>
+                        <span role="cell">{row.choices.join("\n") || "Unavailable"}</span>
+                        <span role="cell">{row.answer ?? "Unavailable"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="benchmark-copy">

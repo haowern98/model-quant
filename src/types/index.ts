@@ -268,6 +268,13 @@ export interface GpqaDiamondStatus {
   detail: string;
 }
 
+export interface GpqaDatasetRow {
+  index: number;
+  question: string;
+  choices: string[];
+  answer: string | null;
+}
+
 export interface GpqaBenchmarkConfigInput {
   contextWindow: string;
   sampleLimit: string;

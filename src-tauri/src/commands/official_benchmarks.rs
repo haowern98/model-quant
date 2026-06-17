@@ -34,6 +34,15 @@ pub struct GpqaDiamondStatus {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GpqaDatasetRow {
+    pub index: usize,
+    pub question: String,
+    pub choices: Vec<String>,
+    pub answer: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GpqaShotMode {
@@ -272,6 +281,19 @@ pub async fn download_gpqa_diamond_dataset(
 }
 
 #[tauri::command]
+pub async fn get_gpqa_diamond_dataset_rows(
+    app: tauri::AppHandle,
+) -> Result<Vec<GpqaDatasetRow>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || read_gpqa_dataset_rows(&app_data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn run_gpqa_diamond_benchmark(
     base_url: String,
     api_key: String,
@@ -443,7 +465,7 @@ import json
 import sys
 from pathlib import Path
 
-dataset_root, marker_path = sys.argv[1], sys.argv[2]
+dataset_root, marker_path, rows_path = sys.argv[1], sys.argv[2], sys.argv[3]
 from evalscope.config import TaskConfig
 from evalscope.benchmarks.gpqa.gpqa_adapter import GPQAAdapter
 from evalscope.api.benchmark import BenchmarkMeta
@@ -473,6 +495,17 @@ dataset = adapter.load_dataset()
 sample_count = sum(len(samples) for samples in dataset.values())
 if sample_count != 198:
     raise SystemExit(f"Expected 198 GPQA Diamond samples, got {sample_count}")
+rows = []
+for samples in dataset.values():
+    for sample in samples:
+        if hasattr(sample, "model_dump"):
+            rows.append(sample.model_dump())
+        elif hasattr(sample, "dict"):
+            rows.append(sample.dict())
+        elif isinstance(sample, dict):
+            rows.append(sample)
+        else:
+            rows.append(vars(sample))
 marker = {
     "version": 1,
     "dataset": "gpqa_diamond",
@@ -481,6 +514,7 @@ marker = {
 }
 Path(marker_path).parent.mkdir(parents=True, exist_ok=True)
 Path(marker_path).write_text(json.dumps(marker, indent=2), encoding="utf-8")
+Path(rows_path).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 print("gpqa_diamond_samples=" + str(sample_count))
 "#;
 
@@ -491,6 +525,9 @@ print("gpqa_diamond_samples=" + str(sample_count))
             script.to_string(),
             dataset_root.to_string_lossy().to_string(),
             gpqa_dataset_marker_path(&app_data_dir)
+                .to_string_lossy()
+                .to_string(),
+            gpqa_dataset_rows_path(&app_data_dir)
                 .to_string_lossy()
                 .to_string(),
         ],
@@ -778,6 +815,10 @@ fn gpqa_dataset_cache_root(app_data_dir: &Path) -> PathBuf {
 
 fn gpqa_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
     gpqa_dataset_cache_root(app_data_dir).join("gpqa_diamond_dataset_ready.json")
+}
+
+fn gpqa_dataset_rows_path(app_data_dir: &Path) -> PathBuf {
+    gpqa_dataset_cache_root(app_data_dir).join("gpqa_diamond_rows.json")
 }
 
 fn gpqa_run_dir(app_data_dir: &Path) -> PathBuf {
@@ -1069,6 +1110,80 @@ fn dataset_detail(state: &GpqaDatasetState) -> String {
     }
 }
 
+fn read_gpqa_dataset_rows(app_data_dir: &Path) -> Result<Vec<GpqaDatasetRow>, String> {
+    if !matches!(
+        detect_gpqa_dataset_state(app_data_dir),
+        GpqaDatasetState::Verified { .. }
+    ) {
+        return Err("GPQA Diamond dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let text = std::fs::read_to_string(gpqa_dataset_rows_path(app_data_dir)).map_err(|e| {
+        format!("Failed to read GPQA Diamond dataset rows: {e}. Click Download dataset to refresh the preview.")
+    })?;
+    let rows_json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse GPQA rows JSON: {e}"))?;
+    let rows = rows_json
+        .as_array()
+        .ok_or_else(|| "GPQA rows JSON must be an array.".to_string())?
+        .iter()
+        .enumerate()
+        .map(|(index, row)| gpqa_dataset_row_from_json(index + 1, row))
+        .collect();
+    Ok(rows)
+}
+
+fn gpqa_dataset_row_from_json(index: usize, row: &serde_json::Value) -> GpqaDatasetRow {
+    GpqaDatasetRow {
+        index,
+        question: string_field(row, &["question", "Question", "problem", "query", "prompt"])
+            .unwrap_or_default(),
+        choices: choices_field(row, &["choices", "Choices", "options", "Options"]),
+        answer: string_field(
+            row,
+            &[
+                "answer",
+                "Answer",
+                "target",
+                "gold",
+                "label",
+                "correct_answer",
+            ],
+        ),
+    }
+}
+
+fn string_field(row: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| row.get(*key))
+        .find_map(|value| value.as_str().map(str::to_string))
+}
+
+fn choices_field(row: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+    for key in keys {
+        let Some(value) = row.get(*key) else {
+            continue;
+        };
+        if let Some(values) = value.as_array() {
+            return values
+                .iter()
+                .filter_map(|choice| choice.as_str().map(str::to_string))
+                .collect();
+        }
+        if let Some(values) = value.as_object() {
+            let mut choices: Vec<_> = values
+                .iter()
+                .filter_map(|(label, choice)| {
+                    choice.as_str().map(|text| format!("{}. {}", label, text))
+                })
+                .collect();
+            choices.sort();
+            return choices;
+        }
+    }
+    Vec::new()
+}
+
 fn probe_value(output: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     output.lines().find_map(|line| {
@@ -1303,6 +1418,23 @@ mod tests {
         assert_eq!(status.status_label, "Download");
         assert!(!status.dataset_ready);
         assert!(status.detail.contains("dataset"));
+    }
+
+    #[test]
+    fn normalizes_gpqa_dataset_row_from_evalscope_json() {
+        let row = gpqa_dataset_row_from_json(
+            7,
+            &json!({
+                "question": "Which energy difference allows two quantum states to be clearly resolved?",
+                "choices": ["A. small", "B. medium", "C. large", "D. tiny"],
+                "answer": "C"
+            }),
+        );
+
+        assert_eq!(row.index, 7);
+        assert!(row.question.contains("energy difference"));
+        assert_eq!(row.choices.len(), 4);
+        assert_eq!(row.answer.as_deref(), Some("C"));
     }
 
     #[test]

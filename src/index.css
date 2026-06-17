@@ -1705,6 +1705,40 @@ body.resizing-bottom-panel * {
   line-height: 1.55;
 }
 
+.benchmark-dataset-table {
+  display: grid;
+  min-width: 760px;
+  border-top: 1px solid var(--vscode-border-subtle);
+  font-size: 12px;
+}
+
+.benchmark-dataset-row {
+  display: grid;
+  grid-template-columns: 44px minmax(220px, 1.3fr) minmax(220px, 1fr) 80px;
+  border-bottom: 1px solid var(--vscode-border-subtle);
+}
+
+.benchmark-dataset-row.header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--vscode-editor);
+  color: var(--vscode-muted);
+  font-weight: 700;
+}
+
+.benchmark-dataset-row span {
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--vscode-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.benchmark-dataset-row.header span {
+  color: var(--vscode-muted);
+}
+
 .benchmark-info-section {
   padding: 0 0 22px;
 }
