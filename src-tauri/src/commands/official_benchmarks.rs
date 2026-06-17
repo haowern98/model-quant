@@ -1137,6 +1137,7 @@ fn gpqa_dataset_row_from_json(index: usize, row: &serde_json::Value) -> GpqaData
     GpqaDatasetRow {
         index,
         question: string_field(row, &["question", "Question", "problem", "query", "prompt"])
+            .or_else(|| gpqa_question_from_input(row))
             .unwrap_or_default(),
         choices: choices_field(row, &["choices", "Choices", "options", "Options"]),
         answer: string_field(
@@ -1151,6 +1152,22 @@ fn gpqa_dataset_row_from_json(index: usize, row: &serde_json::Value) -> GpqaData
             ],
         ),
     }
+}
+
+fn gpqa_question_from_input(row: &serde_json::Value) -> Option<String> {
+    let content = row
+        .get("input")?
+        .as_array()?
+        .first()?
+        .get("content")?
+        .as_str()?;
+    let question = content
+        .rsplit_once("Think step by step before answering.")?
+        .1
+        .split("\nA)")
+        .next()?
+        .trim();
+    (!question.is_empty()).then(|| question.to_string())
 }
 
 fn string_field(row: &serde_json::Value, keys: &[&str]) -> Option<String> {
@@ -1435,6 +1452,24 @@ mod tests {
         assert!(row.question.contains("energy difference"));
         assert_eq!(row.choices.len(), 4);
         assert_eq!(row.answer.as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn extracts_gpqa_question_from_evalscope_prompt() {
+        let row = gpqa_dataset_row_from_json(
+            1,
+            &json!({
+                "input": [{
+                    "content": "Here are some examples...\n\nAnswer the following multiple choice question. The last line of your response should be of the following format: 'ANSWER: [LETTER]' (without quotes) where [LETTER] is one of A,B,C,D. Think step by step before answering.\n\nTwo quantum states with energies E1 and E2 have a lifetime of 10^-9 sec and 10^-8 sec, respectively. We want to clearly distinguish these two energy levels. Which one of the following options could be their energy difference so that they can be clearly resolved?\n\n\nA) 10^-11 eV\nB) 10^-9 eV"
+                }],
+                "choices": ["10^-11 eV", "10^-9 eV"],
+                "target": "B"
+            }),
+        );
+
+        assert!(row.question.starts_with("Two quantum states"));
+        assert!(!row.question.contains("Here are some examples"));
+        assert!(!row.question.contains("A) 10^-11 eV"));
     }
 
     #[test]
