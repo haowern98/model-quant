@@ -1146,7 +1146,9 @@ body.resizing-bottom-panel * {
 .editor-tabs-bar {
   display: flex;
   min-width: 0;
-  background: var(--vscode-tab);
+  height: 35px;
+  box-sizing: border-box;
+  background: #252526;
   border-bottom: 1px solid var(--vscode-border-subtle);
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
 }
@@ -1154,14 +1156,14 @@ body.resizing-bottom-panel * {
 .layer-tabs-shell {
   flex: 1;
   min-width: 0;
-  height: 35px;
+  height: 100%;
   position: relative;
   overflow: hidden;
 }
 
 .layer-tabs {
   width: 100%;
-  height: 35px;
+  height: 100%;
   min-width: 0;
   display: flex;
   overflow-x: auto;
@@ -1196,7 +1198,8 @@ body.resizing-bottom-panel * {
   flex: 0 0 132px;
   min-width: 132px;
   max-width: 180px;
-  height: 35px;
+  height: 100%;
+  box-sizing: border-box;
   position: relative;
   border: 0;
   border-right: 1px solid var(--vscode-border-subtle);
@@ -1276,7 +1279,7 @@ body.resizing-bottom-panel * {
   gap: 6px;
   padding: 0 10px;
   border-left: 1px solid var(--vscode-border-subtle);
-  background: var(--vscode-tab);
+  background: #252526;
 }
 
 .editor-run-controls select {
