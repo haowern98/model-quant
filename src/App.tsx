@@ -437,7 +437,7 @@ function App() {
         selectedRunIds.includes("gpqa_diamond") &&
         !selectedRunIds.includes("ppl_check")
       ) {
-        setAppError("Open a GGUF model before running GPQA Diamond.");
+        setAppError("Open a GGUF model before running tests.");
       } else if (selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond")) {
         setAppError("Open a GGUF model before running selected tests.");
       }
