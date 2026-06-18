@@ -19,6 +19,7 @@ interface RunControlsProps {
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onNoTestsSelected: () => void;
   onTest: () => void;
   onCancelTest: () => void;
 }
@@ -35,6 +36,7 @@ export function RunControls({
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
+  onNoTestsSelected,
   onTest,
   onCancelTest,
 }: RunControlsProps) {
@@ -74,7 +76,7 @@ export function RunControls({
       : "Test Recipe";
   const hasSelectedRun = selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond");
   const hasSelectedGpqa = selectedRunIds.includes("gpqa_diamond");
-  const runDisabled = cancelling || (!hasModel && !hasSelectedGpqa);
+  const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedGpqa);
   const progressMessage =
     progress?.message.toLowerCase().includes("gpqa") ? "GPQA running" : progress?.message;
 
@@ -116,6 +118,7 @@ export function RunControls({
               onCancelTest();
             } else if (!hasSelectedRun) {
               setMenuOpen(true);
+              onNoTestsSelected();
             } else {
               onTest();
             }

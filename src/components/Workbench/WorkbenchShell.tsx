@@ -61,6 +61,7 @@ interface WorkbenchShellProps {
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
@@ -110,6 +111,7 @@ export function WorkbenchShell({
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
+  onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onInstallGpqaHarness,
@@ -326,6 +328,7 @@ export function WorkbenchShell({
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}
         onToggleRunTarget={onToggleRunTarget}
+        onNoTestsSelected={onNoTestsSelected}
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
         onTest={onTest}

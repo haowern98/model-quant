@@ -527,6 +527,10 @@ function App() {
     setProfile,
   ]);
 
+  const handleNoTestsSelected = useCallback(() => {
+    setAppError("Select at least one test before running.");
+  }, []);
+
   const handleInstallGpqaHarness = useCallback(async () => {
     startOperation();
     try {
@@ -671,6 +675,7 @@ function App() {
           onEvalPresetChange={setRecipeEvalPreset}
           onTestModeChange={setRecipeTestMode}
           onToggleRunTarget={handleToggleRunTarget}
+          onNoTestsSelected={handleNoTestsSelected}
           onGpqaShotModeChange={setGpqaShotMode}
           onGpqaConfigChange={setGpqaConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}

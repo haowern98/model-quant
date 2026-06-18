@@ -73,6 +73,7 @@ interface EditorPaneProps {
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onTest: () => void;
@@ -123,6 +124,7 @@ export function EditorPane({
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
+  onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onTest,
@@ -203,6 +205,7 @@ export function EditorPane({
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
           onToggleRunTarget={onToggleRunTarget}
+          onNoTestsSelected={onNoTestsSelected}
           onTest={onTest}
           onCancelTest={onCancelTest}
         />
