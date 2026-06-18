@@ -3079,6 +3079,12 @@ int32_t ms_runtime_get_recipe_chat_session_counters(
     out_counters->model_load_count = session->model_load_count;
     out_counters->context_reset_count = session->session->context_reset_count;
     out_counters->completion_count = session->completion_count;
+    out_counters->copied_tensor_count = session->session->copied_tensors;
+    out_counters->converted_tensor_count = session->session->converted_tensors;
+    out_counters->converted_bytes_before = session->session->converted_bytes_before;
+    out_counters->converted_bytes_after = session->session->converted_bytes_after;
+    out_counters->requested_target_count = session->session->requested_target_count;
+    out_counters->verified_target_count = session->session->verified_target_count;
     return 0;
 }
 

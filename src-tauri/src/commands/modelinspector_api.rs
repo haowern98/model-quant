@@ -12,7 +12,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
 use crate::commands::quant::RecipeStore;
-use crate::ffi::runtime_bindings::{ChatFinishReason, ChatGenerationParams, RecipeChatSession};
+use crate::ffi::runtime_bindings::{
+    ChatFinishReason, ChatGenerationParams, MsRuntimeChatSessionCounters, RecipeChatSession,
+};
 use crate::quant::recipe::{QuantType, RecipeState};
 
 const API_CHAT_CONTEXT_TOKENS: u32 = 20_000;
@@ -25,6 +27,29 @@ pub struct ModelInspectorApiStatus {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModelInspectorApiTensorSummary {
+    pub copied_tensor_count: u64,
+    pub converted_tensor_count: u64,
+    pub converted_bytes_before: u64,
+    pub converted_bytes_after: u64,
+    pub requested_target_count: u64,
+    pub verified_target_count: u64,
+}
+
+impl From<MsRuntimeChatSessionCounters> for ModelInspectorApiTensorSummary {
+    fn from(counters: MsRuntimeChatSessionCounters) -> Self {
+        Self {
+            copied_tensor_count: counters.copied_tensor_count,
+            converted_tensor_count: counters.converted_tensor_count,
+            converted_bytes_before: counters.converted_bytes_before,
+            converted_bytes_after: counters.converted_bytes_after,
+            requested_target_count: counters.requested_target_count,
+            verified_target_count: counters.verified_target_count,
+        }
+    }
 }
 
 pub struct ModelInspectorApiState(pub Mutex<ModelInspectorApiLifecycle>);
@@ -118,6 +143,7 @@ pub struct ModelInspectorApiServer {
     base_url: String,
     model_id: String,
     token: String,
+    tensor_summary: ModelInspectorApiTensorSummary,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -140,6 +166,20 @@ impl ModelInspectorApiServer {
             let _ = handle.join();
         }
     }
+}
+
+pub fn modelinspector_api_tensor_summary(
+    api_state: &ModelInspectorApiState,
+    base_url: &str,
+    model_id: &str,
+) -> Result<ModelInspectorApiTensorSummary, String> {
+    let guard = api_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .server
+        .as_ref()
+        .filter(|server| server.base_url == base_url && server.model_id == model_id)
+        .map(|server| server.tensor_summary)
+        .unwrap_or_default())
 }
 
 #[tauri::command]
@@ -223,6 +263,34 @@ pub async fn start_modelinspector_api(
         guard.finish_start(&startup, None);
         return Err("ModelInspector API startup cancelled".to_string());
     }
+    let tensor_summary = session
+        .counters()
+        .map(ModelInspectorApiTensorSummary::from)
+        .unwrap_or_default();
+    for line in [
+        format!(
+            "ModelInspector API summary: copied tensors {}",
+            tensor_summary.copied_tensor_count
+        ),
+        format!(
+            "ModelInspector API summary: converted tensors {}",
+            tensor_summary.converted_tensor_count
+        ),
+        format!(
+            "ModelInspector API summary: converted from {} B",
+            tensor_summary.converted_bytes_before
+        ),
+        format!(
+            "ModelInspector API summary: converted to {} B",
+            tensor_summary.converted_bytes_after
+        ),
+        format!(
+            "ModelInspector API summary: verified targets {}/{}",
+            tensor_summary.verified_target_count, tensor_summary.requested_target_count
+        ),
+    ] {
+        crate::progress::emit_api_output(&app, line);
+    }
     let server_state = Arc::new(HttpApiState {
         token: token.clone(),
         model_id: model_id.clone(),
@@ -254,6 +322,7 @@ pub async fn start_modelinspector_api(
         base_url: base_url.clone(),
         model_id: model_id.clone(),
         token,
+        tensor_summary,
         stop,
         handle: Some(handle),
     };

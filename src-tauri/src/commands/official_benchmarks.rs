@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Manager, State};
 
+use crate::commands::modelinspector_api::{
+    modelinspector_api_tensor_summary, ModelInspectorApiState, ModelInspectorApiTensorSummary,
+};
 use crate::profile::benchmark::{BenchmarkResult, StandardEvalReport, StandardEvalTaskReport};
 
 const GPQA_SAMPLE_COUNT: u64 = 198;
@@ -339,11 +342,22 @@ pub async fn run_gpqa_diamond_benchmark(
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
     app: tauri::AppHandle,
+    api_state: State<'_, ModelInspectorApiState>,
     runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<BenchmarkResult, String> {
+    let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        run_gpqa_diamond_blocking(base_url, api_key, model_id, shot_mode, config, app, child)
+        run_gpqa_diamond_blocking(
+            base_url,
+            api_key,
+            model_id,
+            shot_mode,
+            config,
+            tensor_summary,
+            app,
+            child,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -607,6 +621,7 @@ fn run_gpqa_diamond_blocking(
     model_id: String,
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
+    tensor_summary: ModelInspectorApiTensorSummary,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
 ) -> Result<BenchmarkResult, String> {
@@ -787,6 +802,7 @@ fn run_gpqa_diamond_blocking(
         shot_mode,
         &report_path,
         start.elapsed().as_millis() as f64,
+        tensor_summary,
     )?)
 }
 
@@ -1298,6 +1314,7 @@ fn gpqa_result_from_report(
     shot_mode: GpqaShotMode,
     report_path: &Path,
     elapsed_ms: f64,
+    tensor_summary: ModelInspectorApiTensorSummary,
 ) -> Result<BenchmarkResult, String> {
     let report_text = std::fs::read_to_string(report_path)
         .map_err(|e| format!("Failed to read EvalScope GPQA report: {e}"))?;
@@ -1327,12 +1344,12 @@ fn gpqa_result_from_report(
         )),
         model_tensor_count: None,
         model_metadata_count: None,
-        copied_tensor_count: 0,
-        converted_tensor_count: 0,
-        converted_bytes_before: 0,
-        converted_bytes_after: 0,
-        requested_target_count: 0,
-        verified_target_count: 0,
+        copied_tensor_count: tensor_summary.copied_tensor_count,
+        converted_tensor_count: tensor_summary.converted_tensor_count,
+        converted_bytes_before: tensor_summary.converted_bytes_before,
+        converted_bytes_after: tensor_summary.converted_bytes_after,
+        requested_target_count: tensor_summary.requested_target_count,
+        verified_target_count: tensor_summary.verified_target_count,
         baseline_benchmark: None,
         quality_eval: None,
         standard_eval: Some(StandardEvalReport {
@@ -1727,7 +1744,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_gpqa_benchmark_result_with_zero_verified_targets() {
+    fn creates_gpqa_benchmark_result_with_tensor_summary() {
         let report_dir = std::env::temp_dir().join(format!("gpqa-report-test-{}", unix_millis()));
         std::fs::create_dir_all(&report_dir).unwrap();
         let report_path = report_dir.join("gpqa_diamond.json");
@@ -1737,14 +1754,30 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            gpqa_result_from_report("mock.gguf", GpqaShotMode::FiveShotCot, &report_path, 123.0)
-                .unwrap();
+        let tensor_summary = ModelInspectorApiTensorSummary {
+            copied_tensor_count: 10,
+            converted_tensor_count: 2,
+            converted_bytes_before: 120,
+            converted_bytes_after: 80,
+            requested_target_count: 2,
+            verified_target_count: 2,
+        };
+        let result = gpqa_result_from_report(
+            "mock.gguf",
+            GpqaShotMode::FiveShotCot,
+            &report_path,
+            123.0,
+            tensor_summary,
+        )
+        .unwrap();
         let _ = std::fs::remove_dir_all(&report_dir);
 
         assert_eq!(result.test_mode, "official_gpqa_diamond");
-        assert_eq!(result.requested_target_count, 0);
-        assert_eq!(result.verified_target_count, 0);
+        assert_eq!(result.converted_tensor_count, 2);
+        assert_eq!(result.converted_bytes_before, 120);
+        assert_eq!(result.converted_bytes_after, 80);
+        assert_eq!(result.requested_target_count, 2);
+        assert_eq!(result.verified_target_count, 2);
         assert_eq!(result.standard_eval.unwrap().recipe_accuracy, 0.5);
     }
 }
