@@ -1707,14 +1707,15 @@ body.resizing-bottom-panel * {
 
 .benchmark-dataset-table {
   display: grid;
-  min-width: 760px;
+  width: 100%;
+  min-width: 0;
   border-top: 1px solid var(--vscode-border-subtle);
   font-size: 12px;
 }
 
 .benchmark-dataset-row {
   display: grid;
-  grid-template-columns: 44px minmax(220px, 1.3fr) minmax(220px, 1fr) 80px;
+  grid-template-columns: 44px minmax(260px, 1.2fr) minmax(280px, 1fr) minmax(240px, 0.9fr);
   border-bottom: 1px solid var(--vscode-border-subtle);
 }
 
