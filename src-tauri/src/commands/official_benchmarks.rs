@@ -281,6 +281,44 @@ pub async fn download_gpqa_diamond_dataset(
 }
 
 #[tauri::command]
+pub async fn delete_gpqa_diamond_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<GpqaDiamondStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&gpqa_dataset_cache_root(&app_data_dir))?;
+        Ok(detect_gpqa_diamond_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_gpqa_diamond_harness(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<GpqaDiamondStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&gpqa_env_dir(&app_data_dir).join("venv"))?;
+        Ok(detect_gpqa_diamond_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn get_gpqa_diamond_dataset_rows(
     app: tauri::AppHandle,
 ) -> Result<Vec<GpqaDatasetRow>, String> {
@@ -318,6 +356,26 @@ pub fn cancel_official_benchmark(runner: State<'_, OfficialBenchmarkRunner>) {
             let _ = child.kill();
         }
     }
+}
+
+fn ensure_official_benchmark_idle(child_slot: &Arc<Mutex<Option<Child>>>) -> Result<(), String> {
+    if child_slot.lock().map_err(|e| e.to_string())?.is_some() {
+        Err("A benchmark setup or run is already active.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn remove_path_if_exists(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+    .map_err(|e| format!("Failed to delete {}: {e}", path.display()))
 }
 
 fn detect_gpqa_diamond_status(app_data_dir: PathBuf) -> GpqaDiamondStatus {

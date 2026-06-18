@@ -29,7 +29,11 @@ import { BottomPanel } from "./BottomPanel";
 import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
-import { getGpqaDiamondDatasetRows } from "../../lib/tauri-bridge";
+import {
+  deleteGpqaDiamondDataset,
+  deleteGpqaDiamondHarness,
+  getGpqaDiamondDatasetRows,
+} from "../../lib/tauri-bridge";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
@@ -377,6 +381,24 @@ function GpqaBenchmarkView({
   const updateThinking = (thinking: GpqaThinkingMode) => {
     onConfigChange({ ...config, thinking });
   };
+  const handleDatasetAction = () => {
+    if (!status.datasetReady) {
+      onDownloadDataset();
+      return;
+    }
+    deleteGpqaDiamondDataset()
+      .then(() => onRefreshStatus())
+      .catch((error: unknown) => console.error(error));
+  };
+  const handleHarnessAction = () => {
+    if (!harnessReady) {
+      onInstallHarness();
+      return;
+    }
+    deleteGpqaDiamondHarness()
+      .then(() => onRefreshStatus())
+      .catch((error: unknown) => console.error(error));
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -397,10 +419,10 @@ function GpqaBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={running || !harnessReady}
-                  onClick={onDownloadDataset}
+                  disabled={running || (!status.datasetReady && !harnessReady)}
+                  onClick={handleDatasetAction}
                 >
-                  Download dataset
+                  {status.datasetReady ? "Delete dataset" : "Download dataset"}
                 </button>
                 <button
                   type="button"
@@ -413,10 +435,10 @@ function GpqaBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={running || Boolean(harnessReady)}
-                  onClick={onInstallHarness}
+                  disabled={running}
+                  onClick={handleHarnessAction}
                 >
-                  Install harness
+                  {harnessReady ? "Delete harness" : "Install harness"}
                 </button>
                 <button
                   type="button"

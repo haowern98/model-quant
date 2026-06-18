@@ -128,6 +128,14 @@ export async function downloadGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("download_gpqa_diamond_dataset");
 }
 
+export async function deleteGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_dataset");
+}
+
+export async function deleteGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_harness");
+}
+
 export async function runGpqaDiamondBenchmark(
   baseUrl: string,
   apiKey: string,
