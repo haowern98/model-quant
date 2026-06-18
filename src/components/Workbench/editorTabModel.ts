@@ -1,4 +1,5 @@
-export const EVAL_RESULTS_TAB_ID = "eval-results";
+import type { BenchmarkResult } from "../../types";
+
 export const GPQA_DETAILS_TAB_ID = "benchmark:gpqa_diamond:details";
 export const GPQA_DATASET_TAB_ID = "benchmark:gpqa_diamond:dataset";
 
@@ -9,8 +10,9 @@ export type EditorTab =
       layerIndex: number;
     }
   | {
-      id: typeof EVAL_RESULTS_TAB_ID;
+      id: `eval-results:${string}`;
       kind: "eval-results";
+      result: BenchmarkResult;
     }
   | {
       id: typeof GPQA_DETAILS_TAB_ID;
@@ -43,9 +45,17 @@ export function gpqaDatasetEditorTab(): EditorTab {
   };
 }
 
+export function evalResultsEditorTab(result: BenchmarkResult): EditorTab {
+  return {
+    id: `eval-results:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+    kind: "eval-results",
+    result,
+  };
+}
+
 export function editorTabLabel(tab: EditorTab): string {
   if (tab.kind === "eval-results") return "Eval Results";
-  if (tab.kind === "gpqa-details") return "GPQA Diamond Details";
+  if (tab.kind === "gpqa-details") return "GPQA Diamond";
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";
   if (tab.layerIndex < 0) return "Global tensors";
   return `Layer ${tab.layerIndex}`;

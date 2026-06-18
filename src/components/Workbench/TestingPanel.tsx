@@ -13,7 +13,7 @@ import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 interface TestingPanelProps {
   modelPath: string | null;
   assignments: Record<string, QuantType>;
-  benchmarkResult: BenchmarkResult | null;
+  latestBenchmarkResult: BenchmarkResult | null;
   running: boolean;
   cancelling: boolean;
   progress: ProgressEvent | null;
@@ -21,6 +21,7 @@ interface TestingPanelProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  gpqaEditorActive: boolean;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
   onInstallGpqaHarness: () => void;
   onOpenGpqaDetails: () => void;
@@ -28,7 +29,6 @@ interface TestingPanelProps {
 }
 
 type TestingSectionId = "localChecks" | "benchmarks" | "environment" | "latestRuns";
-type TestingBenchmarkId = "gpqaDiamond";
 
 function modeLabel(mode: RecipeTestMode): string {
   return mode === "compare_baseline" ? "Compare" : "Single";
@@ -38,27 +38,27 @@ function statusLabel({
   running,
   cancelling,
   progress,
-  benchmarkResult,
-}: Pick<TestingPanelProps, "running" | "cancelling" | "progress" | "benchmarkResult">) {
+  latestBenchmarkResult,
+}: Pick<TestingPanelProps, "running" | "cancelling" | "progress" | "latestBenchmarkResult">) {
   if (cancelling) return "Cancelling";
   if (running) return progress?.message ?? "Running";
-  if (benchmarkResult) return "Latest run ready";
+  if (latestBenchmarkResult) return "Latest run ready";
   return "Ready";
 }
 
 export function TestingPanel({
   modelPath,
   assignments,
-  benchmarkResult,
+  latestBenchmarkResult,
   running,
   cancelling,
   progress,
   testMode,
   selectedRunIds,
   gpqaStatus,
+  gpqaEditorActive,
   onToggleRunTarget,
   onOpenGpqaDetails,
-  onOpenGpqaDataset,
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
     localChecks: true,
@@ -66,23 +66,16 @@ export function TestingPanel({
     environment: true,
     latestRuns: true,
   });
-  const [benchmarks, setBenchmarks] = useState<Record<TestingBenchmarkId, boolean>>({
-    gpqaDiamond: true,
-  });
 
   const changedTargetCount = Object.keys(assignments).length;
   const verifiedTargets =
-    benchmarkResult?.requestedTargetCount !== undefined &&
-    benchmarkResult?.verifiedTargetCount !== undefined
-      ? `${benchmarkResult.verifiedTargetCount}/${benchmarkResult.requestedTargetCount}`
+    latestBenchmarkResult?.requestedTargetCount !== undefined &&
+    latestBenchmarkResult?.verifiedTargetCount !== undefined
+      ? `${latestBenchmarkResult.verifiedTargetCount}/${latestBenchmarkResult.requestedTargetCount}`
       : "0/0";
 
   const toggleSection = (section: TestingSectionId) => {
     setSections((current) => ({ ...current, [section]: !current[section] }));
-  };
-
-  const toggleBenchmark = (benchmark: TestingBenchmarkId) => {
-    setBenchmarks((current) => ({ ...current, [benchmark]: !current[benchmark] }));
   };
 
   return (
@@ -131,24 +124,19 @@ export function TestingPanel({
           onClick={() => toggleSection("benchmarks")}
         />
         {sections.benchmarks && (
-          <div className="explorer-section-body">
-            <ExplorerTreeRow
-              label="GPQA Diamond"
-              right={gpqaStatus.statusLabel}
-              expanded={benchmarks.gpqaDiamond}
-              onToggle={() => toggleBenchmark("gpqaDiamond")}
-              ariaLabel={`GPQA Diamond ${gpqaStatus.statusLabel}`}
+          <div className="explorer-section-body benchmark-card-list">
+            <BenchmarkCard
+              title="GPQA Diamond"
+              description="Graduate-level science QA benchmark"
+              meta="EvalScope · 198 samples · 5-shot CoT"
+              status={gpqaStatus.statusLabel}
+              active={gpqaEditorActive}
+              onClick={onOpenGpqaDetails}
             />
-            {benchmarks.gpqaDiamond && (
-              <>
-                <TestingNavRow label="Details" ariaLabel="GPQA Diamond Details" onClick={onOpenGpqaDetails} />
-                <TestingNavRow label="Dataset" ariaLabel="GPQA Diamond Dataset" onClick={onOpenGpqaDataset} />
-              </>
-            )}
-            <ExplorerTreeRow label="MMLU-Pro" right="Download" ariaLabel="MMLU-Pro Download" />
-            <ExplorerTreeRow label="MMLU-Redux" right="Frozen" ariaLabel="MMLU-Redux Frozen" />
-            <ExplorerTreeRow label="SuperGPQA" right="Download" ariaLabel="SuperGPQA Download" />
-            <ExplorerTreeRow label="Claw-Eval" right="Needs harness" ariaLabel="Claw-Eval Needs harness" />
+            <BenchmarkCard title="MMLU-Pro" description="Multitask professional reasoning" status="Download" />
+            <BenchmarkCard title="MMLU-Redux" description="Cleaned MMLU benchmark split" status="Frozen" />
+            <BenchmarkCard title="SuperGPQA" description="Broad graduate-level QA benchmark" status="Download" />
+            <BenchmarkCard title="Claw-Eval" description="Agentic tool-use evaluation" status="Needs harness" />
           </div>
         )}
       </section>
@@ -179,7 +167,7 @@ export function TestingPanel({
             <ExplorerTreeRow label="GPQA Diamond" right="63.1%" ariaLabel="GPQA Diamond 63.1%" />
             <ExplorerTreeRow
               label="PPL Check"
-              right={statusLabel({ running, cancelling, progress, benchmarkResult })}
+              right={statusLabel({ running, cancelling, progress, latestBenchmarkResult })}
               ariaLabel="PPL Check latest status"
             />
           </div>
@@ -198,23 +186,35 @@ function TestingDetailRow({ label, value }: { label: string; value: string | num
   );
 }
 
-function TestingNavRow({
-  label,
-  ariaLabel,
+function BenchmarkCard({
+  title,
+  description,
+  meta,
+  status,
+  active,
   onClick,
 }: {
-  label: string;
-  ariaLabel: string;
-  onClick: () => void;
+  title: string;
+  description: string;
+  meta?: string;
+  status: string;
+  active?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
-      className="tensor-child-row testing-nav-row"
-      aria-label={ariaLabel}
+      className={`benchmark-card ${active ? "active" : ""}`}
+      aria-label={`${title} ${status}`}
       onClick={onClick}
     >
-      <span>{label}</span>
+      <span className="benchmark-card-icon codicon codicon-beaker" aria-hidden="true" />
+      <span className="benchmark-card-copy">
+        <strong>{title}</strong>
+        <span>{description}</span>
+        {meta ? <small>{meta}</small> : null}
+      </span>
+      <span className="benchmark-card-status">{status}</span>
     </button>
   );
 }

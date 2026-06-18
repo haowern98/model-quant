@@ -171,7 +171,10 @@ export function ExplorerPanel({
                       expanded={expanded}
                       active={active}
                       aria-label={`${sectionLabel(layerIndex)} ${layerTensors.length}`}
-                      onClick={() => onOpenLayer(layerIndex)}
+                      onClick={() => {
+                        if (expanded) onToggleLayer(layerIndex);
+                        else onOpenLayer(layerIndex);
+                      }}
                       onToggle={() => onToggleLayer(layerIndex)}
                     />
                     {expanded &&

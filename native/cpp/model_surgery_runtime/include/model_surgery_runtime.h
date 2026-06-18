@@ -97,6 +97,12 @@ typedef struct ms_runtime_chat_session_counters {
     uint64_t model_load_count;
     uint64_t context_reset_count;
     uint64_t completion_count;
+    uint64_t copied_tensor_count;
+    uint64_t converted_tensor_count;
+    uint64_t converted_bytes_before;
+    uint64_t converted_bytes_after;
+    uint64_t requested_target_count;
+    uint64_t verified_target_count;
 } ms_runtime_chat_session_counters;
 
 typedef struct ms_recipe_analysis {

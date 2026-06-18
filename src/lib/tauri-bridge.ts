@@ -11,6 +11,7 @@ import type {
   HardwareSnapshot,
   ModelInspectorApiStatus,
   GpqaBenchmarkConfig,
+  GpqaDatasetRow,
   GpqaDiamondStatus,
   GpqaShotMode,
 } from "../types";
@@ -115,12 +116,24 @@ export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("get_gpqa_diamond_status");
 }
 
+export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {
+  return invoke<GpqaDatasetRow[]>("get_gpqa_diamond_dataset_rows");
+}
+
 export async function installGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("install_gpqa_diamond_harness");
 }
 
 export async function downloadGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("download_gpqa_diamond_dataset");
+}
+
+export async function deleteGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_dataset");
+}
+
+export async function deleteGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
+  return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_harness");
 }
 
 export async function runGpqaDiamondBenchmark(

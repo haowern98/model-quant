@@ -147,6 +147,12 @@ pub struct MsRuntimeChatSessionCounters {
     pub model_load_count: u64,
     pub context_reset_count: u64,
     pub completion_count: u64,
+    pub copied_tensor_count: u64,
+    pub converted_tensor_count: u64,
+    pub converted_bytes_before: u64,
+    pub converted_bytes_after: u64,
+    pub requested_target_count: u64,
+    pub verified_target_count: u64,
 }
 
 #[repr(C)]
@@ -1145,6 +1151,12 @@ impl RecipeChatSession {
             model_load_count: 0,
             context_reset_count: 0,
             completion_count: 0,
+            copied_tensor_count: 0,
+            converted_tensor_count: 0,
+            converted_bytes_before: 0,
+            converted_bytes_after: 0,
+            requested_target_count: 0,
+            verified_target_count: 0,
         };
         let result = unsafe {
             ms_runtime_get_recipe_chat_session_counters(self.ptr.as_ptr(), &mut counters)

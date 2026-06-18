@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   AssignPattern,
   BenchmarkRunId,
@@ -36,7 +36,7 @@ interface WorkbenchShellProps {
   activeLayerIndex: number | null;
   openEditors: EditorTab[];
   activeEditorId: string | null;
-  benchmarkResult: BenchmarkResult | null;
+  latestBenchmarkResult: BenchmarkResult | null;
   expandedLayers: Set<number>;
   running: boolean;
   cancelling: boolean;
@@ -49,6 +49,7 @@ interface WorkbenchShellProps {
   gpqaStatus: GpqaDiamondStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
+  modelExplorerFocusVersion: number;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -60,6 +61,7 @@ interface WorkbenchShellProps {
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
+  onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
@@ -84,7 +86,7 @@ export function WorkbenchShell({
   activeLayerIndex,
   openEditors,
   activeEditorId,
-  benchmarkResult,
+  latestBenchmarkResult,
   expandedLayers,
   running,
   cancelling,
@@ -97,6 +99,7 @@ export function WorkbenchShell({
   gpqaStatus,
   gpqaShotMode,
   gpqaConfig,
+  modelExplorerFocusVersion,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -108,6 +111,7 @@ export function WorkbenchShell({
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
+  onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onInstallGpqaHarness,
@@ -127,6 +131,23 @@ export function WorkbenchShell({
   const [activeActivity, setActiveActivity] = useState<ActivityId>("gguf");
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
   const sidePanelVisible = explorerWidth > 0;
+  const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
+  const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
+
+  useEffect(() => {
+    if (modelExplorerFocusVersion === 0) return;
+    setActiveActivity("gguf");
+    setExplorerWidth((width) => {
+      if (width > 0) return width;
+      const restoredWidth = clamp(
+        lastExpandedExplorerWidth.current,
+        EXPLORER_MIN_WIDTH,
+        explorerMaxWidth(),
+      );
+      lastExpandedExplorerWidth.current = restoredWidth;
+      return restoredWidth;
+    });
+  }, [modelExplorerFocusVersion]);
 
   const explorerMaxWidth = () => {
     const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
@@ -213,7 +234,7 @@ export function WorkbenchShell({
         <TestingPanel
           modelPath={modelPath}
           assignments={assignments}
-          benchmarkResult={benchmarkResult}
+          latestBenchmarkResult={latestBenchmarkResult}
           running={running}
           cancelling={cancelling}
           progress={progress}
@@ -221,6 +242,7 @@ export function WorkbenchShell({
           testMode={testMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          gpqaEditorActive={gpqaEditorActive}
           onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}
@@ -286,7 +308,6 @@ export function WorkbenchShell({
         apiOutputLines={apiOutputLines}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
-        benchmarkResult={benchmarkResult}
         tensors={selectedTensors}
         assignments={assignments}
         profile={profile}
@@ -306,6 +327,7 @@ export function WorkbenchShell({
         onEvalPresetChange={onEvalPresetChange}
         onTestModeChange={onTestModeChange}
         onToggleRunTarget={onToggleRunTarget}
+        onNoTestsSelected={onNoTestsSelected}
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
         onTest={onTest}

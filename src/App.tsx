@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import {
-  EVAL_RESULTS_TAB_ID,
+  evalResultsEditorTab,
   gpqaDatasetEditorTab,
   gpqaDetailsEditorTab,
   layerEditorTab,
@@ -227,11 +227,10 @@ function App() {
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
+  const [modelExplorerFocusVersion, setModelExplorerFocusVersion] = useState(0);
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
     () => new Set(),
   );
-  const [benchmarkResult, setBenchmarkResult] =
-    useState<BenchmarkResult | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
@@ -276,13 +275,18 @@ function App() {
         currentQuant: t.currentQuant,
       }));
       resetRecipeForModel(path, tensors);
-      setOpenEditors([]);
-      setActiveEditorId(null);
+      setOpenEditors((current) => current.filter((editor) => editor.kind !== "layer"));
+      setActiveEditorId((active) => {
+        if (!active) return null;
+        const activeEditor = openEditors.find((editor) => editor.id === active);
+        if (activeEditor?.kind !== "layer") return active;
+        return openEditors.find((editor) => editor.kind !== "layer")?.id ?? null;
+      });
+      setModelExplorerFocusVersion((version) => version + 1);
       setExpandedLayers(new Set());
-      setBenchmarkResult(null);
       setAppError(null);
     },
-    [resetRecipeForModel],
+    [openEditors, resetRecipeForModel],
   );
 
   const handleOpenLayer = useCallback((layerIndex: number) => {
@@ -337,18 +341,15 @@ function App() {
   }, []);
 
   const handleDiscardResults = useCallback(() => {
-    setBenchmarkResult(null);
-    handleCloseEditor(EVAL_RESULTS_TAB_ID);
-  }, [handleCloseEditor]);
+    if (!activeEditorId) return;
+    const activeEditor = openEditors.find((editor) => editor.id === activeEditorId);
+    if (activeEditor?.kind === "eval-results") handleCloseEditor(activeEditorId);
+  }, [activeEditorId, handleCloseEditor, openEditors]);
 
   const openEvalResults = useCallback((result: BenchmarkResult) => {
-    setBenchmarkResult(result);
-    setOpenEditors((current) =>
-      current.some((editor) => editor.id === EVAL_RESULTS_TAB_ID)
-        ? current
-        : [...current, { id: EVAL_RESULTS_TAB_ID, kind: "eval-results" }],
-    );
-    setActiveEditorId(EVAL_RESULTS_TAB_ID);
+    const tab = evalResultsEditorTab(result);
+    setOpenEditors((current) => [...current, tab]);
+    setActiveEditorId(tab.id);
   }, []);
 
   const openEditorTab = useCallback((tab: EditorTab) => {
@@ -436,7 +437,7 @@ function App() {
         selectedRunIds.includes("gpqa_diamond") &&
         !selectedRunIds.includes("ppl_check")
       ) {
-        setAppError("Open a GGUF model before running GPQA Diamond.");
+        setAppError("Open a GGUF model before running tests.");
       } else if (selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond")) {
         setAppError("Open a GGUF model before running selected tests.");
       }
@@ -519,6 +520,10 @@ function App() {
     openEvalResults,
     setProfile,
   ]);
+
+  const handleNoTestsSelected = useCallback(() => {
+    setAppError("Select at least one test before running.");
+  }, []);
 
   const handleInstallGpqaHarness = useCallback(async () => {
     startOperation();
@@ -608,14 +613,33 @@ function App() {
     activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
+  const latestBenchmarkResult =
+    [...openEditors]
+      .reverse()
+      .find(
+        (editor): editor is Extract<EditorTab, { kind: "eval-results" }> =>
+          editor.kind === "eval-results",
+      )?.result ?? null;
+  const visibleError = modelError ?? appError;
 
   return (
     <div className="app-root">
       <TitleBar modelPath={modelPath} onOpenModel={handleOpenModel} />
       <div className="app-body">
-        {(modelError || appError) && (
-          <div className="app-error" role="alert">
-            {modelError ?? appError}
+        {visibleError && (
+          <div className="app-error-toast" role="alert">
+            <span className="codicon codicon-error app-error-toast-icon" aria-hidden="true" />
+            <span className="app-error-toast-message">{visibleError}</span>
+            <button
+              type="button"
+              className="app-error-toast-close"
+              aria-label="Dismiss error"
+              onClick={() => {
+                setAppError(null);
+              }}
+            >
+              <span className="codicon codicon-close" aria-hidden="true" />
+            </button>
           </div>
         )}
         <WorkbenchShell
@@ -627,7 +651,7 @@ function App() {
           activeLayerIndex={selectedLayerIndex}
           openEditors={openEditors}
           activeEditorId={activeEditorId}
-          benchmarkResult={benchmarkResult}
+          latestBenchmarkResult={latestBenchmarkResult}
           expandedLayers={expandedLayers}
           running={running}
           cancelling={cancelling}
@@ -640,6 +664,7 @@ function App() {
           gpqaStatus={gpqaStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
+          modelExplorerFocusVersion={modelExplorerFocusVersion}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
@@ -651,6 +676,7 @@ function App() {
           onEvalPresetChange={setRecipeEvalPreset}
           onTestModeChange={setRecipeTestMode}
           onToggleRunTarget={handleToggleRunTarget}
+          onNoTestsSelected={handleNoTestsSelected}
           onGpqaShotModeChange={setGpqaShotMode}
           onGpqaConfigChange={setGpqaConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}

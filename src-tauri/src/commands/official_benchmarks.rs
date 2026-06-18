@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{Manager, State};
 
+use crate::commands::modelinspector_api::{
+    modelinspector_api_tensor_summary, ModelInspectorApiState, ModelInspectorApiTensorSummary,
+};
 use crate::profile::benchmark::{BenchmarkResult, StandardEvalReport, StandardEvalTaskReport};
 
 const GPQA_SAMPLE_COUNT: u64 = 198;
@@ -32,6 +35,15 @@ pub struct GpqaDiamondStatus {
     pub dataset_url: String,
     pub expected_dataset_hash: String,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GpqaDatasetRow {
+    pub index: usize,
+    pub question: String,
+    pub choices: Vec<String>,
+    pub answer: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -272,6 +284,57 @@ pub async fn download_gpqa_diamond_dataset(
 }
 
 #[tauri::command]
+pub async fn delete_gpqa_diamond_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<GpqaDiamondStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&gpqa_dataset_cache_root(&app_data_dir))?;
+        Ok(detect_gpqa_diamond_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_gpqa_diamond_harness(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<GpqaDiamondStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&gpqa_env_dir(&app_data_dir).join("venv"))?;
+        Ok(detect_gpqa_diamond_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_gpqa_diamond_dataset_rows(
+    app: tauri::AppHandle,
+) -> Result<Vec<GpqaDatasetRow>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || read_gpqa_dataset_rows(&app_data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn run_gpqa_diamond_benchmark(
     base_url: String,
     api_key: String,
@@ -279,11 +342,22 @@ pub async fn run_gpqa_diamond_benchmark(
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
     app: tauri::AppHandle,
+    api_state: State<'_, ModelInspectorApiState>,
     runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<BenchmarkResult, String> {
+    let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        run_gpqa_diamond_blocking(base_url, api_key, model_id, shot_mode, config, app, child)
+        run_gpqa_diamond_blocking(
+            base_url,
+            api_key,
+            model_id,
+            shot_mode,
+            config,
+            tensor_summary,
+            app,
+            child,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -296,6 +370,26 @@ pub fn cancel_official_benchmark(runner: State<'_, OfficialBenchmarkRunner>) {
             let _ = child.kill();
         }
     }
+}
+
+fn ensure_official_benchmark_idle(child_slot: &Arc<Mutex<Option<Child>>>) -> Result<(), String> {
+    if child_slot.lock().map_err(|e| e.to_string())?.is_some() {
+        Err("A benchmark setup or run is already active.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn remove_path_if_exists(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+    .map_err(|e| format!("Failed to delete {}: {e}", path.display()))
 }
 
 fn detect_gpqa_diamond_status(app_data_dir: PathBuf) -> GpqaDiamondStatus {
@@ -443,7 +537,7 @@ import json
 import sys
 from pathlib import Path
 
-dataset_root, marker_path = sys.argv[1], sys.argv[2]
+dataset_root, marker_path, rows_path = sys.argv[1], sys.argv[2], sys.argv[3]
 from evalscope.config import TaskConfig
 from evalscope.benchmarks.gpqa.gpqa_adapter import GPQAAdapter
 from evalscope.api.benchmark import BenchmarkMeta
@@ -473,6 +567,17 @@ dataset = adapter.load_dataset()
 sample_count = sum(len(samples) for samples in dataset.values())
 if sample_count != 198:
     raise SystemExit(f"Expected 198 GPQA Diamond samples, got {sample_count}")
+rows = []
+for samples in dataset.values():
+    for sample in samples:
+        if hasattr(sample, "model_dump"):
+            rows.append(sample.model_dump())
+        elif hasattr(sample, "dict"):
+            rows.append(sample.dict())
+        elif isinstance(sample, dict):
+            rows.append(sample)
+        else:
+            rows.append(vars(sample))
 marker = {
     "version": 1,
     "dataset": "gpqa_diamond",
@@ -481,6 +586,7 @@ marker = {
 }
 Path(marker_path).parent.mkdir(parents=True, exist_ok=True)
 Path(marker_path).write_text(json.dumps(marker, indent=2), encoding="utf-8")
+Path(rows_path).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 print("gpqa_diamond_samples=" + str(sample_count))
 "#;
 
@@ -491,6 +597,9 @@ print("gpqa_diamond_samples=" + str(sample_count))
             script.to_string(),
             dataset_root.to_string_lossy().to_string(),
             gpqa_dataset_marker_path(&app_data_dir)
+                .to_string_lossy()
+                .to_string(),
+            gpqa_dataset_rows_path(&app_data_dir)
                 .to_string_lossy()
                 .to_string(),
         ],
@@ -512,6 +621,7 @@ fn run_gpqa_diamond_blocking(
     model_id: String,
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
+    tensor_summary: ModelInspectorApiTensorSummary,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
 ) -> Result<BenchmarkResult, String> {
@@ -692,6 +802,7 @@ fn run_gpqa_diamond_blocking(
         shot_mode,
         &report_path,
         start.elapsed().as_millis() as f64,
+        tensor_summary,
     )?)
 }
 
@@ -778,6 +889,10 @@ fn gpqa_dataset_cache_root(app_data_dir: &Path) -> PathBuf {
 
 fn gpqa_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
     gpqa_dataset_cache_root(app_data_dir).join("gpqa_diamond_dataset_ready.json")
+}
+
+fn gpqa_dataset_rows_path(app_data_dir: &Path) -> PathBuf {
+    gpqa_dataset_cache_root(app_data_dir).join("gpqa_diamond_rows.json")
 }
 
 fn gpqa_run_dir(app_data_dir: &Path) -> PathBuf {
@@ -1069,6 +1184,102 @@ fn dataset_detail(state: &GpqaDatasetState) -> String {
     }
 }
 
+fn read_gpqa_dataset_rows(app_data_dir: &Path) -> Result<Vec<GpqaDatasetRow>, String> {
+    if !matches!(
+        detect_gpqa_dataset_state(app_data_dir),
+        GpqaDatasetState::Verified { .. }
+    ) {
+        return Err("GPQA Diamond dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let text = std::fs::read_to_string(gpqa_dataset_rows_path(app_data_dir)).map_err(|e| {
+        format!("Failed to read GPQA Diamond dataset rows: {e}. Click Download dataset to refresh the preview.")
+    })?;
+    let rows_json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Failed to parse GPQA rows JSON: {e}"))?;
+    let rows = rows_json
+        .as_array()
+        .ok_or_else(|| "GPQA rows JSON must be an array.".to_string())?
+        .iter()
+        .enumerate()
+        .map(|(index, row)| gpqa_dataset_row_from_json(index + 1, row))
+        .collect();
+    Ok(rows)
+}
+
+fn gpqa_dataset_row_from_json(index: usize, row: &serde_json::Value) -> GpqaDatasetRow {
+    GpqaDatasetRow {
+        index,
+        question: string_field(row, &["question", "Question", "problem", "query", "prompt"])
+            .or_else(|| gpqa_question_from_input(row))
+            .unwrap_or_default(),
+        choices: choices_field(row, &["choices", "Choices", "options", "Options"]),
+        answer: row
+            .get("metadata")
+            .and_then(|metadata| string_field(metadata, &["correct_answer", "correctAnswer"]))
+            .or_else(|| {
+                string_field(
+                    row,
+                    &[
+                        "answer",
+                        "Answer",
+                        "target",
+                        "gold",
+                        "label",
+                        "correct_answer",
+                    ],
+                )
+            }),
+    }
+}
+
+fn gpqa_question_from_input(row: &serde_json::Value) -> Option<String> {
+    let content = row
+        .get("input")?
+        .as_array()?
+        .first()?
+        .get("content")?
+        .as_str()?;
+    let question = content
+        .rsplit_once("Think step by step before answering.")?
+        .1
+        .split("\nA)")
+        .next()?
+        .trim();
+    (!question.is_empty()).then(|| question.to_string())
+}
+
+fn string_field(row: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| row.get(*key))
+        .find_map(|value| value.as_str().map(str::to_string))
+}
+
+fn choices_field(row: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+    for key in keys {
+        let Some(value) = row.get(*key) else {
+            continue;
+        };
+        if let Some(values) = value.as_array() {
+            return values
+                .iter()
+                .filter_map(|choice| choice.as_str().map(str::to_string))
+                .collect();
+        }
+        if let Some(values) = value.as_object() {
+            let mut choices: Vec<_> = values
+                .iter()
+                .filter_map(|(label, choice)| {
+                    choice.as_str().map(|text| format!("{}. {}", label, text))
+                })
+                .collect();
+            choices.sort();
+            return choices;
+        }
+    }
+    Vec::new()
+}
+
 fn probe_value(output: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     output.lines().find_map(|line| {
@@ -1103,6 +1314,7 @@ fn gpqa_result_from_report(
     shot_mode: GpqaShotMode,
     report_path: &Path,
     elapsed_ms: f64,
+    tensor_summary: ModelInspectorApiTensorSummary,
 ) -> Result<BenchmarkResult, String> {
     let report_text = std::fs::read_to_string(report_path)
         .map_err(|e| format!("Failed to read EvalScope GPQA report: {e}"))?;
@@ -1132,12 +1344,12 @@ fn gpqa_result_from_report(
         )),
         model_tensor_count: None,
         model_metadata_count: None,
-        copied_tensor_count: 0,
-        converted_tensor_count: 0,
-        converted_bytes_before: 0,
-        converted_bytes_after: 0,
-        requested_target_count: 0,
-        verified_target_count: 0,
+        copied_tensor_count: tensor_summary.copied_tensor_count,
+        converted_tensor_count: tensor_summary.converted_tensor_count,
+        converted_bytes_before: tensor_summary.converted_bytes_before,
+        converted_bytes_after: tensor_summary.converted_bytes_after,
+        requested_target_count: tensor_summary.requested_target_count,
+        verified_target_count: tensor_summary.verified_target_count,
         baseline_benchmark: None,
         quality_eval: None,
         standard_eval: Some(StandardEvalReport {
@@ -1303,6 +1515,44 @@ mod tests {
         assert_eq!(status.status_label, "Download");
         assert!(!status.dataset_ready);
         assert!(status.detail.contains("dataset"));
+    }
+
+    #[test]
+    fn normalizes_gpqa_dataset_row_from_evalscope_json() {
+        let row = gpqa_dataset_row_from_json(
+            7,
+            &json!({
+                "question": "Which energy difference allows two quantum states to be clearly resolved?",
+                "choices": ["A. small", "B. medium", "C. large", "D. tiny"],
+                "target": "C",
+                "metadata": {
+                    "correct_answer": "large"
+                }
+            }),
+        );
+
+        assert_eq!(row.index, 7);
+        assert!(row.question.contains("energy difference"));
+        assert_eq!(row.choices.len(), 4);
+        assert_eq!(row.answer.as_deref(), Some("large"));
+    }
+
+    #[test]
+    fn extracts_gpqa_question_from_evalscope_prompt() {
+        let row = gpqa_dataset_row_from_json(
+            1,
+            &json!({
+                "input": [{
+                    "content": "Here are some examples...\n\nAnswer the following multiple choice question. The last line of your response should be of the following format: 'ANSWER: [LETTER]' (without quotes) where [LETTER] is one of A,B,C,D. Think step by step before answering.\n\nTwo quantum states with energies E1 and E2 have a lifetime of 10^-9 sec and 10^-8 sec, respectively. We want to clearly distinguish these two energy levels. Which one of the following options could be their energy difference so that they can be clearly resolved?\n\n\nA) 10^-11 eV\nB) 10^-9 eV"
+                }],
+                "choices": ["10^-11 eV", "10^-9 eV"],
+                "target": "B"
+            }),
+        );
+
+        assert!(row.question.starts_with("Two quantum states"));
+        assert!(!row.question.contains("Here are some examples"));
+        assert!(!row.question.contains("A) 10^-11 eV"));
     }
 
     #[test]
@@ -1494,7 +1744,7 @@ mod tests {
     }
 
     #[test]
-    fn creates_gpqa_benchmark_result_with_zero_verified_targets() {
+    fn creates_gpqa_benchmark_result_with_tensor_summary() {
         let report_dir = std::env::temp_dir().join(format!("gpqa-report-test-{}", unix_millis()));
         std::fs::create_dir_all(&report_dir).unwrap();
         let report_path = report_dir.join("gpqa_diamond.json");
@@ -1504,14 +1754,30 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            gpqa_result_from_report("mock.gguf", GpqaShotMode::FiveShotCot, &report_path, 123.0)
-                .unwrap();
+        let tensor_summary = ModelInspectorApiTensorSummary {
+            copied_tensor_count: 10,
+            converted_tensor_count: 2,
+            converted_bytes_before: 120,
+            converted_bytes_after: 80,
+            requested_target_count: 2,
+            verified_target_count: 2,
+        };
+        let result = gpqa_result_from_report(
+            "mock.gguf",
+            GpqaShotMode::FiveShotCot,
+            &report_path,
+            123.0,
+            tensor_summary,
+        )
+        .unwrap();
         let _ = std::fs::remove_dir_all(&report_dir);
 
         assert_eq!(result.test_mode, "official_gpqa_diamond");
-        assert_eq!(result.requested_target_count, 0);
-        assert_eq!(result.verified_target_count, 0);
+        assert_eq!(result.converted_tensor_count, 2);
+        assert_eq!(result.converted_bytes_before, 120);
+        assert_eq!(result.converted_bytes_after, 80);
+        assert_eq!(result.requested_target_count, 2);
+        assert_eq!(result.verified_target_count, 2);
         assert_eq!(result.standard_eval.unwrap().recipe_accuracy, 0.5);
     }
 }

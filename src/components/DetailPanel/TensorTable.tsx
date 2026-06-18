@@ -33,7 +33,8 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
             const currentSize = t.sizeBytes;
             const targetBits =
               QUANT_TYPES.find(q => q.value === assignedQuant)?.bitsPerWeight ?? 4.5;
-            const targetSize = estQuantSize(t.shape, targetBits);
+            const targetSize =
+              assignedQuant === t.currentQuant ? currentSize : estQuantSize(t.shape, targetBits);
             const canAssignTarget = t.quantPreflight?.canQuantize ?? true;
             const disabledReason = t.quantPreflight?.blockedReason ?? 'Tensor cannot be quantized';
             const allowedTargetQuants = t.quantPreflight?.allowedTargetQuants;
