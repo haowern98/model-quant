@@ -1150,7 +1150,6 @@ body.resizing-bottom-panel * {
   box-sizing: border-box;
   background: #252526;
   border-bottom: 1px solid var(--vscode-border-subtle);
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
 }
 
 .layer-tabs-shell {
