@@ -1198,17 +1198,22 @@ fn gpqa_dataset_row_from_json(index: usize, row: &serde_json::Value) -> GpqaData
             .or_else(|| gpqa_question_from_input(row))
             .unwrap_or_default(),
         choices: choices_field(row, &["choices", "Choices", "options", "Options"]),
-        answer: string_field(
-            row,
-            &[
-                "answer",
-                "Answer",
-                "target",
-                "gold",
-                "label",
-                "correct_answer",
-            ],
-        ),
+        answer: row
+            .get("metadata")
+            .and_then(|metadata| string_field(metadata, &["correct_answer", "correctAnswer"]))
+            .or_else(|| {
+                string_field(
+                    row,
+                    &[
+                        "answer",
+                        "Answer",
+                        "target",
+                        "gold",
+                        "label",
+                        "correct_answer",
+                    ],
+                )
+            }),
     }
 }
 
@@ -1502,14 +1507,17 @@ mod tests {
             &json!({
                 "question": "Which energy difference allows two quantum states to be clearly resolved?",
                 "choices": ["A. small", "B. medium", "C. large", "D. tiny"],
-                "answer": "C"
+                "target": "C",
+                "metadata": {
+                    "correct_answer": "large"
+                }
             }),
         );
 
         assert_eq!(row.index, 7);
         assert!(row.question.contains("energy difference"));
         assert_eq!(row.choices.len(), 4);
-        assert_eq!(row.answer.as_deref(), Some("C"));
+        assert_eq!(row.answer.as_deref(), Some("large"));
     }
 
     #[test]
