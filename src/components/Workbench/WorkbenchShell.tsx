@@ -36,7 +36,7 @@ interface WorkbenchShellProps {
   activeLayerIndex: number | null;
   openEditors: EditorTab[];
   activeEditorId: string | null;
-  benchmarkResult: BenchmarkResult | null;
+  latestBenchmarkResult: BenchmarkResult | null;
   expandedLayers: Set<number>;
   running: boolean;
   cancelling: boolean;
@@ -86,7 +86,7 @@ export function WorkbenchShell({
   activeLayerIndex,
   openEditors,
   activeEditorId,
-  benchmarkResult,
+  latestBenchmarkResult,
   expandedLayers,
   running,
   cancelling,
@@ -234,7 +234,7 @@ export function WorkbenchShell({
         <TestingPanel
           modelPath={modelPath}
           assignments={assignments}
-          benchmarkResult={benchmarkResult}
+          latestBenchmarkResult={latestBenchmarkResult}
           running={running}
           cancelling={cancelling}
           progress={progress}
@@ -308,7 +308,6 @@ export function WorkbenchShell({
         apiOutputLines={apiOutputLines}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
-        benchmarkResult={benchmarkResult}
         tensors={selectedTensors}
         assignments={assignments}
         profile={profile}

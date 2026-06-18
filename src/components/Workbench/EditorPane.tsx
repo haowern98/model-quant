@@ -9,7 +9,6 @@ import {
 } from "react";
 import { TensorTable } from "../DetailPanel/TensorTable";
 import type {
-  BenchmarkResult,
   BenchmarkOutputLine,
   BenchmarkRunId,
   GpqaBenchmarkConfigInput,
@@ -53,7 +52,6 @@ interface EditorPaneProps {
   apiOutputLines: BenchmarkOutputLine[];
   openEditors: EditorTab[];
   activeEditorId: string | null;
-  benchmarkResult: BenchmarkResult | null;
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
@@ -104,7 +102,6 @@ export function EditorPane({
   apiOutputLines,
   openEditors,
   activeEditorId,
-  benchmarkResult,
   tensors,
   assignments,
   profile,
@@ -148,7 +145,7 @@ export function EditorPane({
           ? "GPQA Diamond Dataset"
       : layerTitle(activeLayerIndex);
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
-  const showingResults = activeEditor?.kind === "eval-results" && benchmarkResult;
+  const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
   const showingGpqaDetails = activeEditor?.kind === "gpqa-details";
   const showingGpqaDataset = activeEditor?.kind === "gpqa-dataset";
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
@@ -216,12 +213,12 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>{showingResults || showingGpqaBenchmark ? "benchmark" : "tensors"}</span>
+        <span>{activeResult || showingGpqaBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
-      {showingResults ? (
+      {activeResult ? (
         <EvalResultsView
-          result={benchmarkResult}
+          result={activeResult}
           onSave={onSaveRecipe}
           onExport={onExport}
           onDiscard={onDiscardResults}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import {
-  EVAL_RESULTS_TAB_ID,
+  evalResultsEditorTab,
   gpqaDatasetEditorTab,
   gpqaDetailsEditorTab,
   layerEditorTab,
@@ -231,8 +231,6 @@ function App() {
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
     () => new Set(),
   );
-  const [benchmarkResult, setBenchmarkResult] =
-    useState<BenchmarkResult | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
   const [recipeTestMode, setRecipeTestMode] =
     useState<RecipeTestMode>("single");
@@ -286,7 +284,6 @@ function App() {
       });
       setModelExplorerFocusVersion((version) => version + 1);
       setExpandedLayers(new Set());
-      setBenchmarkResult(null);
       setAppError(null);
     },
     [openEditors, resetRecipeForModel],
@@ -344,18 +341,15 @@ function App() {
   }, []);
 
   const handleDiscardResults = useCallback(() => {
-    setBenchmarkResult(null);
-    handleCloseEditor(EVAL_RESULTS_TAB_ID);
-  }, [handleCloseEditor]);
+    if (!activeEditorId) return;
+    const activeEditor = openEditors.find((editor) => editor.id === activeEditorId);
+    if (activeEditor?.kind === "eval-results") handleCloseEditor(activeEditorId);
+  }, [activeEditorId, handleCloseEditor, openEditors]);
 
   const openEvalResults = useCallback((result: BenchmarkResult) => {
-    setBenchmarkResult(result);
-    setOpenEditors((current) =>
-      current.some((editor) => editor.id === EVAL_RESULTS_TAB_ID)
-        ? current
-        : [...current, { id: EVAL_RESULTS_TAB_ID, kind: "eval-results" }],
-    );
-    setActiveEditorId(EVAL_RESULTS_TAB_ID);
+    const tab = evalResultsEditorTab(result);
+    setOpenEditors((current) => [...current, tab]);
+    setActiveEditorId(tab.id);
   }, []);
 
   const openEditorTab = useCallback((tab: EditorTab) => {
@@ -619,6 +613,13 @@ function App() {
     activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
+  const latestBenchmarkResult =
+    [...openEditors]
+      .reverse()
+      .find(
+        (editor): editor is Extract<EditorTab, { kind: "eval-results" }> =>
+          editor.kind === "eval-results",
+      )?.result ?? null;
   const visibleError = modelError ?? appError;
 
   return (
@@ -650,7 +651,7 @@ function App() {
           activeLayerIndex={selectedLayerIndex}
           openEditors={openEditors}
           activeEditorId={activeEditorId}
-          benchmarkResult={benchmarkResult}
+          latestBenchmarkResult={latestBenchmarkResult}
           expandedLayers={expandedLayers}
           running={running}
           cancelling={cancelling}

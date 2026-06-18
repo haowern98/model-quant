@@ -13,7 +13,7 @@ import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 interface TestingPanelProps {
   modelPath: string | null;
   assignments: Record<string, QuantType>;
-  benchmarkResult: BenchmarkResult | null;
+  latestBenchmarkResult: BenchmarkResult | null;
   running: boolean;
   cancelling: boolean;
   progress: ProgressEvent | null;
@@ -38,18 +38,18 @@ function statusLabel({
   running,
   cancelling,
   progress,
-  benchmarkResult,
-}: Pick<TestingPanelProps, "running" | "cancelling" | "progress" | "benchmarkResult">) {
+  latestBenchmarkResult,
+}: Pick<TestingPanelProps, "running" | "cancelling" | "progress" | "latestBenchmarkResult">) {
   if (cancelling) return "Cancelling";
   if (running) return progress?.message ?? "Running";
-  if (benchmarkResult) return "Latest run ready";
+  if (latestBenchmarkResult) return "Latest run ready";
   return "Ready";
 }
 
 export function TestingPanel({
   modelPath,
   assignments,
-  benchmarkResult,
+  latestBenchmarkResult,
   running,
   cancelling,
   progress,
@@ -69,9 +69,9 @@ export function TestingPanel({
 
   const changedTargetCount = Object.keys(assignments).length;
   const verifiedTargets =
-    benchmarkResult?.requestedTargetCount !== undefined &&
-    benchmarkResult?.verifiedTargetCount !== undefined
-      ? `${benchmarkResult.verifiedTargetCount}/${benchmarkResult.requestedTargetCount}`
+    latestBenchmarkResult?.requestedTargetCount !== undefined &&
+    latestBenchmarkResult?.verifiedTargetCount !== undefined
+      ? `${latestBenchmarkResult.verifiedTargetCount}/${latestBenchmarkResult.requestedTargetCount}`
       : "0/0";
 
   const toggleSection = (section: TestingSectionId) => {
@@ -167,7 +167,7 @@ export function TestingPanel({
             <ExplorerTreeRow label="GPQA Diamond" right="63.1%" ariaLabel="GPQA Diamond 63.1%" />
             <ExplorerTreeRow
               label="PPL Check"
-              right={statusLabel({ running, cancelling, progress, benchmarkResult })}
+              right={statusLabel({ running, cancelling, progress, latestBenchmarkResult })}
               ariaLabel="PPL Check latest status"
             />
           </div>
