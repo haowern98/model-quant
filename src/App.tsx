@@ -227,6 +227,7 @@ function App() {
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
+  const [modelExplorerFocusVersion, setModelExplorerFocusVersion] = useState(0);
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
     () => new Set(),
   );
@@ -276,13 +277,19 @@ function App() {
         currentQuant: t.currentQuant,
       }));
       resetRecipeForModel(path, tensors);
-      setOpenEditors([]);
-      setActiveEditorId(null);
+      setOpenEditors((current) => current.filter((editor) => editor.kind !== "layer"));
+      setActiveEditorId((active) => {
+        if (!active) return null;
+        const activeEditor = openEditors.find((editor) => editor.id === active);
+        if (activeEditor?.kind !== "layer") return active;
+        return openEditors.find((editor) => editor.kind !== "layer")?.id ?? null;
+      });
+      setModelExplorerFocusVersion((version) => version + 1);
       setExpandedLayers(new Set());
       setBenchmarkResult(null);
       setAppError(null);
     },
-    [resetRecipeForModel],
+    [openEditors, resetRecipeForModel],
   );
 
   const handleOpenLayer = useCallback((layerIndex: number) => {
@@ -652,6 +659,7 @@ function App() {
           gpqaStatus={gpqaStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
+          modelExplorerFocusVersion={modelExplorerFocusVersion}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}

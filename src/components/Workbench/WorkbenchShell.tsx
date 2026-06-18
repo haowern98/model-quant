@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   AssignPattern,
   BenchmarkRunId,
@@ -49,6 +49,7 @@ interface WorkbenchShellProps {
   gpqaStatus: GpqaDiamondStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
+  modelExplorerFocusVersion: number;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -97,6 +98,7 @@ export function WorkbenchShell({
   gpqaStatus,
   gpqaShotMode,
   gpqaConfig,
+  modelExplorerFocusVersion,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -129,6 +131,21 @@ export function WorkbenchShell({
   const sidePanelVisible = explorerWidth > 0;
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
+
+  useEffect(() => {
+    if (modelExplorerFocusVersion === 0) return;
+    setActiveActivity("gguf");
+    setExplorerWidth((width) => {
+      if (width > 0) return width;
+      const restoredWidth = clamp(
+        lastExpandedExplorerWidth.current,
+        EXPLORER_MIN_WIDTH,
+        explorerMaxWidth(),
+      );
+      lastExpandedExplorerWidth.current = restoredWidth;
+      return restoredWidth;
+    });
+  }, [modelExplorerFocusVersion]);
 
   const explorerMaxWidth = () => {
     const shellWidth = shellRef.current?.getBoundingClientRect().width ?? 1280;
