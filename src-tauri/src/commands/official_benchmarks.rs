@@ -10,7 +10,9 @@ use serde_json::json;
 use tauri::{Manager, State};
 
 use crate::commands::modelinspector_api::{
-    modelinspector_api_tensor_summary, ModelInspectorApiState, ModelInspectorApiTensorSummary,
+    modelinspector_api_runtime_totals, modelinspector_api_tensor_summary,
+    ModelInspectorApiRuntimeSummary, ModelInspectorApiRuntimeTotals, ModelInspectorApiState,
+    ModelInspectorApiTensorSummary,
 };
 use crate::profile::benchmark::{BenchmarkResult, StandardEvalReport, StandardEvalTaskReport};
 
@@ -346,6 +348,7 @@ pub async fn run_gpqa_diamond_benchmark(
     runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<BenchmarkResult, String> {
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run_gpqa_diamond_blocking(
@@ -355,6 +358,7 @@ pub async fn run_gpqa_diamond_benchmark(
             shot_mode,
             config,
             tensor_summary,
+            runtime_totals,
             app,
             child,
         )
@@ -622,6 +626,7 @@ fn run_gpqa_diamond_blocking(
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
     tensor_summary: ModelInspectorApiTensorSummary,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
 ) -> Result<BenchmarkResult, String> {
@@ -803,6 +808,7 @@ fn run_gpqa_diamond_blocking(
         &report_path,
         start.elapsed().as_millis() as f64,
         tensor_summary,
+        runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
     )?)
 }
 
@@ -1315,6 +1321,7 @@ fn gpqa_result_from_report(
     report_path: &Path,
     elapsed_ms: f64,
     tensor_summary: ModelInspectorApiTensorSummary,
+    runtime_summary: ModelInspectorApiRuntimeSummary,
 ) -> Result<BenchmarkResult, String> {
     let report_text = std::fs::read_to_string(report_path)
         .map_err(|e| format!("Failed to read EvalScope GPQA report: {e}"))?;
@@ -1323,16 +1330,16 @@ fn gpqa_result_from_report(
     let accuracy = extract_accuracy_from_json(&report_json).unwrap_or(0.0);
     let sample_count = extract_sample_count_from_json(&report_json).unwrap_or(GPQA_SAMPLE_COUNT);
     Ok(BenchmarkResult {
-        prompt_eval_tps: 0.0,
-        token_gen_tps: 0.0,
-        ttft_ms: 0.0,
-        prompt_eval_ms: 0.0,
-        generation_ms: 0.0,
-        vram_peak_mb: 0.0,
-        vram_allocated_mb: 0.0,
+        prompt_eval_tps: runtime_summary.prompt_eval_tps,
+        token_gen_tps: runtime_summary.token_gen_tps,
+        ttft_ms: runtime_summary.ttft_ms,
+        prompt_eval_ms: runtime_summary.prompt_eval_ms,
+        generation_ms: runtime_summary.generation_ms,
+        vram_peak_mb: runtime_summary.vram_peak_mb,
+        vram_allocated_mb: runtime_summary.vram_allocated_mb,
         disk_size_mb: 0.0,
         elapsed_ms,
-        load_ms: 0.0,
+        load_ms: runtime_summary.load_ms,
         test_mode: "official_gpqa_diamond".to_string(),
         status_message: format!(
             "GPQA Diamond EvalScope official harness completed for {model_id} with {}.",
@@ -1768,6 +1775,16 @@ mod tests {
             &report_path,
             123.0,
             tensor_summary,
+            ModelInspectorApiRuntimeSummary {
+                prompt_eval_tps: 100.0,
+                token_gen_tps: 20.0,
+                ttft_ms: 50.0,
+                prompt_eval_ms: 10.0,
+                generation_ms: 25.0,
+                vram_peak_mb: 1024.0,
+                vram_allocated_mb: 900.0,
+                load_ms: 500.0,
+            },
         )
         .unwrap();
         let _ = std::fs::remove_dir_all(&report_dir);
@@ -1778,6 +1795,9 @@ mod tests {
         assert_eq!(result.converted_bytes_after, 80);
         assert_eq!(result.requested_target_count, 2);
         assert_eq!(result.verified_target_count, 2);
+        assert_eq!(result.token_gen_tps, 20.0);
+        assert_eq!(result.ttft_ms, 50.0);
+        assert_eq!(result.load_ms, 500.0);
         assert_eq!(result.standard_eval.unwrap().recipe_accuracy, 0.5);
     }
 }
