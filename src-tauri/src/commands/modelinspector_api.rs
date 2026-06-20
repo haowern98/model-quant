@@ -65,6 +65,12 @@ pub(crate) struct ModelInspectorApiRuntimeSummary {
     pub load_ms: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ModelInspectorApiModelSummary {
+    pub tensor_count: u64,
+    pub metadata_count: u64,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ModelInspectorApiRuntimeTotals {
     load_ms: f64,
@@ -215,6 +221,7 @@ pub struct ModelInspectorApiServer {
     model_id: String,
     token: String,
     tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
@@ -268,6 +275,20 @@ pub(crate) fn modelinspector_api_runtime_totals(
         .unwrap_or_default())
 }
 
+pub(crate) fn modelinspector_api_model_summary(
+    api_state: &ModelInspectorApiState,
+    base_url: &str,
+    model_id: &str,
+) -> Result<ModelInspectorApiModelSummary, String> {
+    let guard = api_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .server
+        .as_ref()
+        .filter(|server| server.base_url == base_url && server.model_id == model_id)
+        .map(|server| server.model_summary)
+        .unwrap_or_default())
+}
+
 #[tauri::command]
 pub async fn start_modelinspector_api(
     benchmark_label: Option<String>,
@@ -285,6 +306,11 @@ pub async fn start_modelinspector_api(
         .clone()
         .ok_or("No model loaded")?;
 
+    let gguf_summary = crate::ffi::runtime_bindings::inspect_gguf(&recipe.base_model)?;
+    let model_summary = ModelInspectorApiModelSummary {
+        tensor_count: gguf_summary.tensor_count,
+        metadata_count: gguf_summary.metadata_count,
+    };
     let model_id = model_id_from_path(&recipe.base_model);
     let token = make_token();
     let (startup, old_server) = {
@@ -413,6 +439,7 @@ pub async fn start_modelinspector_api(
         model_id: model_id.clone(),
         token,
         tensor_summary,
+        model_summary,
         runtime_totals,
         stop,
         handle: Some(handle),

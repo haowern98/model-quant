@@ -73,10 +73,6 @@ function choiceLabel(index: number): string {
   return String.fromCharCode(65 + index);
 }
 
-function metricForTask(): string {
-  return "acc_norm";
-}
-
 function runtimeElapsed(result: BenchmarkResult): number {
   return result.loadMs + result.promptEvalMs + result.generationMs;
 }
@@ -215,13 +211,16 @@ function ResultsTable({ result }: { result: BenchmarkResult }) {
       </h3>
 
       <div className="overflow-x-auto">
-        <div className="grid min-w-[560px] grid-cols-[minmax(220px,1fr)_72px_56px_72px_72px] gap-x-4 gap-y-1">
+        <div className="grid min-w-[640px] grid-cols-[minmax(220px,1fr)_72px_56px_72px_72px_72px] gap-x-4 gap-y-1">
           <span className="text-text-muted uppercase tracking-wider">Task</span>
           <span className="text-text-muted uppercase tracking-wider">
             Metric
           </span>
           <span className="text-right text-text-muted uppercase tracking-wider">
             N-Shot
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Samples
           </span>
           <span className="text-right text-text-muted uppercase tracking-wider">
             Value
@@ -231,15 +230,19 @@ function ResultsTable({ result }: { result: BenchmarkResult }) {
           </span>
 
           {standard.tasks.map((task) => {
-            const metric = metricForTask();
             return (
               <Fragment key={task.task}>
                 <span className="text-text-muted truncate" title={task.task}>
                   {task.task}
                 </span>
-                <span className="font-mono text-text-primary">{metric}</span>
+                <span className="font-mono text-text-primary">
+                  {task.metric ?? "acc_norm"}
+                </span>
                 <span className="text-right font-mono text-text-primary">
-                  0
+                  {task.nShot ?? 0}
+                </span>
+                <span className="text-right font-mono text-text-primary">
+                  {task.sampleCount}
                 </span>
                 <span className="text-right font-mono text-text-primary">
                   {formatMetricValue(task.recipeAccuracy)}
@@ -267,13 +270,16 @@ function PairedCompareTable({ result }: { result: BenchmarkResult }) {
       </h3>
 
       <div className="overflow-x-auto">
-        <div className="grid min-w-[1220px] grid-cols-[minmax(220px,1fr)_72px_56px_72px_72px_72px_160px_170px_96px_104px] gap-x-4 gap-y-1">
+        <div className="grid min-w-[1300px] grid-cols-[minmax(220px,1fr)_72px_56px_72px_72px_72px_72px_160px_170px_96px_104px] gap-x-4 gap-y-1">
           <span className="text-text-muted uppercase tracking-wider">Task</span>
           <span className="text-text-muted uppercase tracking-wider">
             Metric
           </span>
           <span className="text-right text-text-muted uppercase tracking-wider">
             N-Shot
+          </span>
+          <span className="text-right text-text-muted uppercase tracking-wider">
+            Samples
           </span>
           <span className="text-right text-text-muted uppercase tracking-wider">
             Base
@@ -303,10 +309,13 @@ function PairedCompareTable({ result }: { result: BenchmarkResult }) {
                 {task.task}
               </span>
               <span className="font-mono text-text-primary">
-                {metricForTask()}
+                {task.metric ?? "acc_norm"}
               </span>
               <span className="text-right font-mono text-text-primary">
-                0
+                {task.nShot ?? 0}
+              </span>
+              <span className="text-right font-mono text-text-primary">
+                {task.sampleCount}
               </span>
               <span className="text-right font-mono text-text-primary">
                 {task.baselineAccuracy === null
@@ -341,6 +350,9 @@ function PairedCompareTable({ result }: { result: BenchmarkResult }) {
           </span>
           <span className="font-mono text-text-primary">mixed</span>
           <span className="text-right font-mono text-text-primary">0</span>
+          <span className="text-right font-mono text-text-primary">
+            {standard.sampleCount}
+          </span>
           <span className="text-right font-mono text-text-primary">
             {formatMetricValue(standard.baselineAccuracy)}
           </span>

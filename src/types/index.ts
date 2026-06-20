@@ -349,6 +349,8 @@ export interface StandardEvalReport {
 
 export interface StandardEvalTaskReport {
   task: string;
+  metric?: string;
+  nShot?: number;
   sampleCount: number;
   baselineCorrectCount: number | null;
   recipeCorrectCount: number;

@@ -90,6 +90,8 @@ pub struct StandardEvalReport {
 #[serde(rename_all = "camelCase")]
 pub struct StandardEvalTaskReport {
     pub task: String,
+    pub metric: String,
+    pub n_shot: u64,
     pub sample_count: u64,
     pub baseline_correct_count: Option<u64>,
     pub recipe_correct_count: u64,
@@ -683,6 +685,8 @@ fn standard_eval_report_from_native(
             .iter()
             .map(|task| StandardEvalTaskReport {
                 task: crate::ffi::runtime_bindings::standard_task_name(task),
+                metric: "acc_norm".to_string(),
+                n_shot: 0,
                 sample_count: task.sample_count,
                 baseline_correct_count: has_baseline.then_some(task.baseline_correct_count),
                 recipe_correct_count: task.recipe_correct_count,

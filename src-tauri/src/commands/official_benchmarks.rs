@@ -10,7 +10,8 @@ use serde_json::json;
 use tauri::{Manager, State};
 
 use crate::commands::modelinspector_api::{
-    modelinspector_api_runtime_totals, modelinspector_api_tensor_summary,
+    modelinspector_api_model_summary, modelinspector_api_runtime_totals,
+    modelinspector_api_tensor_summary, ModelInspectorApiModelSummary,
     ModelInspectorApiRuntimeSummary, ModelInspectorApiRuntimeTotals, ModelInspectorApiState,
     ModelInspectorApiTensorSummary,
 };
@@ -348,6 +349,7 @@ pub async fn run_gpqa_diamond_benchmark(
     runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<BenchmarkResult, String> {
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
     let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -358,6 +360,7 @@ pub async fn run_gpqa_diamond_benchmark(
             shot_mode,
             config,
             tensor_summary,
+            model_summary,
             runtime_totals,
             app,
             child,
@@ -626,6 +629,7 @@ fn run_gpqa_diamond_blocking(
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
     tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
@@ -808,6 +812,7 @@ fn run_gpqa_diamond_blocking(
         &report_path,
         start.elapsed().as_millis() as f64,
         tensor_summary,
+        model_summary,
         runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
     )?)
 }
@@ -1321,6 +1326,7 @@ fn gpqa_result_from_report(
     report_path: &Path,
     elapsed_ms: f64,
     tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
     runtime_summary: ModelInspectorApiRuntimeSummary,
 ) -> Result<BenchmarkResult, String> {
     let report_text = std::fs::read_to_string(report_path)
@@ -1328,6 +1334,7 @@ fn gpqa_result_from_report(
     let report_json: serde_json::Value = serde_json::from_str(&report_text)
         .map_err(|e| format!("Failed to parse EvalScope GPQA report JSON: {e}"))?;
     let accuracy = extract_accuracy_from_json(&report_json).unwrap_or(0.0);
+    let metric = extract_metric_from_json(&report_json).unwrap_or_else(|| "mean_acc".to_string());
     let sample_count = extract_sample_count_from_json(&report_json).unwrap_or(GPQA_SAMPLE_COUNT);
     Ok(BenchmarkResult {
         prompt_eval_tps: runtime_summary.prompt_eval_tps,
@@ -1349,8 +1356,8 @@ fn gpqa_result_from_report(
             "EvalScope GPQA Diamond report: {}",
             report_path.display()
         )),
-        model_tensor_count: None,
-        model_metadata_count: None,
+        model_tensor_count: Some(model_summary.tensor_count),
+        model_metadata_count: Some(model_summary.metadata_count),
         copied_tensor_count: tensor_summary.copied_tensor_count,
         converted_tensor_count: tensor_summary.converted_tensor_count,
         converted_bytes_before: tensor_summary.converted_bytes_before,
@@ -1372,6 +1379,8 @@ fn gpqa_result_from_report(
             margin_delta: None,
             tasks: vec![StandardEvalTaskReport {
                 task: "gpqa_diamond".to_string(),
+                metric,
+                n_shot: shot_mode.few_shot_num() as u64,
                 sample_count,
                 baseline_correct_count: None,
                 recipe_correct_count: (accuracy * sample_count as f64).round() as u64,
@@ -1397,7 +1406,10 @@ fn extract_accuracy_from_json(value: &serde_json::Value) -> Option<f64> {
         serde_json::Value::Object(map) => {
             for (key, candidate) in map {
                 let key = key.to_lowercase();
-                if matches!(key.as_str(), "acc" | "accuracy" | "score" | "value") {
+                if matches!(
+                    key.as_str(),
+                    "mean_acc" | "acc_norm" | "acc" | "accuracy" | "score" | "value"
+                ) {
                     if let Some(score) = normalize_score(candidate.as_f64()) {
                         return Some(score);
                     }
@@ -1406,6 +1418,34 @@ fn extract_accuracy_from_json(value: &serde_json::Value) -> Option<f64> {
             map.values().find_map(extract_accuracy_from_json)
         }
         serde_json::Value::Array(items) => items.iter().find_map(extract_accuracy_from_json),
+        _ => None,
+    }
+}
+
+fn extract_metric_from_json(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(metric) = map
+                .get("metric")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+            {
+                return Some(metric.to_string());
+            }
+            if let Some(metrics) = map.get("metrics").and_then(|value| value.as_object()) {
+                for metric in ["mean_acc", "acc_norm", "acc", "accuracy", "score", "value"] {
+                    if metrics
+                        .get(metric)
+                        .and_then(|value| value.as_f64())
+                        .is_some()
+                    {
+                        return Some(metric.to_string());
+                    }
+                }
+            }
+            map.values().find_map(extract_metric_from_json)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(extract_metric_from_json),
         _ => None,
     }
 }
@@ -1741,12 +1781,16 @@ mod tests {
         let report = json!({
             "task": "gpqa_diamond",
             "metrics": {
-                "acc": 63.1
+                "mean_acc": 63.1
             },
             "sample_count": 198
         });
 
         assert_eq!(extract_accuracy_from_json(&report), Some(0.631));
+        assert_eq!(
+            extract_metric_from_json(&report).as_deref(),
+            Some("mean_acc")
+        );
         assert_eq!(extract_sample_count_from_json(&report), Some(198));
     }
 
@@ -1775,6 +1819,10 @@ mod tests {
             &report_path,
             123.0,
             tensor_summary,
+            ModelInspectorApiModelSummary {
+                tensor_count: 427,
+                metadata_count: 33,
+            },
             ModelInspectorApiRuntimeSummary {
                 prompt_eval_tps: 100.0,
                 token_gen_tps: 20.0,
@@ -1795,9 +1843,14 @@ mod tests {
         assert_eq!(result.converted_bytes_after, 80);
         assert_eq!(result.requested_target_count, 2);
         assert_eq!(result.verified_target_count, 2);
+        assert_eq!(result.model_tensor_count, Some(427));
+        assert_eq!(result.model_metadata_count, Some(33));
         assert_eq!(result.token_gen_tps, 20.0);
         assert_eq!(result.ttft_ms, 50.0);
         assert_eq!(result.load_ms, 500.0);
-        assert_eq!(result.standard_eval.unwrap().recipe_accuracy, 0.5);
+        let standard_eval = result.standard_eval.unwrap();
+        assert_eq!(standard_eval.recipe_accuracy, 0.5);
+        assert_eq!(standard_eval.tasks[0].metric, "acc");
+        assert_eq!(standard_eval.tasks[0].sample_count, 198);
     }
 }
