@@ -23,6 +23,8 @@ const GPQA_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
 const GPQA_DEFAULT_CONTEXT_WINDOW: u32 = 20_000;
 const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -679,6 +681,7 @@ fn run_gpqa_diamond_blocking(
         fallback.args(["-m", "evalscope"]);
         fallback
     };
+    hide_child_console(&mut command);
     command
         .args([
             "eval".to_string(),
@@ -878,6 +881,7 @@ fn find_python() -> Option<PythonCommand> {
 
     candidates.into_iter().find(|candidate| {
         let mut command = Command::new(&candidate.executable);
+        hide_child_console(&mut command);
         command.args(&candidate.prefix_args).arg("--version");
         command
             .output()
@@ -972,7 +976,9 @@ fn run_managed_child(
     args: Vec<String>,
     child_slot: &Arc<Mutex<Option<Child>>>,
 ) -> Result<String, String> {
-    let mut child = Command::new(executable)
+    let mut command = Command::new(executable);
+    hide_child_console(&mut command);
+    let mut child = command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1049,6 +1055,7 @@ except Exception as exc:
 "#;
 
     let mut command = Command::new(&python.executable);
+    hide_child_console(&mut command);
     command.args(&python.prefix_args).args(["-c", script]);
     let output = command
         .output()
@@ -1064,6 +1071,15 @@ except Exception as exc:
         ))
     }
 }
+
+#[cfg(windows)]
+fn hide_child_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_child_console(_: &mut Command) {}
 
 #[cfg(test)]
 fn classify_probe_output(output: &str) -> GpqaDiamondStatus {
