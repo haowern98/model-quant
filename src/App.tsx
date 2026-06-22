@@ -18,6 +18,7 @@ import {
   cancelRecipeTest,
   cancelOfficialBenchmark,
   getGpqaDiamondStatus,
+  getHumanEvalStatus,
   installGpqaDiamondHarness,
   downloadGpqaDiamondDataset,
   runGpqaDiamondBenchmark,
@@ -34,6 +35,7 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalStatus,
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
@@ -52,6 +54,16 @@ const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
   datasetUrl: "AI-ModelScope/gpqa_diamond",
   expectedDatasetHash: "EvalScope dataset cache marker",
   detail: "GPQA Diamond readiness has not been checked yet.",
+};
+
+const DEFAULT_HUMANEVAL_STATUS: HumanEvalStatus = {
+  ready: false,
+  statusLabel: "Needs Docker",
+  python: null,
+  evalscope: null,
+  dockerReady: false,
+  docker: null,
+  detail: "HumanEval readiness has not been checked yet.",
 };
 
 const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
@@ -242,6 +254,9 @@ function App() {
   ]);
   const [gpqaStatus, setGpqaStatus] =
     useState<GpqaDiamondStatus>(DEFAULT_GPQA_STATUS);
+  const [humanevalStatus, setHumanEvalStatus] = useState<HumanEvalStatus>(
+    DEFAULT_HUMANEVAL_STATUS,
+  );
   const [gpqaShotMode, setGpqaShotMode] =
     useState<GpqaShotMode>("five_shot_cot");
   const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
@@ -268,6 +283,27 @@ function App() {
   }, []);
 
   useEffect(() => refreshGpqaStatus(), [refreshGpqaStatus, modelPath]);
+
+  const refreshHumanEvalStatus = useCallback(() => {
+    let cancelled = false;
+    getHumanEvalStatus()
+      .then((status) => {
+        if (!cancelled) setHumanEvalStatus(status);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setHumanEvalStatus({
+            ...DEFAULT_HUMANEVAL_STATUS,
+            detail: (error as Error).message,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => refreshHumanEvalStatus(), [refreshHumanEvalStatus]);
 
   const resetForLoadedModel = useCallback(
     (path: string, loadedModel: NonNullable<typeof model>) => {
@@ -667,6 +703,7 @@ function App() {
           testMode={recipeTestMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          humanevalStatus={humanevalStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}

@@ -3,6 +3,7 @@ import type {
   BenchmarkRunId,
   BenchmarkResult,
   GpqaDiamondStatus,
+  HumanEvalStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -21,6 +22,7 @@ interface TestingPanelProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  humanevalStatus: HumanEvalStatus;
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
@@ -58,6 +60,7 @@ export function TestingPanel({
   testMode,
   selectedRunIds,
   gpqaStatus,
+  humanevalStatus,
   gpqaEditorActive,
   humanevalEditorActive,
   onToggleRunTarget,
@@ -144,7 +147,7 @@ export function TestingPanel({
               title="HumanEval"
               description="Python code generation benchmark"
               meta="EvalScope · 164 samples · pass@1"
-              status="Needs Docker"
+              status={humanevalStatus.statusLabel}
               icon="code"
               active={humanevalEditorActive}
               onClick={onOpenHumanEvalDetails}

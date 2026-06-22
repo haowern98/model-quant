@@ -14,6 +14,7 @@ import type {
   GpqaDatasetRow,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalStatus,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -114,6 +115,10 @@ export async function getModelInspectorApiStatus(): Promise<ModelInspectorApiSta
 
 export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("get_gpqa_diamond_status");
+}
+
+export async function getHumanEvalStatus(): Promise<HumanEvalStatus> {
+  return invoke<HumanEvalStatus>("get_humaneval_status");
 }
 
 export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {

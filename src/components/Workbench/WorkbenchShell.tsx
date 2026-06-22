@@ -7,6 +7,7 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -47,6 +48,7 @@ interface WorkbenchShellProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  humanevalStatus: HumanEvalStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
@@ -98,6 +100,7 @@ export function WorkbenchShell({
   testMode,
   selectedRunIds,
   gpqaStatus,
+  humanevalStatus,
   gpqaShotMode,
   gpqaConfig,
   modelExplorerFocusVersion,
@@ -245,6 +248,7 @@ export function WorkbenchShell({
           testMode={testMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          humanevalStatus={humanevalStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           onToggleRunTarget={onToggleRunTarget}
@@ -320,6 +324,7 @@ export function WorkbenchShell({
         testMode={testMode}
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
+        humanevalStatus={humanevalStatus}
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}

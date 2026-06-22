@@ -268,6 +268,16 @@ export interface GpqaDiamondStatus {
   detail: string;
 }
 
+export interface HumanEvalStatus {
+  ready: boolean;
+  statusLabel: string;
+  python: string | null;
+  evalscope: string | null;
+  dockerReady: boolean;
+  docker: string | null;
+  detail: string;
+}
+
 export interface GpqaDatasetRow {
   index: number;
   question: string;

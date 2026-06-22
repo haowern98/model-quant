@@ -16,6 +16,7 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   GpqaThinkingMode,
+  HumanEvalStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -60,6 +61,7 @@ interface EditorPaneProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  humanevalStatus: HumanEvalStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
@@ -110,6 +112,7 @@ export function EditorPane({
   testMode,
   selectedRunIds,
   gpqaStatus,
+  humanevalStatus,
   gpqaShotMode,
   gpqaConfig,
   onSelectEditor,
@@ -243,7 +246,7 @@ export function EditorPane({
           onRunBenchmark={onTest}
         />
       ) : showingHumanEvalBenchmark ? (
-        <HumanEvalBenchmarkView />
+        <HumanEvalBenchmarkView status={humanevalStatus} />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -650,7 +653,7 @@ function GpqaBenchmarkView({
   );
 }
 
-function HumanEvalBenchmarkView() {
+function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
   const [activeTab, setActiveTab] = useState<HumanEvalBenchmarkTab>("details");
 
   return (
@@ -809,14 +812,15 @@ function HumanEvalBenchmarkView() {
             )}
           </div>
           <aside className="benchmark-page-side">
-            <p className="benchmark-readiness">Docker must be running before HumanEval can run safely.</p>
+            <p className="benchmark-readiness">{status.detail}</p>
             <BenchmarkInfoSection title="Harness">
               <BenchmarkInfoRow label="Framework" value="EvalScope" />
               <BenchmarkInfoRow label="Dataset" value="humaneval" />
               <BenchmarkInfoRow label="Metric" value="pass@1" />
-              <BenchmarkInfoRow label="Status" value="Needs Docker" />
-              <BenchmarkInfoRow label="Python" value="Unavailable" />
-              <BenchmarkInfoRow label="EvalScope" value="Unavailable" />
+              <BenchmarkInfoRow label="Status" value={status.statusLabel} />
+              <BenchmarkInfoRow label="Python" value={status.python ?? "Unavailable"} />
+              <BenchmarkInfoRow label="EvalScope" value={status.evalscope ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Docker" value={status.dockerReady ? status.docker ?? "Ready" : "Unavailable"} />
             </BenchmarkInfoSection>
             <BenchmarkInfoSection title="HumanEval Dataset">
               <BenchmarkInfoRow label="Downloaded" value="No" />

@@ -42,6 +42,7 @@ pub fn run() {
             commands::modelinspector_api::stop_modelinspector_api,
             commands::modelinspector_api::get_modelinspector_api_status,
             commands::official_benchmarks::get_gpqa_diamond_status,
+            commands::official_benchmarks::get_humaneval_status,
             commands::official_benchmarks::get_gpqa_diamond_dataset_rows,
             commands::official_benchmarks::install_gpqa_diamond_harness,
             commands::official_benchmarks::download_gpqa_diamond_dataset,

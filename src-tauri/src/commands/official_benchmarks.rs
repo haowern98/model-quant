@@ -42,6 +42,18 @@ pub struct GpqaDiamondStatus {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanEvalStatus {
+    pub ready: bool,
+    pub status_label: String,
+    pub python: Option<String>,
+    pub evalscope: Option<String>,
+    pub docker_ready: bool,
+    pub docker: Option<String>,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GpqaDatasetRow {
@@ -255,6 +267,17 @@ pub async fn get_gpqa_diamond_status(app: tauri::AppHandle) -> Result<GpqaDiamon
 }
 
 #[tauri::command]
+pub async fn get_humaneval_status(app: tauri::AppHandle) -> Result<HumanEvalStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || detect_humaneval_status(app_data_dir))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn install_gpqa_diamond_harness(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -429,6 +452,61 @@ fn detect_gpqa_diamond_status(app_data_dir: PathBuf) -> GpqaDiamondStatus {
             dataset_url: GPQA_DATASET_ID.to_string(),
             expected_dataset_hash: "EvalScope dataset cache marker".to_string(),
             detail: error,
+        },
+    }
+}
+
+fn detect_humaneval_status(app_data_dir: PathBuf) -> HumanEvalStatus {
+    let (docker_ready, docker, docker_detail) = detect_docker_status();
+    let env_dir = gpqa_env_dir(&app_data_dir);
+    let venv_python = venv_python_path(&env_dir);
+    let system_python_exists = find_python().is_some();
+
+    if !venv_python.exists() {
+        return HumanEvalStatus {
+            ready: false,
+            status_label: if !docker_ready {
+                "Needs Docker"
+            } else if system_python_exists {
+                "Needs harness"
+            } else {
+                "Needs Python"
+            }
+            .to_string(),
+            python: None,
+            evalscope: None,
+            docker_ready,
+            docker,
+            detail: if !docker_ready {
+                docker_detail
+            } else if system_python_exists {
+                "HumanEval harness has not been installed in the managed benchmark environment."
+                    .to_string()
+            } else {
+                "Python was not found on PATH.".to_string()
+            },
+        };
+    }
+
+    let output = run_humaneval_probe(&PythonCommand {
+        executable: venv_python.to_string_lossy().to_string(),
+        prefix_args: Vec::new(),
+    });
+    match output {
+        Ok(probe) => classify_humaneval_status(&probe, docker_ready, docker, docker_detail),
+        Err(error) => HumanEvalStatus {
+            ready: false,
+            status_label: if docker_ready {
+                "Needs harness"
+            } else {
+                "Needs Docker"
+            }
+            .to_string(),
+            python: None,
+            evalscope: None,
+            docker_ready,
+            docker,
+            detail: if docker_ready { error } else { docker_detail },
         },
     }
 }
@@ -1072,6 +1150,85 @@ except Exception as exc:
     }
 }
 
+fn run_humaneval_probe(python: &PythonCommand) -> Result<String, String> {
+    let script = r#"
+import sys
+try:
+    from importlib import metadata
+except Exception:
+    import importlib_metadata as metadata
+
+print("python=" + ".".join(str(part) for part in sys.version_info[:3]))
+try:
+    import evalscope
+    print("evalscope=" + metadata.version("evalscope"))
+except Exception as exc:
+    print("evalscope_error=" + str(exc))
+try:
+    from evalscope.benchmarks.humaneval.humaneval_adapter import HumanevalAdapter
+    print("humaneval_task=ok")
+except Exception as exc:
+    print("humaneval_task_error=" + str(exc))
+"#;
+
+    let mut command = Command::new(&python.executable);
+    hide_child_console(&mut command);
+    command.args(&python.prefix_args).args(["-c", script]);
+    let output = command
+        .output()
+        .map_err(|e| format!("Failed to probe HumanEval benchmark harness: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        Ok(stdout.to_string())
+    } else {
+        Err(format!(
+            "HumanEval benchmark harness probe failed: {}",
+            stderr.trim()
+        ))
+    }
+}
+
+fn detect_docker_status() -> (bool, Option<String>, String) {
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command.args(["info", "--format", "{{.ServerVersion}}"]).output();
+    match output {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let version = if version.is_empty() {
+                None
+            } else {
+                Some(version)
+            };
+            (
+                true,
+                version.clone(),
+                version
+                    .map(|value| format!("Docker daemon is available ({value})."))
+                    .unwrap_or_else(|| "Docker daemon is available.".to_string()),
+            )
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            (
+                false,
+                None,
+                if stderr.is_empty() {
+                    "Docker CLI is available, but the Docker daemon is not running.".to_string()
+                } else {
+                    stderr
+                },
+            )
+        }
+        Err(error) => (
+            false,
+            None,
+            format!("Docker was not found or could not be started: {error}"),
+        ),
+    }
+}
+
 #[cfg(windows)]
 fn hide_child_console(command: &mut Command) {
     use std::os::windows::process::CommandExt;
@@ -1127,6 +1284,48 @@ fn classify_gpqa_status(output: &str, dataset_state: GpqaDatasetState) -> GpqaDi
                 .to_string()
         } else if harness_ready {
             dataset_detail(&dataset_state)
+        } else {
+            output
+                .lines()
+                .filter(|line| line.contains("_error="))
+                .collect::<Vec<_>>()
+                .join("; ")
+        },
+    }
+}
+
+fn classify_humaneval_status(
+    output: &str,
+    docker_ready: bool,
+    docker: Option<String>,
+    docker_detail: String,
+) -> HumanEvalStatus {
+    let python = probe_value(output, "python");
+    let evalscope = probe_value(output, "evalscope");
+    let humaneval_task = probe_value(output, "humaneval_task");
+    let harness_ready = python.is_some()
+        && evalscope.is_some()
+        && humaneval_task.as_deref() == Some("ok");
+    let ready = harness_ready && docker_ready;
+
+    HumanEvalStatus {
+        ready,
+        status_label: if !docker_ready {
+            "Needs Docker"
+        } else if !harness_ready {
+            "Needs harness"
+        } else {
+            "Ready"
+        }
+        .to_string(),
+        python,
+        evalscope,
+        docker_ready,
+        docker,
+        detail: if ready {
+            "EvalScope HumanEval adapter and Docker daemon are verified.".to_string()
+        } else if !docker_ready {
+            docker_detail
         } else {
             output
                 .lines()
