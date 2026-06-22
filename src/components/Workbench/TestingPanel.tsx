@@ -22,10 +22,12 @@ interface TestingPanelProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   gpqaEditorActive: boolean;
+  humanevalEditorActive: boolean;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
   onInstallGpqaHarness: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
+  onOpenHumanEvalDetails: () => void;
 }
 
 type TestingSectionId = "localChecks" | "benchmarks" | "environment" | "latestRuns";
@@ -57,8 +59,10 @@ export function TestingPanel({
   selectedRunIds,
   gpqaStatus,
   gpqaEditorActive,
+  humanevalEditorActive,
   onToggleRunTarget,
   onOpenGpqaDetails,
+  onOpenHumanEvalDetails,
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
     localChecks: true,
@@ -136,6 +140,15 @@ export function TestingPanel({
             <BenchmarkCard title="MMLU-Pro" description="Multitask professional reasoning" status="Download" />
             <BenchmarkCard title="MMLU-Redux" description="Cleaned MMLU benchmark split" status="Frozen" />
             <BenchmarkCard title="SuperGPQA" description="Broad graduate-level QA benchmark" status="Download" />
+            <BenchmarkCard
+              title="HumanEval"
+              description="Python code generation benchmark"
+              meta="EvalScope · 164 samples · pass@1"
+              status="Needs Docker"
+              icon="code"
+              active={humanevalEditorActive}
+              onClick={onOpenHumanEvalDetails}
+            />
             <BenchmarkCard title="Claw-Eval" description="Agentic tool-use evaluation" status="Needs harness" />
           </div>
         )}
@@ -192,6 +205,7 @@ function BenchmarkCard({
   meta,
   status,
   active,
+  icon = "beaker",
   onClick,
 }: {
   title: string;
@@ -199,6 +213,7 @@ function BenchmarkCard({
   meta?: string;
   status: string;
   active?: boolean;
+  icon?: "beaker" | "code";
   onClick?: () => void;
 }) {
   return (
@@ -208,7 +223,7 @@ function BenchmarkCard({
       aria-label={`${title} ${status}`}
       onClick={onClick}
     >
-      <span className="benchmark-card-icon codicon codicon-beaker" aria-hidden="true" />
+      <span className={`benchmark-card-icon codicon codicon-${icon}`} aria-hidden="true" />
       <span className="benchmark-card-copy">
         <strong>{title}</strong>
         <span>{description}</span>

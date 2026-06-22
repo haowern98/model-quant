@@ -37,6 +37,7 @@ import {
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
 type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
+type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -143,12 +144,15 @@ export function EditorPane({
         ? "GPQA Diamond"
         : activeEditor?.kind === "gpqa-dataset"
           ? "GPQA Diamond Dataset"
+          : activeEditor?.kind === "humaneval-details"
+            ? "HumanEval"
       : layerTitle(activeLayerIndex);
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
   const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
   const showingGpqaDetails = activeEditor?.kind === "gpqa-details";
   const showingGpqaDataset = activeEditor?.kind === "gpqa-dataset";
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
+  const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -213,7 +217,7 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>{activeResult || showingGpqaBenchmark ? "benchmark" : "tensors"}</span>
+        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
       {activeResult ? (
@@ -238,6 +242,8 @@ export function EditorPane({
           onConfigChange={onGpqaConfigChange}
           onRunBenchmark={onTest}
         />
+      ) : showingHumanEvalBenchmark ? (
+        <HumanEvalBenchmarkView />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -636,6 +642,191 @@ function GpqaBenchmarkView({
               <BenchmarkInfoRow label="Cache path" value={status.datasetPath ?? "Not downloaded"} />
               <BenchmarkInfoRow label="SHA256" value={status.datasetHash ?? "Unavailable"} />
               <BenchmarkInfoRow label="Expected SHA256" value={status.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HumanEvalBenchmarkView() {
+  const [activeTab, setActiveTab] = useState<HumanEvalBenchmarkTab>("details");
+
+  return (
+    <section className="benchmark-editor-surface">
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-title">
+              <h1>HumanEval</h1>
+              <div className="benchmark-page-meta">
+                <span>EvalScope</span>
+                <span>|</span>
+                <span>humaneval</span>
+                <span>|</span>
+                <span>164 samples</span>
+              </div>
+              <p>Official HumanEval harness for checking Python code generation through the in-process chat API.</p>
+              <div className="benchmark-page-actions">
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Download dataset
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Verify hash
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Install harness
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Refresh
+                </button>
+                <button type="button" className="benchmark-action-button primary" disabled>
+                  Run Benchmark
+                </button>
+                <button type="button" className="benchmark-icon-button" aria-label="HumanEval settings">
+                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="HumanEval sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Harness</h2>
+                <p>
+                  HumanEval evaluates Python function synthesis through EvalScope using the
+                  app&apos;s in-process OpenAI-compatible chat API. Docker is required so generated
+                  code is executed in a sandbox.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains Python programming tasks with hidden tests. Each run asks
+                  the model to produce code that can pass the task&apos;s tests.
+                </p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                <p>HumanEval dataset preview will appear after the dataset workflow is wired.</p>
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="HumanEval thinking"
+                    value="off"
+                    onChange={() => undefined}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="HumanEval temperature"
+                    value="0"
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="HumanEval top K sampling"
+                    value="40"
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="HumanEval repeat penalty"
+                    value="1.1"
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="HumanEval presence penalty"
+                    value="0"
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="HumanEval top P sampling"
+                    value="0.95"
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="HumanEval min P sampling"
+                    value="0.05"
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="HumanEval context window"
+                    value="20000"
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={() => undefined}
+                  />
+                  <BenchmarkInfoRow label="Batch size" value="1" />
+                  <BenchmarkInputRow
+                    label="Samples"
+                    inputLabel="HumanEval samples"
+                    value="164"
+                    placeholder="164"
+                    inputMode="numeric"
+                    onChange={() => undefined}
+                  />
+                </BenchmarkInfoSection>
+              </div>
+            )}
+          </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">Docker must be running before HumanEval can run safely.</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="EvalScope" />
+              <BenchmarkInfoRow label="Dataset" value="humaneval" />
+              <BenchmarkInfoRow label="Metric" value="pass@1" />
+              <BenchmarkInfoRow label="Status" value="Needs Docker" />
+              <BenchmarkInfoRow label="Python" value="Unavailable" />
+              <BenchmarkInfoRow label="EvalScope" value="Unavailable" />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="HumanEval Dataset">
+              <BenchmarkInfoRow label="Downloaded" value="No" />
+              <BenchmarkInfoRow label="Verified" value="No" />
+              <BenchmarkInfoRow label="Samples" value="164" />
+              <BenchmarkInfoRow label="License" value="MIT" />
+              <BenchmarkInfoRow label="Official asset" value="opencompass/humaneval" />
+              <BenchmarkInfoRow label="Cache path" value="Not downloaded" />
+              <BenchmarkInfoRow label="SHA256" value="Unavailable" />
+              <BenchmarkInfoRow label="Expected SHA256" value="EvalScope dataset cache marker" />
             </BenchmarkInfoSection>
           </aside>
         </div>

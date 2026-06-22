@@ -69,6 +69,7 @@ interface WorkbenchShellProps {
   onRefreshGpqaStatus: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
+  onOpenHumanEvalDetails: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -119,6 +120,7 @@ export function WorkbenchShell({
   onRefreshGpqaStatus,
   onOpenGpqaDetails,
   onOpenGpqaDataset,
+  onOpenHumanEvalDetails,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -133,6 +135,7 @@ export function WorkbenchShell({
   const sidePanelVisible = explorerWidth > 0;
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
+  const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
 
   useEffect(() => {
     if (modelExplorerFocusVersion === 0) return;
@@ -243,10 +246,12 @@ export function WorkbenchShell({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           gpqaEditorActive={gpqaEditorActive}
+          humanevalEditorActive={humanevalEditorActive}
           onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
+          onOpenHumanEvalDetails={onOpenHumanEvalDetails}
         />
       ) : (
         <ExplorerPanel

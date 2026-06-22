@@ -5,6 +5,7 @@ import {
   evalResultsEditorTab,
   gpqaDatasetEditorTab,
   gpqaDetailsEditorTab,
+  humanevalDetailsEditorTab,
   layerEditorTab,
   type EditorTab,
 } from "./components/Workbench/editorTabModel";
@@ -367,6 +368,10 @@ function App() {
     openEditorTab(gpqaDatasetEditorTab());
   }, [openEditorTab]);
 
+  const handleOpenHumanEvalDetails = useCallback(() => {
+    openEditorTab(humanevalDetailsEditorTab());
+  }, [openEditorTab]);
+
   const handleToggleRunTarget = useCallback(
     (target: BenchmarkRunId) => {
       if (target !== "ppl_check" && target !== "gpqa_diamond") return;
@@ -684,6 +689,7 @@ function App() {
           onRefreshGpqaStatus={refreshGpqaStatus}
           onOpenGpqaDetails={handleOpenGpqaDetails}
           onOpenGpqaDataset={handleOpenGpqaDataset}
+          onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
           onTest={handleTest}
           onCancelTest={handleCancelTest}
           onSaveRecipe={handleSaveRecipe}
