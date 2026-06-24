@@ -51,6 +51,7 @@ interface WorkbenchShellProps {
   humanevalStatus: HumanEvalStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
+  humanevalConfig: GpqaBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
@@ -66,12 +67,14 @@ interface WorkbenchShellProps {
   onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
   onRefreshGpqaStatus: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
+  onRunHumanEvalBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -103,6 +106,7 @@ export function WorkbenchShell({
   humanevalStatus,
   gpqaShotMode,
   gpqaConfig,
+  humanevalConfig,
   modelExplorerFocusVersion,
   onOpenLayer,
   onOpenModel,
@@ -118,12 +122,14 @@ export function WorkbenchShell({
   onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
+  onHumanEvalConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
   onRefreshGpqaStatus,
   onOpenGpqaDetails,
   onOpenGpqaDataset,
   onOpenHumanEvalDetails,
+  onRunHumanEvalBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -307,7 +313,7 @@ export function WorkbenchShell({
           setExplorerWidth(nextWidth);
         }}
       />
-      <EditorPane
+        <EditorPane
         modelPath={modelPath}
         hasModel={tensors.length > 0}
         running={running}
@@ -327,6 +333,7 @@ export function WorkbenchShell({
         humanevalStatus={humanevalStatus}
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
+        humanevalConfig={humanevalConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
         onRefreshGpqaStatus={onRefreshGpqaStatus}
@@ -340,6 +347,8 @@ export function WorkbenchShell({
         onNoTestsSelected={onNoTestsSelected}
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
+        onHumanEvalConfigChange={onHumanEvalConfigChange}
+        onRunHumanEvalBenchmark={onRunHumanEvalBenchmark}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}

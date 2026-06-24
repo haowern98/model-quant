@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   BenchmarkRunId,
   GpqaDiamondStatus,
+  HumanEvalStatus,
   ProgressEvent,
   RecipeEvalPreset,
   RecipeTestMode,
@@ -16,6 +17,7 @@ interface RunControlsProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  humanevalStatus: HumanEvalStatus;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
@@ -33,6 +35,7 @@ export function RunControls({
   testMode,
   selectedRunIds,
   gpqaStatus,
+  humanevalStatus,
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
@@ -74,11 +77,18 @@ export function RunControls({
     : testMode === "compare_baseline"
       ? "Compare Recipe"
       : "Test Recipe";
-  const hasSelectedRun = selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond");
-  const hasSelectedGpqa = selectedRunIds.includes("gpqa_diamond");
-  const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedGpqa);
+  const hasSelectedRun = selectedRunIds.some(
+    (id) => id === "ppl_check" || id === "gpqa_diamond" || id === "humaneval",
+  );
+  const hasSelectedApiBenchmark =
+    selectedRunIds.includes("gpqa_diamond") || selectedRunIds.includes("humaneval");
+  const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedApiBenchmark);
   const progressMessage =
-    progress?.message.toLowerCase().includes("gpqa") ? "GPQA running" : progress?.message;
+    progress?.message.toLowerCase().includes("gpqa")
+      ? "GPQA running"
+      : progress?.message.toLowerCase().includes("humaneval")
+        ? "HumanEval running"
+        : progress?.message;
 
   return (
     <div className="editor-run-controls">
@@ -163,6 +173,13 @@ export function RunControls({
               checked={selectedRunIds.includes("gpqa_diamond")}
               disabled={running}
               onClick={() => onToggleRunTarget("gpqa_diamond")}
+            />
+            <RunMenuCheckbox
+              label="HumanEval"
+              status={humanevalStatus.statusLabel}
+              checked={selectedRunIds.includes("humaneval")}
+              disabled={running}
+              onClick={() => onToggleRunTarget("humaneval")}
             />
             <RunMenuCheckbox label="MMLU-Pro" status="Download" disabled muted />
             <RunMenuCheckbox label="MMLU-Redux" status="Frozen" disabled muted />

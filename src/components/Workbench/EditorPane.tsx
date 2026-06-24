@@ -73,6 +73,7 @@ interface EditorPaneProps {
   humanevalStatus: HumanEvalStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
+  humanevalConfig: GpqaBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
@@ -86,6 +87,8 @@ interface EditorPaneProps {
   onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onRunHumanEvalBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -124,6 +127,7 @@ export function EditorPane({
   humanevalStatus,
   gpqaShotMode,
   gpqaConfig,
+  humanevalConfig,
   onSelectEditor,
   onCloseEditor,
   onReorderEditor,
@@ -137,6 +141,8 @@ export function EditorPane({
   onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
+  onHumanEvalConfigChange,
+  onRunHumanEvalBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -215,6 +221,7 @@ export function EditorPane({
           testMode={testMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          humanevalStatus={humanevalStatus}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
           onToggleRunTarget={onToggleRunTarget}
@@ -255,7 +262,13 @@ export function EditorPane({
           onRunBenchmark={onTest}
         />
       ) : showingHumanEvalBenchmark ? (
-        <HumanEvalBenchmarkView status={humanevalStatus} />
+        <HumanEvalBenchmarkView
+          status={humanevalStatus}
+          config={humanevalConfig}
+          running={running}
+          onConfigChange={onHumanEvalConfigChange}
+          onRunBenchmark={onRunHumanEvalBenchmark}
+        />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -662,7 +675,19 @@ function GpqaBenchmarkView({
   );
 }
 
-function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
+function HumanEvalBenchmarkView({
+  status,
+  config,
+  running,
+  onConfigChange,
+  onRunBenchmark,
+}: {
+  status: HumanEvalStatus;
+  config: GpqaBenchmarkConfigInput;
+  running: boolean;
+  onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onRunBenchmark: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<HumanEvalBenchmarkTab>("details");
   const [viewStatus, setViewStatus] = useState(status);
   const [datasetStatus, setDatasetStatus] = useState<HumanEvalDatasetStatus>({
@@ -677,7 +702,26 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
   const [datasetRows, setDatasetRows] = useState<HumanEvalDatasetRow[]>([]);
   const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
   const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
-  const harnessInstalled = Boolean(viewStatus.python && viewStatus.evalscope);
+  const harnessInstalled =
+    viewStatus.statusLabel !== "Needs harness" && Boolean(viewStatus.python && viewStatus.evalscope);
+  const updateIntegerField =
+    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
+    };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) onConfigChange({ ...config, [field]: value });
+    };
+  const updatePresencePenalty = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.currentTarget.value;
+    if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+      onConfigChange({ ...config, presencePenalty: value });
+    }
+  };
 
   useEffect(() => {
     setViewStatus(status);
@@ -815,7 +859,12 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
                 >
                   Refresh
                 </button>
-                <button type="button" className="benchmark-action-button primary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={busy || running || !viewStatus.ready || !datasetStatus.datasetReady}
+                  onClick={onRunBenchmark}
+                >
                   Run Benchmark
                 </button>
                 <button type="button" className="benchmark-icon-button" aria-label="HumanEval settings">
@@ -894,8 +943,8 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="HumanEval thinking"
-                    value="off"
-                    onChange={() => undefined}
+                    value={config.thinking}
+                    onChange={(thinking) => onConfigChange({ ...config, thinking })}
                     options={[
                       { value: "off", label: "Off" },
                       { value: "on", label: "On" },
@@ -904,67 +953,67 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
                   <BenchmarkInputRow
                     label="Temperature"
                     inputLabel="HumanEval temperature"
-                    value="0"
+                    value={config.temperature}
                     placeholder="0"
                     inputMode="decimal"
-                    onChange={() => undefined}
+                    onChange={updateDecimalField("temperature")}
                   />
                   <BenchmarkInputRow
                     label="Top K Sampling"
                     inputLabel="HumanEval top K sampling"
-                    value="40"
+                    value={config.topK}
                     placeholder="40"
                     inputMode="numeric"
-                    onChange={() => undefined}
+                    onChange={updateIntegerField("topK")}
                   />
                   <BenchmarkInputRow
                     label="Repeat Penalty"
                     inputLabel="HumanEval repeat penalty"
-                    value="1.1"
+                    value={config.repeatPenalty}
                     placeholder="1.1"
                     inputMode="decimal"
-                    onChange={() => undefined}
+                    onChange={updateDecimalField("repeatPenalty")}
                   />
                   <BenchmarkInputRow
                     label="Presence Penalty"
                     inputLabel="HumanEval presence penalty"
-                    value="0"
+                    value={config.presencePenalty}
                     placeholder="0"
                     inputMode="decimal"
-                    onChange={() => undefined}
+                    onChange={updatePresencePenalty}
                   />
                   <BenchmarkInputRow
                     label="Top P Sampling"
                     inputLabel="HumanEval top P sampling"
-                    value="0.95"
+                    value={config.topP}
                     placeholder="0.95"
                     inputMode="decimal"
-                    onChange={() => undefined}
+                    onChange={updateDecimalField("topP")}
                   />
                   <BenchmarkInputRow
                     label="Min P Sampling"
                     inputLabel="HumanEval min P sampling"
-                    value="0.05"
+                    value={config.minP}
                     placeholder="0.05"
                     inputMode="decimal"
-                    onChange={() => undefined}
+                    onChange={updateDecimalField("minP")}
                   />
                   <BenchmarkInputRow
                     label="Context window"
                     inputLabel="HumanEval context window"
-                    value="20000"
+                    value={config.contextWindow}
                     placeholder="20000"
                     inputMode="numeric"
-                    onChange={() => undefined}
+                    onChange={updateIntegerField("contextWindow")}
                   />
                   <BenchmarkInfoRow label="Batch size" value="1" />
                   <BenchmarkInputRow
                     label="Samples"
                     inputLabel="HumanEval samples"
-                    value="164"
+                    value={config.sampleLimit}
                     placeholder="164"
                     inputMode="numeric"
-                    onChange={() => undefined}
+                    onChange={updateIntegerField("sampleLimit")}
                   />
                 </BenchmarkInfoSection>
               </div>

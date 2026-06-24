@@ -55,6 +55,7 @@ pub fn run() {
             commands::official_benchmarks::delete_gpqa_diamond_harness,
             commands::official_benchmarks::delete_humaneval_harness,
             commands::official_benchmarks::run_gpqa_diamond_benchmark,
+            commands::official_benchmarks::run_humaneval_benchmark,
             commands::official_benchmarks::cancel_official_benchmark,
         ])
         .run(tauri::generate_context!())

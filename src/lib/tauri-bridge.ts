@@ -183,6 +183,20 @@ export async function runGpqaDiamondBenchmark(
   });
 }
 
+export async function runHumanEvalBenchmark(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  config: GpqaBenchmarkConfig,
+): Promise<BenchmarkResult> {
+  return invoke<BenchmarkResult>("run_humaneval_benchmark", {
+    baseUrl,
+    apiKey,
+    modelId,
+    config,
+  });
+}
+
 export async function cancelOfficialBenchmark(): Promise<void> {
   return invoke<void>("cancel_official_benchmark");
 }

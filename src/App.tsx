@@ -22,6 +22,7 @@ import {
   installGpqaDiamondHarness,
   downloadGpqaDiamondDataset,
   runGpqaDiamondBenchmark,
+  runHumanEvalBenchmark,
   saveRecipe,
   loadRecipe,
   exportGguf,
@@ -68,6 +69,7 @@ const DEFAULT_HUMANEVAL_STATUS: HumanEvalStatus = {
 
 const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
 const GPQA_SAMPLE_COUNT = 198;
+const HUMANEVAL_SAMPLE_COUNT = 164;
 const GPQA_DEFAULT_TEMPERATURE = 0;
 
 const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
@@ -80,6 +82,12 @@ const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
   presencePenalty: "0",
   topP: "0.95",
   minP: "0.05",
+};
+
+const DEFAULT_HUMANEVAL_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
+  ...DEFAULT_GPQA_CONFIG_INPUT,
+  contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
+  sampleLimit: String(HUMANEVAL_SAMPLE_COUNT),
 };
 
 function parseOptionalIntegerField(
@@ -262,6 +270,9 @@ function App() {
   const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
     DEFAULT_GPQA_CONFIG_INPUT,
   );
+  const [humanevalConfig, setHumanEvalConfig] = useState<GpqaBenchmarkConfigInput>(
+    DEFAULT_HUMANEVAL_CONFIG_INPUT,
+  );
 
   const refreshGpqaStatus = useCallback(() => {
     let cancelled = false;
@@ -421,7 +432,7 @@ function App() {
 
   const handleToggleRunTarget = useCallback(
     (target: BenchmarkRunId) => {
-      if (target !== "ppl_check" && target !== "gpqa_diamond") return;
+      if (target !== "ppl_check" && target !== "gpqa_diamond" && target !== "humaneval") return;
       setSelectedRunIds((current) =>
         current.includes(target)
           ? current.filter((id) => id !== target)
@@ -487,10 +498,15 @@ function App() {
     if (!recipe || !modelPath) {
       if (
         selectedRunIds.includes("gpqa_diamond") &&
+        !selectedRunIds.includes("humaneval") &&
         !selectedRunIds.includes("ppl_check")
       ) {
         setAppError("Open a GGUF model before running tests.");
-      } else if (selectedRunIds.some((id) => id === "ppl_check" || id === "gpqa_diamond")) {
+      } else if (
+        selectedRunIds.some(
+          (id) => id === "ppl_check" || id === "gpqa_diamond" || id === "humaneval",
+        )
+      ) {
         setAppError("Open a GGUF model before running selected tests.");
       }
       return;
@@ -500,11 +516,16 @@ function App() {
       return;
     }
     const runQueue = selectedRunIds.filter(
-      (id) => id === "ppl_check" || (id === "gpqa_diamond" && gpqaStatus.ready),
+      (id) =>
+        id === "ppl_check" ||
+        (id === "gpqa_diamond" && gpqaStatus.ready) ||
+        (id === "humaneval" && humanevalStatus.ready),
     );
     if (runQueue.length === 0) {
       if (selectedRunIds.includes("gpqa_diamond") && !gpqaStatus.ready) {
         setAppError(`GPQA Diamond is not ready. Current status: ${gpqaStatus.statusLabel}.`);
+      } else if (selectedRunIds.includes("humaneval") && !humanevalStatus.ready) {
+        setAppError(`HumanEval is not ready. Current status: ${humanevalStatus.statusLabel}.`);
       }
       return;
     }
@@ -551,6 +572,31 @@ function App() {
         }
       }
 
+      if (runQueue.includes("humaneval")) {
+        const config = resolveGpqaConfigInput(humanevalConfig);
+        if (typeof config === "string") throw new Error(config.replaceAll("GPQA", "HumanEval"));
+        config.sampleLimit = Math.min(config.sampleLimit, HUMANEVAL_SAMPLE_COUNT);
+        const apiStatus = await startModelInspectorApi({
+          benchmarkLabel: "ModelInspector API",
+          contextWindow: config.contextWindow,
+          defaultEnableThinking: false,
+        });
+        if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+          throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+        }
+        try {
+          latestResult = await runHumanEvalBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            config,
+          );
+          openEvalResults(latestResult);
+        } finally {
+          await stopModelInspectorApi();
+        }
+      }
+
       setAppError(null);
     } catch (e) {
       const message = (e as Error).message;
@@ -565,12 +611,75 @@ function App() {
     recipeEvalPreset,
     selectedRunIds,
     gpqaStatus.ready,
+    humanevalStatus.ready,
+    humanevalStatus.statusLabel,
     gpqaShotMode,
     gpqaConfig,
+    humanevalConfig,
     startOperation,
     endOperation,
     openEvalResults,
     setProfile,
+  ]);
+
+  const handleRunHumanEvalBenchmark = useCallback(async () => {
+    if (!recipe || !modelPath) {
+      setAppError("Open a GGUF model before running HumanEval.");
+      return;
+    }
+    if (recipe.baseModel !== modelPath) {
+      setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
+      return;
+    }
+    if (!humanevalStatus.ready) {
+      setAppError(`HumanEval is not ready. Current status: ${humanevalStatus.statusLabel}.`);
+      return;
+    }
+
+    const config = resolveGpqaConfigInput(humanevalConfig);
+    if (typeof config === "string") {
+      setAppError(config.replaceAll("GPQA", "HumanEval"));
+      return;
+    }
+    config.sampleLimit = Math.min(config.sampleLimit, HUMANEVAL_SAMPLE_COUNT);
+
+    startOperation();
+    try {
+      const apiStatus = await startModelInspectorApi({
+        benchmarkLabel: "ModelInspector API",
+        contextWindow: config.contextWindow,
+        defaultEnableThinking: config.thinking === "on",
+      });
+      if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+        throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+      }
+      try {
+        const result = await runHumanEvalBenchmark(
+          apiStatus.baseUrl,
+          apiStatus.apiKey,
+          apiStatus.modelId,
+          config,
+        );
+        openEvalResults(result);
+      } finally {
+        await stopModelInspectorApi();
+      }
+      setAppError(null);
+    } catch (e) {
+      const message = (e as Error).message;
+      if (!message.toLowerCase().includes("cancelled")) setAppError(message);
+    } finally {
+      endOperation();
+    }
+  }, [
+    recipe,
+    modelPath,
+    humanevalStatus.ready,
+    humanevalStatus.statusLabel,
+    humanevalConfig,
+    startOperation,
+    endOperation,
+    openEvalResults,
   ]);
 
   const handleNoTestsSelected = useCallback(() => {
@@ -717,6 +826,7 @@ function App() {
           humanevalStatus={humanevalStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
+          humanevalConfig={humanevalConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
@@ -732,12 +842,14 @@ function App() {
           onNoTestsSelected={handleNoTestsSelected}
           onGpqaShotModeChange={setGpqaShotMode}
           onGpqaConfigChange={setGpqaConfig}
+          onHumanEvalConfigChange={setHumanEvalConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}
           onDownloadGpqaDataset={handleDownloadGpqaDataset}
           onRefreshGpqaStatus={refreshGpqaStatus}
           onOpenGpqaDetails={handleOpenGpqaDetails}
           onOpenGpqaDataset={handleOpenGpqaDataset}
           onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
+          onRunHumanEvalBenchmark={handleRunHumanEvalBenchmark}
           onTest={handleTest}
           onCancelTest={handleCancelTest}
           onSaveRecipe={handleSaveRecipe}

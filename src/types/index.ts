@@ -165,6 +165,7 @@ export type RecipeEvalPreset = "quick" | "default";
 export type BenchmarkRunId =
   | "ppl_check"
   | "gpqa_diamond"
+  | "humaneval"
   | "mmlu_pro"
   | "mmlu_redux"
   | "supergpqa"
