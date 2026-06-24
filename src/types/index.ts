@@ -278,6 +278,23 @@ export interface HumanEvalStatus {
   detail: string;
 }
 
+export interface HumanEvalDatasetStatus {
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+}
+
+export interface HumanEvalDatasetRow {
+  index: number;
+  taskId: string;
+  entryPoint: string;
+  prompt: string;
+  canonicalSolution: string;
+}
+
 export interface GpqaDatasetRow {
   index: number;
   question: string;

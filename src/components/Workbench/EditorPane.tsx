@@ -16,6 +16,8 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   GpqaThinkingMode,
+  HumanEvalDatasetRow,
+  HumanEvalDatasetStatus,
   HumanEvalStatus,
   ProgressEvent,
   QuantType,
@@ -32,8 +34,12 @@ import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
   deleteGpqaDiamondDataset,
   deleteGpqaDiamondHarness,
+  deleteHumanEvalDataset,
   deleteHumanEvalHarness,
+  downloadHumanEvalDataset,
   getGpqaDiamondDatasetRows,
+  getHumanEvalDatasetRows,
+  getHumanEvalDatasetStatus,
   getHumanEvalStatus,
   installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
@@ -659,17 +665,71 @@ function GpqaBenchmarkView({
 function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
   const [activeTab, setActiveTab] = useState<HumanEvalBenchmarkTab>("details");
   const [viewStatus, setViewStatus] = useState(status);
+  const [datasetStatus, setDatasetStatus] = useState<HumanEvalDatasetStatus>({
+    datasetReady: false,
+    datasetStatusLabel: "Missing",
+    datasetPath: null,
+    datasetHash: null,
+    datasetUrl: "opencompass/humaneval",
+    expectedDatasetHash: "EvalScope dataset cache marker",
+  });
   const [busy, setBusy] = useState(false);
+  const [datasetRows, setDatasetRows] = useState<HumanEvalDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const harnessInstalled = Boolean(viewStatus.python && viewStatus.evalscope);
 
   useEffect(() => {
     setViewStatus(status);
+    getHumanEvalDatasetStatus()
+      .then(setDatasetStatus)
+      .catch((error: unknown) => {
+        setViewStatus((current) => ({
+          ...current,
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+      });
   }, [status]);
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getHumanEvalDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetStatus.datasetReady]);
 
   const refreshStatus = async () => {
     setBusy(true);
     try {
-      setViewStatus(await getHumanEvalStatus());
+      const [nextStatus, nextDatasetStatus] = await Promise.all([
+        getHumanEvalStatus(),
+        getHumanEvalDatasetStatus(),
+      ]);
+      setViewStatus(nextStatus);
+      setDatasetStatus(nextDatasetStatus);
     } catch (error) {
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
@@ -682,6 +742,22 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
     try {
       setViewStatus(
         harnessInstalled ? await deleteHumanEvalHarness() : await installHumanEvalHarness(),
+      );
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeDataset = async () => {
+    setBusy(true);
+    try {
+      setDatasetStatus(
+        datasetStatus.datasetReady
+          ? await deleteHumanEvalDataset()
+          : await downloadHumanEvalDataset(),
       );
       window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
     } catch (error) {
@@ -707,10 +783,20 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
               </div>
               <p>Official HumanEval harness for checking Python code generation through the in-process chat API.</p>
               <div className="benchmark-page-actions">
-                <button type="button" className="benchmark-action-button secondary" disabled>
-                  Download dataset
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || (!datasetStatus.datasetReady && !harnessInstalled)}
+                  onClick={changeDataset}
+                >
+                  {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy}
+                  onClick={refreshStatus}
+                >
                   Verify hash
                 </button>
                 <button
@@ -772,7 +858,35 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
             ) : activeTab === "dataset" ? (
               <div className="benchmark-copy">
                 <h2>Dataset Preview</h2>
-                <p>HumanEval dataset preview will appear after the dataset workflow is wired.</p>
+                {!datasetStatus.datasetReady ? (
+                  <p>Download and verify the dataset to preview rows.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset rows...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset rows found.</p>
+                ) : (
+                  <div className="benchmark-dataset-table" role="table" aria-label="HumanEval dataset rows">
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Task</span>
+                      <span role="columnheader">Prompt</span>
+                      <span role="columnheader">Canonical solution</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.index}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">
+                          {row.taskId || "Unavailable"}
+                          {row.entryPoint ? `\n${row.entryPoint}` : ""}
+                        </span>
+                        <span role="cell">{row.prompt || "Unavailable"}</span>
+                        <span role="cell">{row.canonicalSolution || "Unavailable"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="benchmark-copy">
@@ -868,14 +982,14 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
               <BenchmarkInfoRow label="Docker" value={viewStatus.dockerReady ? viewStatus.docker ?? "Ready" : "Unavailable"} />
             </BenchmarkInfoSection>
             <BenchmarkInfoSection title="HumanEval Dataset">
-              <BenchmarkInfoRow label="Downloaded" value="No" />
-              <BenchmarkInfoRow label="Verified" value="No" />
+              <BenchmarkInfoRow label="Downloaded" value={datasetStatus.datasetPath ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetReady ? "Yes" : "No"} />
               <BenchmarkInfoRow label="Samples" value="164" />
               <BenchmarkInfoRow label="License" value="MIT" />
-              <BenchmarkInfoRow label="Official asset" value="opencompass/humaneval" />
-              <BenchmarkInfoRow label="Cache path" value="Not downloaded" />
-              <BenchmarkInfoRow label="SHA256" value="Unavailable" />
-              <BenchmarkInfoRow label="Expected SHA256" value="EvalScope dataset cache marker" />
+              <BenchmarkInfoRow label="Official asset" value={datasetStatus.datasetUrl} />
+              <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
+              <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
             </BenchmarkInfoSection>
           </aside>
         </div>

@@ -14,6 +14,8 @@ import type {
   GpqaDatasetRow,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalDatasetRow,
+  HumanEvalDatasetStatus,
   HumanEvalStatus,
 } from "../types";
 
@@ -121,8 +123,16 @@ export async function getHumanEvalStatus(): Promise<HumanEvalStatus> {
   return invoke<HumanEvalStatus>("get_humaneval_status");
 }
 
+export async function getHumanEvalDatasetStatus(): Promise<HumanEvalDatasetStatus> {
+  return invoke<HumanEvalDatasetStatus>("get_humaneval_dataset_status");
+}
+
 export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {
   return invoke<GpqaDatasetRow[]>("get_gpqa_diamond_dataset_rows");
+}
+
+export async function getHumanEvalDatasetRows(): Promise<HumanEvalDatasetRow[]> {
+  return invoke<HumanEvalDatasetRow[]>("get_humaneval_dataset_rows");
 }
 
 export async function installGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
@@ -137,8 +147,16 @@ export async function downloadGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("download_gpqa_diamond_dataset");
 }
 
+export async function downloadHumanEvalDataset(): Promise<HumanEvalDatasetStatus> {
+  return invoke<HumanEvalDatasetStatus>("download_humaneval_dataset");
+}
+
 export async function deleteGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_dataset");
+}
+
+export async function deleteHumanEvalDataset(): Promise<HumanEvalDatasetStatus> {
+  return invoke<HumanEvalDatasetStatus>("delete_humaneval_dataset");
 }
 
 export async function deleteGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
