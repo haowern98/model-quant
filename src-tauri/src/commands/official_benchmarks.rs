@@ -295,6 +295,24 @@ pub async fn install_gpqa_diamond_harness(
 }
 
 #[tauri::command]
+pub async fn install_humaneval_harness(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<HumanEvalStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        install_gpqa_diamond_harness_blocking(app_data_dir.clone(), app, child)?;
+        Ok(detect_humaneval_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn download_gpqa_diamond_dataset(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -344,6 +362,25 @@ pub async fn delete_gpqa_diamond_harness(
         ensure_official_benchmark_idle(&child)?;
         remove_path_if_exists(&gpqa_env_dir(&app_data_dir).join("venv"))?;
         Ok(detect_gpqa_diamond_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_humaneval_harness(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<HumanEvalStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&gpqa_env_dir(&app_data_dir).join("venv"))?;
+        Ok(detect_humaneval_status(app_data_dir))
     })
     .await
     .map_err(|e| e.to_string())?

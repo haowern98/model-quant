@@ -32,7 +32,10 @@ import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
   deleteGpqaDiamondDataset,
   deleteGpqaDiamondHarness,
+  deleteHumanEvalHarness,
   getGpqaDiamondDatasetRows,
+  getHumanEvalStatus,
+  installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
@@ -655,6 +658,38 @@ function GpqaBenchmarkView({
 
 function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
   const [activeTab, setActiveTab] = useState<HumanEvalBenchmarkTab>("details");
+  const [viewStatus, setViewStatus] = useState(status);
+  const [busy, setBusy] = useState(false);
+  const harnessInstalled = Boolean(viewStatus.python && viewStatus.evalscope);
+
+  useEffect(() => {
+    setViewStatus(status);
+  }, [status]);
+
+  const refreshStatus = async () => {
+    setBusy(true);
+    try {
+      setViewStatus(await getHumanEvalStatus());
+    } catch (error) {
+      setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeHarness = async () => {
+    setBusy(true);
+    try {
+      setViewStatus(
+        harnessInstalled ? await deleteHumanEvalHarness() : await installHumanEvalHarness(),
+      );
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -678,10 +713,20 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
                 <button type="button" className="benchmark-action-button secondary" disabled>
                   Verify hash
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
-                  Install harness
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy}
+                  onClick={changeHarness}
+                >
+                  {harnessInstalled ? "Delete harness" : "Install harness"}
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy}
+                  onClick={refreshStatus}
+                >
                   Refresh
                 </button>
                 <button type="button" className="benchmark-action-button primary" disabled>
@@ -812,15 +857,15 @@ function HumanEvalBenchmarkView({ status }: { status: HumanEvalStatus }) {
             )}
           </div>
           <aside className="benchmark-page-side">
-            <p className="benchmark-readiness">{status.detail}</p>
+            <p className="benchmark-readiness">{viewStatus.detail}</p>
             <BenchmarkInfoSection title="Harness">
               <BenchmarkInfoRow label="Framework" value="EvalScope" />
               <BenchmarkInfoRow label="Dataset" value="humaneval" />
               <BenchmarkInfoRow label="Metric" value="pass@1" />
-              <BenchmarkInfoRow label="Status" value={status.statusLabel} />
-              <BenchmarkInfoRow label="Python" value={status.python ?? "Unavailable"} />
-              <BenchmarkInfoRow label="EvalScope" value={status.evalscope ?? "Unavailable"} />
-              <BenchmarkInfoRow label="Docker" value={status.dockerReady ? status.docker ?? "Ready" : "Unavailable"} />
+              <BenchmarkInfoRow label="Status" value={viewStatus.statusLabel} />
+              <BenchmarkInfoRow label="Python" value={viewStatus.python ?? "Unavailable"} />
+              <BenchmarkInfoRow label="EvalScope" value={viewStatus.evalscope ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Docker" value={viewStatus.dockerReady ? viewStatus.docker ?? "Ready" : "Unavailable"} />
             </BenchmarkInfoSection>
             <BenchmarkInfoSection title="HumanEval Dataset">
               <BenchmarkInfoRow label="Downloaded" value="No" />

@@ -129,6 +129,10 @@ export async function installGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("install_gpqa_diamond_harness");
 }
 
+export async function installHumanEvalHarness(): Promise<HumanEvalStatus> {
+  return invoke<HumanEvalStatus>("install_humaneval_harness");
+}
+
 export async function downloadGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("download_gpqa_diamond_dataset");
 }
@@ -139,6 +143,10 @@ export async function deleteGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
 
 export async function deleteGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_harness");
+}
+
+export async function deleteHumanEvalHarness(): Promise<HumanEvalStatus> {
+  return invoke<HumanEvalStatus>("delete_humaneval_harness");
 }
 
 export async function runGpqaDiamondBenchmark(

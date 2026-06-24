@@ -305,6 +305,17 @@ function App() {
 
   useEffect(() => refreshHumanEvalStatus(), [refreshHumanEvalStatus]);
 
+  useEffect(() => {
+    const refreshBenchmarkStatuses = () => {
+      void refreshGpqaStatus();
+      void refreshHumanEvalStatus();
+    };
+    window.addEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
+    return () => {
+      window.removeEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
+    };
+  }, [refreshGpqaStatus, refreshHumanEvalStatus]);
+
   const resetForLoadedModel = useCallback(
     (path: string, loadedModel: NonNullable<typeof model>) => {
       const tensors = loadedModel.tensors.map((t) => ({
