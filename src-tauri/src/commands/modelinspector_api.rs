@@ -5,7 +5,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -13,7 +13,8 @@ use tauri::{AppHandle, State};
 
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
-    ChatFinishReason, ChatGenerationParams, MsRuntimeChatSessionCounters, RecipeChatSession,
+    ChatFinishReason, ChatGenerationParams, MsBaselineBenchmark, MsRuntimeChatSessionCounters,
+    RecipeChatSession,
 };
 use crate::quant::recipe::{QuantType, RecipeState};
 
@@ -49,6 +50,82 @@ impl From<MsRuntimeChatSessionCounters> for ModelInspectorApiTensorSummary {
             requested_target_count: counters.requested_target_count,
             verified_target_count: counters.verified_target_count,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ModelInspectorApiRuntimeSummary {
+    pub prompt_eval_tps: f64,
+    pub token_gen_tps: f64,
+    pub ttft_ms: f64,
+    pub prompt_eval_ms: f64,
+    pub generation_ms: f64,
+    pub vram_peak_mb: f64,
+    pub vram_allocated_mb: f64,
+    pub load_ms: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ModelInspectorApiModelSummary {
+    pub tensor_count: u64,
+    pub metadata_count: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ModelInspectorApiRuntimeTotals {
+    load_ms: f64,
+    completion_count: u64,
+    prompt_tokens: u64,
+    generated_tokens: u64,
+    prompt_eval_ms: f64,
+    generation_ms: f64,
+    ttft_ms_total: f64,
+    vram_peak_mb: f64,
+    vram_allocated_mb: f64,
+}
+
+impl ModelInspectorApiRuntimeTotals {
+    fn new(load_ms: f64) -> Self {
+        Self {
+            load_ms,
+            ..Self::default()
+        }
+    }
+
+    fn record(&mut self, benchmark: &MsBaselineBenchmark) {
+        self.completion_count += 1;
+        self.prompt_tokens += benchmark.prompt_tokens as u64;
+        self.generated_tokens += benchmark.generated_tokens as u64;
+        self.prompt_eval_ms += benchmark.prompt_eval_ms;
+        self.generation_ms += benchmark.generation_ms;
+        self.ttft_ms_total += benchmark.ttft_ms;
+        self.vram_peak_mb = self.vram_peak_mb.max(benchmark.vram_peak_mb);
+        self.vram_allocated_mb = self.vram_allocated_mb.max(benchmark.vram_allocated_mb);
+    }
+
+    pub(crate) fn snapshot(&self) -> ModelInspectorApiRuntimeSummary {
+        ModelInspectorApiRuntimeSummary {
+            prompt_eval_tps: tokens_per_second(self.prompt_tokens, self.prompt_eval_ms),
+            token_gen_tps: tokens_per_second(self.generated_tokens, self.generation_ms),
+            ttft_ms: if self.completion_count == 0 {
+                0.0
+            } else {
+                self.ttft_ms_total / self.completion_count as f64
+            },
+            prompt_eval_ms: self.prompt_eval_ms,
+            generation_ms: self.generation_ms,
+            vram_peak_mb: self.vram_peak_mb,
+            vram_allocated_mb: self.vram_allocated_mb,
+            load_ms: self.load_ms,
+        }
+    }
+}
+
+fn tokens_per_second(tokens: u64, elapsed_ms: f64) -> f64 {
+    if elapsed_ms <= 0.0 {
+        0.0
+    } else {
+        tokens as f64 / (elapsed_ms / 1000.0)
     }
 }
 
@@ -144,6 +221,8 @@ pub struct ModelInspectorApiServer {
     model_id: String,
     token: String,
     tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -182,6 +261,34 @@ pub fn modelinspector_api_tensor_summary(
         .unwrap_or_default())
 }
 
+pub(crate) fn modelinspector_api_runtime_totals(
+    api_state: &ModelInspectorApiState,
+    base_url: &str,
+    model_id: &str,
+) -> Result<Arc<Mutex<ModelInspectorApiRuntimeTotals>>, String> {
+    let guard = api_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .server
+        .as_ref()
+        .filter(|server| server.base_url == base_url && server.model_id == model_id)
+        .map(|server| server.runtime_totals.clone())
+        .unwrap_or_default())
+}
+
+pub(crate) fn modelinspector_api_model_summary(
+    api_state: &ModelInspectorApiState,
+    base_url: &str,
+    model_id: &str,
+) -> Result<ModelInspectorApiModelSummary, String> {
+    let guard = api_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .server
+        .as_ref()
+        .filter(|server| server.base_url == base_url && server.model_id == model_id)
+        .map(|server| server.model_summary)
+        .unwrap_or_default())
+}
+
 #[tauri::command]
 pub async fn start_modelinspector_api(
     benchmark_label: Option<String>,
@@ -199,6 +306,11 @@ pub async fn start_modelinspector_api(
         .clone()
         .ok_or("No model loaded")?;
 
+    let gguf_summary = crate::ffi::runtime_bindings::inspect_gguf(&recipe.base_model)?;
+    let model_summary = ModelInspectorApiModelSummary {
+        tensor_count: gguf_summary.tensor_count,
+        metadata_count: gguf_summary.metadata_count,
+    };
     let model_id = model_id_from_path(&recipe.base_model);
     let token = make_token();
     let (startup, old_server) = {
@@ -237,6 +349,7 @@ pub async fn start_modelinspector_api(
     if context_tokens == 0 {
         return Err("ModelInspector API context window must be greater than 0.".to_string());
     }
+    let load_start = Instant::now();
     let session = match crate::ffi::runtime_bindings::open_recipe_chat_session_with_progress(
         &recipe.base_model,
         &targets,
@@ -258,6 +371,7 @@ pub async fn start_modelinspector_api(
             ));
         }
     };
+    let load_ms = load_start.elapsed().as_secs_f64() * 1000.0;
     if startup.cancel_requested() {
         let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
         guard.finish_start(&startup, None);
@@ -291,10 +405,12 @@ pub async fn start_modelinspector_api(
     ] {
         crate::progress::emit_api_output(&app, line);
     }
+    let runtime_totals = Arc::new(Mutex::new(ModelInspectorApiRuntimeTotals::new(load_ms)));
     let server_state = Arc::new(HttpApiState {
         token: token.clone(),
         model_id: model_id.clone(),
         session: Some(Mutex::new(session)),
+        runtime_totals: runtime_totals.clone(),
         benchmark_label,
         benchmark_sample_count,
         default_enable_thinking,
@@ -323,6 +439,8 @@ pub async fn start_modelinspector_api(
         model_id: model_id.clone(),
         token,
         tensor_summary,
+        model_summary,
+        runtime_totals,
         stop,
         handle: Some(handle),
     };
@@ -389,6 +507,7 @@ struct HttpApiState {
     token: String,
     model_id: String,
     session: Option<Mutex<RecipeChatSession>>,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     benchmark_label: Option<String>,
     benchmark_sample_count: Option<u64>,
     default_enable_thinking: Option<bool>,
@@ -952,6 +1071,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
     if state.session.is_none() {
         finish_reason = apply_stop_strings(&mut content, &config.stop);
     }
+    record_completion_benchmark(state, &benchmark);
     let diagnostics = ChatCompletionDiagnostics {
         model: model.clone(),
         finish_reason,
@@ -1128,6 +1248,7 @@ fn chat_completions_stream(
 
     match final_result {
         Ok((content, reasoning_content, benchmark, finish_reason)) => {
+            record_completion_benchmark(state, &benchmark);
             let diagnostics = ChatCompletionDiagnostics {
                 model: model.clone(),
                 finish_reason,
@@ -1180,6 +1301,12 @@ fn next_completion_count(state: &HttpApiState) -> u64 {
 
 fn prospective_completion_count(state: &HttpApiState) -> u64 {
     state.completion_count.load(Ordering::SeqCst) + 1
+}
+
+fn record_completion_benchmark(state: &HttpApiState, benchmark: &MsBaselineBenchmark) {
+    if let Ok(mut totals) = state.runtime_totals.lock() {
+        totals.record(benchmark);
+    }
 }
 
 fn emit_completion_output(
@@ -1560,6 +1687,7 @@ mod tests {
             token: "test-token".to_string(),
             model_id: "Qwen3.5-9B-Q4_K_M.gguf".to_string(),
             session: None,
+            runtime_totals: Arc::new(Mutex::new(ModelInspectorApiRuntimeTotals::default())),
             benchmark_label: None,
             benchmark_sample_count: None,
             default_enable_thinking: None,

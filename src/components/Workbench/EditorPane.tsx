@@ -16,6 +16,9 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   GpqaThinkingMode,
+  HumanEvalDatasetRow,
+  HumanEvalDatasetStatus,
+  HumanEvalStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -31,12 +34,20 @@ import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
   deleteGpqaDiamondDataset,
   deleteGpqaDiamondHarness,
+  deleteHumanEvalDataset,
+  deleteHumanEvalHarness,
+  downloadHumanEvalDataset,
   getGpqaDiamondDatasetRows,
+  getHumanEvalDatasetRows,
+  getHumanEvalDatasetStatus,
+  getHumanEvalStatus,
+  installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
 type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
+type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -59,8 +70,10 @@ interface EditorPaneProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  humanevalStatus: HumanEvalStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
+  humanevalConfig: GpqaBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
@@ -74,6 +87,8 @@ interface EditorPaneProps {
   onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onRunHumanEvalBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -109,8 +124,10 @@ export function EditorPane({
   testMode,
   selectedRunIds,
   gpqaStatus,
+  humanevalStatus,
   gpqaShotMode,
   gpqaConfig,
+  humanevalConfig,
   onSelectEditor,
   onCloseEditor,
   onReorderEditor,
@@ -124,6 +141,8 @@ export function EditorPane({
   onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
+  onHumanEvalConfigChange,
+  onRunHumanEvalBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -143,12 +162,15 @@ export function EditorPane({
         ? "GPQA Diamond"
         : activeEditor?.kind === "gpqa-dataset"
           ? "GPQA Diamond Dataset"
+          : activeEditor?.kind === "humaneval-details"
+            ? "HumanEval"
       : layerTitle(activeLayerIndex);
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
   const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
   const showingGpqaDetails = activeEditor?.kind === "gpqa-details";
   const showingGpqaDataset = activeEditor?.kind === "gpqa-dataset";
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
+  const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -199,6 +221,7 @@ export function EditorPane({
           testMode={testMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          humanevalStatus={humanevalStatus}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
           onToggleRunTarget={onToggleRunTarget}
@@ -213,7 +236,7 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>{activeResult || showingGpqaBenchmark ? "benchmark" : "tensors"}</span>
+        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
       {activeResult ? (
@@ -237,6 +260,14 @@ export function EditorPane({
           onShotModeChange={onGpqaShotModeChange}
           onConfigChange={onGpqaConfigChange}
           onRunBenchmark={onTest}
+        />
+      ) : showingHumanEvalBenchmark ? (
+        <HumanEvalBenchmarkView
+          status={humanevalStatus}
+          config={humanevalConfig}
+          running={running}
+          onConfigChange={onHumanEvalConfigChange}
+          onRunBenchmark={onRunHumanEvalBenchmark}
         />
       ) : (
         <section className="tensor-editor-surface">
@@ -636,6 +667,379 @@ function GpqaBenchmarkView({
               <BenchmarkInfoRow label="Cache path" value={status.datasetPath ?? "Not downloaded"} />
               <BenchmarkInfoRow label="SHA256" value={status.datasetHash ?? "Unavailable"} />
               <BenchmarkInfoRow label="Expected SHA256" value={status.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HumanEvalBenchmarkView({
+  status,
+  config,
+  running,
+  onConfigChange,
+  onRunBenchmark,
+}: {
+  status: HumanEvalStatus;
+  config: GpqaBenchmarkConfigInput;
+  running: boolean;
+  onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onRunBenchmark: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<HumanEvalBenchmarkTab>("details");
+  const [viewStatus, setViewStatus] = useState(status);
+  const [datasetStatus, setDatasetStatus] = useState<HumanEvalDatasetStatus>({
+    datasetReady: false,
+    datasetStatusLabel: "Missing",
+    datasetPath: null,
+    datasetHash: null,
+    datasetUrl: "opencompass/humaneval",
+    expectedDatasetHash: "EvalScope dataset cache marker",
+  });
+  const [busy, setBusy] = useState(false);
+  const [datasetRows, setDatasetRows] = useState<HumanEvalDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
+  const harnessInstalled =
+    viewStatus.statusLabel !== "Needs harness" && Boolean(viewStatus.python && viewStatus.evalscope);
+  const updateIntegerField =
+    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
+    };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) onConfigChange({ ...config, [field]: value });
+    };
+  const updatePresencePenalty = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.currentTarget.value;
+    if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+      onConfigChange({ ...config, presencePenalty: value });
+    }
+  };
+
+  useEffect(() => {
+    setViewStatus(status);
+    getHumanEvalDatasetStatus()
+      .then(setDatasetStatus)
+      .catch((error: unknown) => {
+        setViewStatus((current) => ({
+          ...current,
+          detail: error instanceof Error ? error.message : String(error),
+        }));
+      });
+  }, [status]);
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getHumanEvalDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetStatus.datasetReady]);
+
+  const refreshStatus = async () => {
+    setBusy(true);
+    try {
+      const [nextStatus, nextDatasetStatus] = await Promise.all([
+        getHumanEvalStatus(),
+        getHumanEvalDatasetStatus(),
+      ]);
+      setViewStatus(nextStatus);
+      setDatasetStatus(nextDatasetStatus);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeHarness = async () => {
+    setBusy(true);
+    try {
+      setViewStatus(
+        harnessInstalled ? await deleteHumanEvalHarness() : await installHumanEvalHarness(),
+      );
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeDataset = async () => {
+    setBusy(true);
+    try {
+      setDatasetStatus(
+        datasetStatus.datasetReady
+          ? await deleteHumanEvalDataset()
+          : await downloadHumanEvalDataset(),
+      );
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="benchmark-editor-surface">
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-title">
+              <h1>HumanEval</h1>
+              <div className="benchmark-page-meta">
+                <span>EvalScope</span>
+                <span>|</span>
+                <span>humaneval</span>
+                <span>|</span>
+                <span>164 samples</span>
+              </div>
+              <p>Official HumanEval harness for checking Python code generation through the in-process chat API.</p>
+              <div className="benchmark-page-actions">
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || (!datasetStatus.datasetReady && !harnessInstalled)}
+                  onClick={changeDataset}
+                >
+                  {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy}
+                  onClick={refreshStatus}
+                >
+                  Verify hash
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy}
+                  onClick={changeHarness}
+                >
+                  {harnessInstalled ? "Delete harness" : "Install harness"}
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy}
+                  onClick={refreshStatus}
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={busy || running || !viewStatus.ready || !datasetStatus.datasetReady}
+                  onClick={onRunBenchmark}
+                >
+                  Run Benchmark
+                </button>
+                <button type="button" className="benchmark-icon-button" aria-label="HumanEval settings">
+                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="HumanEval sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Harness</h2>
+                <p>
+                  HumanEval evaluates Python function synthesis through EvalScope using the
+                  app&apos;s in-process OpenAI-compatible chat API. Docker is required so generated
+                  code is executed in a sandbox.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains Python programming tasks with hidden tests. Each run asks
+                  the model to produce code that can pass the task&apos;s tests.
+                </p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                {!datasetStatus.datasetReady ? (
+                  <p>Download and verify the dataset to preview rows.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset rows...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset rows found.</p>
+                ) : (
+                  <div className="benchmark-dataset-table" role="table" aria-label="HumanEval dataset rows">
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Task</span>
+                      <span role="columnheader">Prompt</span>
+                      <span role="columnheader">Canonical solution</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.index}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">
+                          {row.taskId || "Unavailable"}
+                          {row.entryPoint ? `\n${row.entryPoint}` : ""}
+                        </span>
+                        <span role="cell">{row.prompt || "Unavailable"}</span>
+                        <span role="cell">{row.canonicalSolution || "Unavailable"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="HumanEval thinking"
+                    value={config.thinking}
+                    onChange={(thinking) => onConfigChange({ ...config, thinking })}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="HumanEval temperature"
+                    value={config.temperature}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("temperature")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="HumanEval top K sampling"
+                    value={config.topK}
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("topK")}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="HumanEval repeat penalty"
+                    value={config.repeatPenalty}
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("repeatPenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="HumanEval presence penalty"
+                    value={config.presencePenalty}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updatePresencePenalty}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="HumanEval top P sampling"
+                    value={config.topP}
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("topP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="HumanEval min P sampling"
+                    value={config.minP}
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("minP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="HumanEval context window"
+                    value={config.contextWindow}
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("contextWindow")}
+                  />
+                  <BenchmarkInfoRow label="Batch size" value="1" />
+                  <BenchmarkInputRow
+                    label="Samples"
+                    inputLabel="HumanEval samples"
+                    value={config.sampleLimit}
+                    placeholder="164"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("sampleLimit")}
+                  />
+                </BenchmarkInfoSection>
+              </div>
+            )}
+          </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">{viewStatus.detail}</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="EvalScope" />
+              <BenchmarkInfoRow label="Dataset" value="humaneval" />
+              <BenchmarkInfoRow label="Metric" value="pass@1" />
+              <BenchmarkInfoRow label="Status" value={viewStatus.statusLabel} />
+              <BenchmarkInfoRow label="Python" value={viewStatus.python ?? "Unavailable"} />
+              <BenchmarkInfoRow label="EvalScope" value={viewStatus.evalscope ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Docker" value={viewStatus.dockerReady ? viewStatus.docker ?? "Ready" : "Unavailable"} />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="HumanEval Dataset">
+              <BenchmarkInfoRow label="Downloaded" value={datasetStatus.datasetPath ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetReady ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Samples" value="164" />
+              <BenchmarkInfoRow label="License" value="MIT" />
+              <BenchmarkInfoRow label="Official asset" value={datasetStatus.datasetUrl} />
+              <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
+              <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
             </BenchmarkInfoSection>
           </aside>
         </div>

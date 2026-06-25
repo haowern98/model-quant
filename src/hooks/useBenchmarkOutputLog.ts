@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { isTauri } from "@tauri-apps/api/core";
 import type { ApiOutputEvent, BenchmarkOutputEvent, BenchmarkOutputLine } from "../types";
 
-const MAX_OUTPUT_LINES = 1000;
-const MAX_API_OUTPUT_CHARS = 300_000;
+const MAX_OUTPUT_LINES = 300;
+const MAX_API_OUTPUT_CHARS = 10_000;
 
 function formatLogTimestamp(date: Date): string {
   const hours = date.getHours().toString().padStart(2, "0");

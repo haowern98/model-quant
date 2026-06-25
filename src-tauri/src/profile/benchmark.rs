@@ -90,6 +90,8 @@ pub struct StandardEvalReport {
 #[serde(rename_all = "camelCase")]
 pub struct StandardEvalTaskReport {
     pub task: String,
+    pub metric: String,
+    pub n_shot: u64,
     pub sample_count: u64,
     pub baseline_correct_count: Option<u64>,
     pub recipe_correct_count: u64,
@@ -399,9 +401,10 @@ pub fn run_native_recipe_single_benchmark(
     eval_preset: StandardEvalPreset,
     progress: &ProgressEmitter,
 ) -> Result<BenchmarkResult, String> {
-    let standard_subset = load_standard_eval_subset(eval_preset)?;
-    let eval_texts = standard_subset.ppl_texts;
-    let standard_samples = standard_subset.samples;
+    let LoadedStandardSubset {
+        ppl_texts: eval_texts,
+        samples: _standard_samples,
+    } = load_standard_eval_subset(eval_preset)?;
     run_native_inference_benchmark(
         gguf_path,
         max_tokens,
@@ -409,24 +412,21 @@ pub fn run_native_recipe_single_benchmark(
         "Running single recipe model test...",
         "Native single recipe test complete",
         "native_recipe_single_v1",
-        Some(&standard_samples),
+        None,
         |path, prompt, max_tokens| {
-            crate::ffi::runtime_bindings::eval_recipe_standard_single(
+            crate::ffi::runtime_bindings::eval_recipe_single(
                 path,
                 targets,
                 &eval_texts,
-                &standard_samples,
                 128,
                 prompt,
                 max_tokens,
             )
-            .map(|(benchmark, eval, standard, audits)| {
-                (benchmark, Some(eval), Some(standard), Some(audits))
-            })
+            .map(|(benchmark, eval)| (benchmark, Some(eval), None, None))
         },
         |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style local eval with {} llama.cpp PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), ran {} local PPL eval with {} llama.cpp PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval_preset.label(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
@@ -445,9 +445,10 @@ pub fn run_native_recipe_compare_benchmark(
     eval_preset: StandardEvalPreset,
     progress: &ProgressEmitter,
 ) -> Result<BenchmarkResult, String> {
-    let standard_subset = load_standard_eval_subset(eval_preset)?;
-    let eval_texts = standard_subset.ppl_texts;
-    let standard_samples = standard_subset.samples;
+    let LoadedStandardSubset {
+        ppl_texts: eval_texts,
+        samples: _standard_samples,
+    } = load_standard_eval_subset(eval_preset)?;
     run_native_inference_benchmark(
         gguf_path,
         max_tokens,
@@ -455,24 +456,21 @@ pub fn run_native_recipe_compare_benchmark(
         "Running baseline and recipe drift eval...",
         "Native recipe eval complete",
         "native_recipe_eval_v1",
-        Some(&standard_samples),
+        None,
         |path, prompt, max_tokens| {
-            crate::ffi::runtime_bindings::eval_recipe_standard(
+            crate::ffi::runtime_bindings::eval_recipe(
                 path,
                 targets,
                 &eval_texts,
-                &standard_samples,
                 128,
                 prompt,
                 max_tokens,
             )
-            .map(|(benchmark, eval, standard, audits)| {
-                (benchmark, Some(eval), Some(standard), Some(audits))
-            })
+            .map(|(benchmark, eval)| (benchmark, Some(eval), None, None))
         },
         |summary, benchmark, eval, standard| {
             format!(
-                "Native llama.cpp recipe path validated {} tensor target(s), ran {} built-in lm-eval-style recipe drift eval with {} llama.cpp PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
+                "Native llama.cpp recipe path validated {} tensor target(s), ran {} local PPL recipe drift eval with {} llama.cpp PPL tokens and {} frozen standard task sample(s) from GGUF v{}, copied unchanged tensors and applied supported in-memory conversions, then generated {} tokens.",
                 targets.len(),
                 eval_preset.label(),
                 eval.map(|quality| quality.eval_token_count).unwrap_or(0),
@@ -683,6 +681,8 @@ fn standard_eval_report_from_native(
             .iter()
             .map(|task| StandardEvalTaskReport {
                 task: crate::ffi::runtime_bindings::standard_task_name(task),
+                metric: "acc_norm".to_string(),
+                n_shot: 0,
                 sample_count: task.sample_count,
                 baseline_correct_count: has_baseline.then_some(task.baseline_correct_count),
                 recipe_correct_count: task.recipe_correct_count,

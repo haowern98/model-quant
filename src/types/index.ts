@@ -165,6 +165,7 @@ export type RecipeEvalPreset = "quick" | "default";
 export type BenchmarkRunId =
   | "ppl_check"
   | "gpqa_diamond"
+  | "humaneval"
   | "mmlu_pro"
   | "mmlu_redux"
   | "supergpqa"
@@ -268,6 +269,33 @@ export interface GpqaDiamondStatus {
   detail: string;
 }
 
+export interface HumanEvalStatus {
+  ready: boolean;
+  statusLabel: string;
+  python: string | null;
+  evalscope: string | null;
+  dockerReady: boolean;
+  docker: string | null;
+  detail: string;
+}
+
+export interface HumanEvalDatasetStatus {
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+}
+
+export interface HumanEvalDatasetRow {
+  index: number;
+  taskId: string;
+  entryPoint: string;
+  prompt: string;
+  canonicalSolution: string;
+}
+
 export interface GpqaDatasetRow {
   index: number;
   question: string;
@@ -349,6 +377,8 @@ export interface StandardEvalReport {
 
 export interface StandardEvalTaskReport {
   task: string;
+  metric?: string;
+  nShot?: number;
   sampleCount: number;
   baselineCorrectCount: number | null;
   recipeCorrectCount: number;

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -10,16 +11,25 @@ use serde_json::json;
 use tauri::{Manager, State};
 
 use crate::commands::modelinspector_api::{
-    modelinspector_api_tensor_summary, ModelInspectorApiState, ModelInspectorApiTensorSummary,
+    modelinspector_api_model_summary, modelinspector_api_runtime_totals,
+    modelinspector_api_tensor_summary, ModelInspectorApiModelSummary,
+    ModelInspectorApiRuntimeSummary, ModelInspectorApiRuntimeTotals, ModelInspectorApiState,
+    ModelInspectorApiTensorSummary,
 };
 use crate::profile::benchmark::{BenchmarkResult, StandardEvalReport, StandardEvalTaskReport};
 
 const GPQA_SAMPLE_COUNT: u64 = 198;
 const GPQA_DATASET_ID: &str = "AI-ModelScope/gpqa_diamond";
 const GPQA_DATASET_MARKER_VERSION: u32 = 1;
+const HUMANEVAL_SAMPLE_COUNT: u64 = 164;
+const HUMANEVAL_DATASET_ID: &str = "opencompass/humaneval";
+const HUMANEVAL_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
 const GPQA_DEFAULT_CONTEXT_WINDOW: u32 = 20_000;
 const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
+const HUMANEVAL_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +47,29 @@ pub struct GpqaDiamondStatus {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanEvalStatus {
+    pub ready: bool,
+    pub status_label: String,
+    pub python: Option<String>,
+    pub evalscope: Option<String>,
+    pub docker_ready: bool,
+    pub docker: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanEvalDatasetStatus {
+    pub dataset_ready: bool,
+    pub dataset_status_label: String,
+    pub dataset_path: Option<String>,
+    pub dataset_hash: Option<String>,
+    pub dataset_url: String,
+    pub expected_dataset_hash: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GpqaDatasetRow {
@@ -44,6 +77,16 @@ pub struct GpqaDatasetRow {
     pub question: String,
     pub choices: Vec<String>,
     pub answer: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HumanEvalDatasetRow {
+    pub index: usize,
+    pub task_id: String,
+    pub entry_point: String,
+    pub prompt: String,
+    pub canonical_solution: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -250,6 +293,28 @@ pub async fn get_gpqa_diamond_status(app: tauri::AppHandle) -> Result<GpqaDiamon
 }
 
 #[tauri::command]
+pub async fn get_humaneval_status(app: tauri::AppHandle) -> Result<HumanEvalStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || detect_humaneval_status(app_data_dir))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_humaneval_dataset_status(
+    app: tauri::AppHandle,
+) -> Result<HumanEvalDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    Ok(detect_humaneval_dataset_status(&app_data_dir))
+}
+
+#[tauri::command]
 pub async fn install_gpqa_diamond_harness(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -267,6 +332,24 @@ pub async fn install_gpqa_diamond_harness(
 }
 
 #[tauri::command]
+pub async fn install_humaneval_harness(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<HumanEvalStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        install_gpqa_diamond_harness_blocking(app_data_dir.clone(), app, child)?;
+        Ok(detect_humaneval_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn download_gpqa_diamond_dataset(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -278,6 +361,23 @@ pub async fn download_gpqa_diamond_dataset(
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
         download_gpqa_diamond_dataset_blocking(app_data_dir, app, child)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn download_humaneval_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<HumanEvalDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        download_humaneval_dataset_blocking(app_data_dir, app, child)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -303,6 +403,25 @@ pub async fn delete_gpqa_diamond_dataset(
 }
 
 #[tauri::command]
+pub async fn delete_humaneval_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<HumanEvalDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&humaneval_dataset_cache_root(&app_data_dir))?;
+        Ok(detect_humaneval_dataset_status(&app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn delete_gpqa_diamond_harness(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -322,6 +441,35 @@ pub async fn delete_gpqa_diamond_harness(
 }
 
 #[tauri::command]
+pub async fn delete_humaneval_harness(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<HumanEvalStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        run_managed_child(
+            &venv_python_path(&gpqa_env_dir(&app_data_dir)).to_string_lossy(),
+            vec![
+                "-m".to_string(),
+                "pip".to_string(),
+                "uninstall".to_string(),
+                "-y".to_string(),
+                "ms-enclave".to_string(),
+            ],
+            &child,
+        )?;
+        Ok(detect_humaneval_status(app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn get_gpqa_diamond_dataset_rows(
     app: tauri::AppHandle,
 ) -> Result<Vec<GpqaDatasetRow>, String> {
@@ -330,6 +478,19 @@ pub async fn get_gpqa_diamond_dataset_rows(
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
     tauri::async_runtime::spawn_blocking(move || read_gpqa_dataset_rows(&app_data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_humaneval_dataset_rows(
+    app: tauri::AppHandle,
+) -> Result<Vec<HumanEvalDatasetRow>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || read_humaneval_dataset_rows(&app_data_dir))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -346,6 +507,8 @@ pub async fn run_gpqa_diamond_benchmark(
     runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<BenchmarkResult, String> {
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
+    let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run_gpqa_diamond_blocking(
@@ -355,6 +518,39 @@ pub async fn run_gpqa_diamond_benchmark(
             shot_mode,
             config,
             tensor_summary,
+            model_summary,
+            runtime_totals,
+            app,
+            child,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn run_humaneval_benchmark(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    config: Option<GpqaRunConfig>,
+    app: tauri::AppHandle,
+    api_state: State<'_, ModelInspectorApiState>,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<BenchmarkResult, String> {
+    let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
+    let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_humaneval_blocking(
+            base_url,
+            api_key,
+            model_id,
+            config,
+            tensor_summary,
+            model_summary,
+            runtime_totals,
             app,
             child,
         )
@@ -424,6 +620,61 @@ fn detect_gpqa_diamond_status(app_data_dir: PathBuf) -> GpqaDiamondStatus {
     }
 }
 
+fn detect_humaneval_status(app_data_dir: PathBuf) -> HumanEvalStatus {
+    let (docker_ready, docker, docker_detail) = detect_docker_status();
+    let env_dir = gpqa_env_dir(&app_data_dir);
+    let venv_python = venv_python_path(&env_dir);
+    let system_python_exists = find_python().is_some();
+
+    if !venv_python.exists() {
+        return HumanEvalStatus {
+            ready: false,
+            status_label: if system_python_exists {
+                "Needs harness"
+            } else if !docker_ready {
+                "Needs Docker"
+            } else {
+                "Needs Python"
+            }
+            .to_string(),
+            python: None,
+            evalscope: None,
+            docker_ready,
+            docker,
+            detail: if system_python_exists {
+                "HumanEval harness has not been installed in the managed benchmark environment."
+                    .to_string()
+            } else if !docker_ready {
+                docker_detail
+            } else {
+                "Python was not found on PATH.".to_string()
+            },
+        };
+    }
+
+    let output = run_humaneval_probe(&PythonCommand {
+        executable: venv_python.to_string_lossy().to_string(),
+        prefix_args: Vec::new(),
+    });
+    match output {
+        Ok(probe) => classify_humaneval_status(&probe, docker_ready, docker, docker_detail),
+        Err(error) => HumanEvalStatus {
+            ready: false,
+            status_label: if docker_ready {
+                "Needs harness"
+            } else {
+                "Needs Docker"
+            }
+            .to_string(),
+            python: None,
+            evalscope: None,
+            docker_ready,
+            docker,
+            detail: if docker_ready { error } else { docker_detail },
+        },
+    }
+}
+
 fn install_gpqa_diamond_harness_blocking(
     app_data_dir: PathBuf,
     app: tauri::AppHandle,
@@ -487,7 +738,7 @@ fn install_gpqa_diamond_harness_blocking(
             "pip".to_string(),
             "install".to_string(),
             "--upgrade".to_string(),
-            format!("evalscope=={EVALSCOPE_VERSION}"),
+            format!("evalscope[sandbox]=={EVALSCOPE_VERSION}"),
         ],
         &child_slot,
     )?;
@@ -615,6 +866,105 @@ print("gpqa_diamond_samples=" + str(sample_count))
     Ok(detect_gpqa_diamond_status(app_data_dir))
 }
 
+fn download_humaneval_dataset_blocking(
+    app_data_dir: PathBuf,
+    app: tauri::AppHandle,
+    child_slot: Arc<Mutex<Option<Child>>>,
+) -> Result<HumanEvalDatasetStatus, String> {
+    let venv_python = venv_python_path(&gpqa_env_dir(&app_data_dir));
+    if !venv_python.exists() {
+        return Err(
+            "HumanEval harness is not installed. Install the harness before downloading the dataset."
+                .to_string(),
+        );
+    }
+
+    let progress = crate::progress::ProgressEmitter::new(app);
+    let dataset_root = humaneval_dataset_cache_root(&app_data_dir);
+    std::fs::create_dir_all(&dataset_root).map_err(|e| e.to_string())?;
+    progress.emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.2,
+        "Materializing HumanEval through EvalScope...",
+    );
+
+    let script = r#"
+import json
+import sys
+from pathlib import Path
+
+dataset_root, marker_path, rows_path = sys.argv[1], sys.argv[2], sys.argv[3]
+from evalscope.config import TaskConfig
+from evalscope.benchmarks.humaneval.humaneval_adapter import HumanevalAdapter
+from evalscope.api.benchmark import BenchmarkMeta
+
+meta = BenchmarkMeta(
+    name="humaneval",
+    dataset_id="opencompass/humaneval",
+    data_adapter=HumanevalAdapter,
+    subset_list=["openai_humaneval"],
+    default_subset="openai_humaneval",
+    eval_split="test",
+    few_shot_num=0,
+    prompt_template="Read the following function signature and docstring, and fully implement the function described. Your response should only contain the code for this function.\n{question}",
+)
+task_config = TaskConfig(
+    model="modelinspector-dataset-check",
+    eval_type="mock_llm",
+    datasets=["humaneval"],
+    dataset_dir=dataset_root,
+)
+adapter = HumanevalAdapter(benchmark_meta=meta, task_config=task_config)
+dataset = adapter.load_dataset()
+sample_count = sum(len(samples) for samples in dataset.values())
+if sample_count != 164:
+    raise SystemExit(f"Expected 164 HumanEval samples, got {sample_count}")
+rows = []
+for samples in dataset.values():
+    for sample in samples:
+        if hasattr(sample, "model_dump"):
+            rows.append(sample.model_dump())
+        elif hasattr(sample, "dict"):
+            rows.append(sample.dict())
+        elif isinstance(sample, dict):
+            rows.append(sample)
+        else:
+            rows.append(vars(sample))
+marker = {
+    "version": 1,
+    "dataset": "humaneval",
+    "dataset_id": "opencompass/humaneval",
+    "sample_count": sample_count,
+}
+Path(marker_path).write_text(json.dumps(marker, indent=2), encoding="utf-8")
+Path(rows_path).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+print("humaneval_samples=" + str(sample_count))
+"#;
+
+    run_managed_child(
+        &venv_python.to_string_lossy(),
+        vec![
+            "-c".to_string(),
+            script.to_string(),
+            dataset_root.to_string_lossy().to_string(),
+            humaneval_dataset_marker_path(&app_data_dir)
+                .to_string_lossy()
+                .to_string(),
+            humaneval_dataset_rows_path(&app_data_dir)
+                .to_string_lossy()
+                .to_string(),
+        ],
+        &child_slot,
+    )?;
+
+    progress.emit(
+        crate::progress::ProgressStage::Benchmarking,
+        1.0,
+        "HumanEval dataset downloaded and verified.",
+    );
+    Ok(detect_humaneval_dataset_status(&app_data_dir))
+}
+
 fn run_gpqa_diamond_blocking(
     base_url: String,
     api_key: String,
@@ -622,6 +972,8 @@ fn run_gpqa_diamond_blocking(
     shot_mode: GpqaShotMode,
     config: Option<GpqaRunConfig>,
     tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
 ) -> Result<BenchmarkResult, String> {
@@ -670,6 +1022,7 @@ fn run_gpqa_diamond_blocking(
         fallback.args(["-m", "evalscope"]);
         fallback
     };
+    hide_child_console(&mut command);
     command
         .args([
             "eval".to_string(),
@@ -803,6 +1156,204 @@ fn run_gpqa_diamond_blocking(
         &report_path,
         start.elapsed().as_millis() as f64,
         tensor_summary,
+        model_summary,
+        runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
+    )?)
+}
+
+fn run_humaneval_blocking(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    config: Option<GpqaRunConfig>,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
+    app: tauri::AppHandle,
+    child_slot: Arc<Mutex<Option<Child>>>,
+) -> Result<BenchmarkResult, String> {
+    let mut effective_config = effective_gpqa_run_config(config)?;
+    if effective_config.sample_limit > HUMANEVAL_SAMPLE_COUNT {
+        effective_config.sample_limit = HUMANEVAL_SAMPLE_COUNT;
+    }
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let status = detect_humaneval_status(app_data_dir.clone());
+    if !status.ready {
+        return Err(format!(
+            "HumanEval is not ready. Current status: {}. {}",
+            status.status_label, status.detail
+        ));
+    }
+    let dataset_status = detect_humaneval_dataset_status(&app_data_dir);
+    if !dataset_status.dataset_ready {
+        return Err("HumanEval dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let env_dir = gpqa_env_dir(&app_data_dir);
+    let venv_python = venv_python_path(&env_dir);
+    let evalscope_cli = evalscope_cli_path(&env_dir);
+    let run_dir = gpqa_run_dir(&app_data_dir).join(format!("humaneval-{}", unix_millis()));
+    std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
+
+    let generation_config = gpqa_generation_config(&effective_config).to_string();
+    let mut command = if evalscope_cli.exists() {
+        Command::new(&evalscope_cli)
+    } else {
+        let mut fallback = Command::new(&venv_python);
+        fallback.args(["-m", "evalscope"]);
+        fallback
+    };
+    hide_child_console(&mut command);
+    command
+        .args([
+            "eval".to_string(),
+            "--eval-type".to_string(),
+            "openai_api".to_string(),
+            "--model".to_string(),
+            model_id.clone(),
+            "--model-id".to_string(),
+            "modelinspector-humaneval".to_string(),
+            "--api-url".to_string(),
+            base_url.clone(),
+            "--api-key".to_string(),
+            api_key.clone(),
+            "--datasets".to_string(),
+            "humaneval".to_string(),
+            "--dataset-dir".to_string(),
+            humaneval_dataset_cache_root(&app_data_dir)
+                .to_string_lossy()
+                .to_string(),
+            "--generation-config".to_string(),
+            generation_config,
+            "--limit".to_string(),
+            effective_config.sample_limit.to_string(),
+            "--eval-batch-size".to_string(),
+            "1".to_string(),
+            "--repeats".to_string(),
+            "1".to_string(),
+            "--work-dir".to_string(),
+            run_dir.to_string_lossy().to_string(),
+            "--no-timestamp".to_string(),
+            "--enable-progress-tracker".to_string(),
+            "--no-collect-perf".to_string(),
+            "--sandbox".to_string(),
+            r#"{"enabled": true, "engine": "docker"}"#.to_string(),
+        ])
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    crate::progress::emit_benchmark_output(&app, "EvalScope: starting HumanEval official harness");
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("EvalScope: work directory {}", run_dir.display()),
+    );
+    crate::progress::ProgressEmitter::new(app.clone()).emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.05,
+        "HumanEval running",
+    );
+
+    let start = Instant::now();
+    let sandbox_containers_before = sandbox_container_ids()?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to start HumanEval harness: {e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    {
+        let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            let _ = child.kill();
+            return Err("An official benchmark is already running.".to_string());
+        }
+        *guard = Some(child);
+    }
+
+    let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("EvalScope stdout"));
+    let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("EvalScope stderr"));
+    let mut report_ready_since = None;
+    let mut completed_report = None;
+    let mut forced_report_completion = false;
+    let status = loop {
+        {
+            let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+            let child = guard
+                .as_mut()
+                .ok_or("Official benchmark process was not available.")?;
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                break status;
+            }
+        }
+
+        if !forced_report_completion {
+            if let Some(report_path) = ready_humaneval_report_path(&run_dir) {
+                completed_report = Some(report_path);
+                let ready_since = report_ready_since.get_or_insert_with(Instant::now);
+                if ready_since.elapsed() >= HUMANEVAL_SHUTDOWN_GRACE {
+                    let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+                    let child = guard
+                        .as_mut()
+                        .ok_or("Official benchmark process was not available.")?;
+                    terminate_child_tree(child);
+                    forced_report_completion = true;
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    {
+        let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+        let _ = guard.take();
+    }
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+    let output = format!("{stdout}\n{stderr}");
+    cleanup_new_sandbox_containers(&sandbox_containers_before, &app);
+    if !status.success() && !forced_report_completion {
+        if output.to_lowercase().contains("cancel") {
+            crate::progress::emit_benchmark_output(
+                &app,
+                "EvalScope: HumanEval official harness cancelled",
+            );
+            return Err("HumanEval benchmark cancelled".to_string());
+        }
+        crate::progress::emit_benchmark_output(
+            &app,
+            format!("EvalScope: HumanEval official harness failed with status {status}"),
+        );
+        return Err(format!(
+            "HumanEval harness failed with status {status}: {}",
+            output.trim()
+        ));
+    }
+
+    let report_path = completed_report
+        .or_else(|| ready_humaneval_report_path(&run_dir))
+        .ok_or_else(|| {
+            format!(
+                "EvalScope finished but did not write a HumanEval report under {}",
+                run_dir.display()
+            )
+        })?;
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("EvalScope: HumanEval report {}", report_path.display()),
+    );
+    crate::progress::emit_benchmark_output(&app, "EvalScope: HumanEval official harness finished");
+    Ok(humaneval_result_from_report(
+        &model_id,
+        &report_path,
+        start.elapsed().as_millis() as f64,
+        tensor_summary,
+        model_summary,
+        runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
     )?)
 }
 
@@ -867,6 +1418,7 @@ fn find_python() -> Option<PythonCommand> {
 
     candidates.into_iter().find(|candidate| {
         let mut command = Command::new(&candidate.executable);
+        hide_child_console(&mut command);
         command.args(&candidate.prefix_args).arg("--version");
         command
             .output()
@@ -893,6 +1445,18 @@ fn gpqa_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
 
 fn gpqa_dataset_rows_path(app_data_dir: &Path) -> PathBuf {
     gpqa_dataset_cache_root(app_data_dir).join("gpqa_diamond_rows.json")
+}
+
+fn humaneval_dataset_cache_root(app_data_dir: &Path) -> PathBuf {
+    gpqa_dataset_cache_root(app_data_dir).join("humaneval")
+}
+
+fn humaneval_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
+    humaneval_dataset_cache_root(app_data_dir).join("humaneval_dataset_ready.json")
+}
+
+fn humaneval_dataset_rows_path(app_data_dir: &Path) -> PathBuf {
+    humaneval_dataset_cache_root(app_data_dir).join("humaneval_rows.json")
 }
 
 fn gpqa_run_dir(app_data_dir: &Path) -> PathBuf {
@@ -961,7 +1525,9 @@ fn run_managed_child(
     args: Vec<String>,
     child_slot: &Arc<Mutex<Option<Child>>>,
 ) -> Result<String, String> {
-    let mut child = Command::new(executable)
+    let mut command = Command::new(executable);
+    hide_child_console(&mut command);
+    let mut child = command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1038,6 +1604,7 @@ except Exception as exc:
 "#;
 
     let mut command = Command::new(&python.executable);
+    hide_child_console(&mut command);
     command.args(&python.prefix_args).args(["-c", script]);
     let output = command
         .output()
@@ -1053,6 +1620,189 @@ except Exception as exc:
         ))
     }
 }
+
+fn run_humaneval_probe(python: &PythonCommand) -> Result<String, String> {
+    let script = r#"
+import sys
+try:
+    from importlib import metadata
+except Exception:
+    import importlib_metadata as metadata
+
+print("python=" + ".".join(str(part) for part in sys.version_info[:3]))
+try:
+    import evalscope
+    print("evalscope=" + metadata.version("evalscope"))
+except Exception as exc:
+    print("evalscope_error=" + str(exc))
+try:
+    from evalscope.benchmarks.humaneval.humaneval_adapter import HumanevalAdapter
+    print("humaneval_task=ok")
+except Exception as exc:
+    print("humaneval_task_error=" + str(exc))
+try:
+    import ms_enclave
+    print("sandbox=ok")
+except Exception as exc:
+    print("sandbox_error=" + str(exc))
+"#;
+
+    let mut command = Command::new(&python.executable);
+    hide_child_console(&mut command);
+    command.args(&python.prefix_args).args(["-c", script]);
+    let output = command
+        .output()
+        .map_err(|e| format!("Failed to probe HumanEval benchmark harness: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        Ok(stdout.to_string())
+    } else {
+        Err(format!(
+            "HumanEval benchmark harness probe failed: {}",
+            stderr.trim()
+        ))
+    }
+}
+
+fn detect_docker_status() -> (bool, Option<String>, String) {
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command
+        .args(["info", "--format", "{{.ServerVersion}}"])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let version = if version.is_empty() {
+                None
+            } else {
+                Some(version)
+            };
+            (
+                true,
+                version.clone(),
+                version
+                    .map(|value| format!("Docker daemon is available ({value})."))
+                    .unwrap_or_else(|| "Docker daemon is available.".to_string()),
+            )
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            (
+                false,
+                None,
+                if stderr.is_empty() {
+                    "Docker CLI is available, but the Docker daemon is not running.".to_string()
+                } else {
+                    stderr
+                },
+            )
+        }
+        Err(error) => (
+            false,
+            None,
+            format!("Docker was not found or could not be started: {error}"),
+        ),
+    }
+}
+
+fn sandbox_container_ids() -> Result<BTreeSet<String>, String> {
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command
+        .args([
+            "ps",
+            "-a",
+            "--filter",
+            "name=sandbox-",
+            "--format",
+            "{{.ID}}",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to list HumanEval sandbox containers: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to list HumanEval sandbox containers: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
+}
+
+fn new_sandbox_container_ids(before: &BTreeSet<String>, after: &BTreeSet<String>) -> Vec<String> {
+    after.difference(before).cloned().collect()
+}
+
+fn cleanup_new_sandbox_containers(before: &BTreeSet<String>, app: &tauri::AppHandle) {
+    let Ok(after) = sandbox_container_ids() else {
+        crate::progress::emit_benchmark_output(
+            app,
+            "EvalScope: could not inspect HumanEval sandbox containers for cleanup",
+        );
+        return;
+    };
+    let created = new_sandbox_container_ids(before, &after);
+    if created.is_empty() {
+        return;
+    }
+
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command.args(["rm", "-f"]).args(&created).output();
+    match output {
+        Ok(output) if output.status.success() => crate::progress::emit_benchmark_output(
+            app,
+            format!(
+                "EvalScope: removed {} HumanEval sandbox container(s)",
+                created.len()
+            ),
+        ),
+        Ok(output) => crate::progress::emit_benchmark_output(
+            app,
+            format!(
+                "EvalScope: failed to remove HumanEval sandbox containers: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ),
+        Err(error) => crate::progress::emit_benchmark_output(
+            app,
+            format!("EvalScope: failed to remove HumanEval sandbox containers: {error}"),
+        ),
+    }
+}
+
+fn terminate_child_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill");
+        hide_child_console(&mut command);
+        let status = command
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .status();
+        if !matches!(status, Ok(status) if status.success()) {
+            let _ = child.kill();
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(windows)]
+fn hide_child_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_child_console(_: &mut Command) {}
 
 #[cfg(test)]
 fn classify_probe_output(output: &str) -> GpqaDiamondStatus {
@@ -1106,6 +1856,100 @@ fn classify_gpqa_status(output: &str, dataset_state: GpqaDatasetState) -> GpqaDi
                 .filter(|line| line.contains("_error="))
                 .collect::<Vec<_>>()
                 .join("; ")
+        },
+    }
+}
+
+fn classify_humaneval_status(
+    output: &str,
+    docker_ready: bool,
+    docker: Option<String>,
+    docker_detail: String,
+) -> HumanEvalStatus {
+    let python = probe_value(output, "python");
+    let evalscope = probe_value(output, "evalscope");
+    let humaneval_task = probe_value(output, "humaneval_task");
+    let sandbox = probe_value(output, "sandbox");
+    let harness_ready = python.is_some()
+        && evalscope.is_some()
+        && humaneval_task.as_deref() == Some("ok")
+        && sandbox.as_deref() == Some("ok");
+    let ready = harness_ready && docker_ready;
+
+    HumanEvalStatus {
+        ready,
+        status_label: if !harness_ready {
+            "Needs harness"
+        } else if !docker_ready {
+            "Needs Docker"
+        } else {
+            "Ready"
+        }
+        .to_string(),
+        python,
+        evalscope,
+        docker_ready,
+        docker,
+        detail: if !harness_ready {
+            output
+                .lines()
+                .filter(|line| line.contains("_error="))
+                .collect::<Vec<_>>()
+                .join("; ")
+        } else if ready {
+            "EvalScope HumanEval adapter and Docker daemon are verified.".to_string()
+        } else if !docker_ready {
+            docker_detail
+        } else {
+            String::new()
+        },
+    }
+}
+
+fn detect_humaneval_dataset_status(app_data_dir: &Path) -> HumanEvalDatasetStatus {
+    let state = detect_humaneval_dataset_state(app_data_dir);
+    HumanEvalDatasetStatus {
+        dataset_ready: matches!(state, GpqaDatasetState::Verified { .. }),
+        dataset_status_label: dataset_status_label(&state).to_string(),
+        dataset_path: dataset_path_string(&state),
+        dataset_hash: dataset_hash_string(&state),
+        dataset_url: HUMANEVAL_DATASET_ID.to_string(),
+        expected_dataset_hash: "EvalScope dataset cache marker".to_string(),
+    }
+}
+
+fn detect_humaneval_dataset_state(app_data_dir: &Path) -> GpqaDatasetState {
+    let path = humaneval_dataset_marker_path(app_data_dir);
+    if !path.exists() {
+        return GpqaDatasetState::Missing;
+    }
+
+    match std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
+        }) {
+        Ok(marker)
+            if marker.get("version").and_then(|value| value.as_u64())
+                == Some(HUMANEVAL_DATASET_MARKER_VERSION as u64)
+                && marker.get("dataset").and_then(|value| value.as_str()) == Some("humaneval")
+                && marker.get("sample_count").and_then(|value| value.as_u64())
+                    == Some(HUMANEVAL_SAMPLE_COUNT) =>
+        {
+            GpqaDatasetState::Verified {
+                path,
+                hash: format!("marker-v{HUMANEVAL_DATASET_MARKER_VERSION}"),
+            }
+        }
+        Ok(_) => GpqaDatasetState::Invalid {
+            path,
+            hash: None,
+            detail: "HumanEval EvalScope dataset marker is invalid.".to_string(),
+        },
+        Err(error) => GpqaDatasetState::Invalid {
+            path,
+            hash: None,
+            detail: error,
         },
     }
 }
@@ -1233,6 +2077,44 @@ fn gpqa_dataset_row_from_json(index: usize, row: &serde_json::Value) -> GpqaData
     }
 }
 
+fn read_humaneval_dataset_rows(app_data_dir: &Path) -> Result<Vec<HumanEvalDatasetRow>, String> {
+    if !matches!(
+        detect_humaneval_dataset_state(app_data_dir),
+        GpqaDatasetState::Verified { .. }
+    ) {
+        return Err("HumanEval dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let text = std::fs::read_to_string(humaneval_dataset_rows_path(app_data_dir)).map_err(|e| {
+        format!(
+            "Failed to read HumanEval dataset rows: {e}. Click Download dataset to refresh the preview."
+        )
+    })?;
+    let rows_json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Failed to parse HumanEval rows JSON: {e}"))?;
+    rows_json
+        .as_array()
+        .ok_or_else(|| "HumanEval rows JSON must be an array.".to_string())
+        .map(|rows| {
+            rows.iter()
+                .enumerate()
+                .map(|(index, row)| humaneval_dataset_row_from_json(index + 1, row))
+                .collect()
+        })
+}
+
+fn humaneval_dataset_row_from_json(index: usize, row: &serde_json::Value) -> HumanEvalDatasetRow {
+    let metadata = row.get("metadata").unwrap_or(&serde_json::Value::Null);
+    HumanEvalDatasetRow {
+        index,
+        task_id: string_field(metadata, &["task_id"]).unwrap_or_default(),
+        entry_point: string_field(metadata, &["entry_point"]).unwrap_or_default(),
+        prompt: string_field(metadata, &["prompt"]).unwrap_or_default(),
+        canonical_solution: string_field(row, &["target", "canonical_solution"])
+            .unwrap_or_default(),
+    }
+}
+
 fn gpqa_question_from_input(row: &serde_json::Value) -> Option<String> {
     let content = row
         .get("input")?
@@ -1309,30 +2191,59 @@ fn find_gpqa_report_path(run_dir: &Path) -> Option<PathBuf> {
     visit(&run_dir.join("reports")).or_else(|| visit(run_dir))
 }
 
+fn find_humaneval_report_path(run_dir: &Path) -> Option<PathBuf> {
+    fn visit(dir: &Path) -> Option<PathBuf> {
+        let entries = std::fs::read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = visit(&path) {
+                    return Some(found);
+                }
+            } else if path.file_name().and_then(|name| name.to_str()) == Some("humaneval.json") {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    visit(&run_dir.join("reports")).or_else(|| visit(run_dir))
+}
+
+fn ready_humaneval_report_path(run_dir: &Path) -> Option<PathBuf> {
+    let path = find_humaneval_report_path(run_dir)?;
+    let report = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<serde_json::Value>(&report).ok()?;
+    Some(path)
+}
+
 fn gpqa_result_from_report(
     model_id: &str,
     shot_mode: GpqaShotMode,
     report_path: &Path,
     elapsed_ms: f64,
     tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_summary: ModelInspectorApiRuntimeSummary,
 ) -> Result<BenchmarkResult, String> {
     let report_text = std::fs::read_to_string(report_path)
         .map_err(|e| format!("Failed to read EvalScope GPQA report: {e}"))?;
     let report_json: serde_json::Value = serde_json::from_str(&report_text)
         .map_err(|e| format!("Failed to parse EvalScope GPQA report JSON: {e}"))?;
     let accuracy = extract_accuracy_from_json(&report_json).unwrap_or(0.0);
+    let metric = extract_metric_from_json(&report_json).unwrap_or_else(|| "mean_acc".to_string());
     let sample_count = extract_sample_count_from_json(&report_json).unwrap_or(GPQA_SAMPLE_COUNT);
     Ok(BenchmarkResult {
-        prompt_eval_tps: 0.0,
-        token_gen_tps: 0.0,
-        ttft_ms: 0.0,
-        prompt_eval_ms: 0.0,
-        generation_ms: 0.0,
-        vram_peak_mb: 0.0,
-        vram_allocated_mb: 0.0,
+        prompt_eval_tps: runtime_summary.prompt_eval_tps,
+        token_gen_tps: runtime_summary.token_gen_tps,
+        ttft_ms: runtime_summary.ttft_ms,
+        prompt_eval_ms: runtime_summary.prompt_eval_ms,
+        generation_ms: runtime_summary.generation_ms,
+        vram_peak_mb: runtime_summary.vram_peak_mb,
+        vram_allocated_mb: runtime_summary.vram_allocated_mb,
         disk_size_mb: 0.0,
         elapsed_ms,
-        load_ms: 0.0,
+        load_ms: runtime_summary.load_ms,
         test_mode: "official_gpqa_diamond".to_string(),
         status_message: format!(
             "GPQA Diamond EvalScope official harness completed for {model_id} with {}.",
@@ -1342,8 +2253,8 @@ fn gpqa_result_from_report(
             "EvalScope GPQA Diamond report: {}",
             report_path.display()
         )),
-        model_tensor_count: None,
-        model_metadata_count: None,
+        model_tensor_count: Some(model_summary.tensor_count),
+        model_metadata_count: Some(model_summary.metadata_count),
         copied_tensor_count: tensor_summary.copied_tensor_count,
         converted_tensor_count: tensor_summary.converted_tensor_count,
         converted_bytes_before: tensor_summary.converted_bytes_before,
@@ -1365,6 +2276,8 @@ fn gpqa_result_from_report(
             margin_delta: None,
             tasks: vec![StandardEvalTaskReport {
                 task: "gpqa_diamond".to_string(),
+                metric,
+                n_shot: shot_mode.few_shot_num() as u64,
                 sample_count,
                 baseline_correct_count: None,
                 recipe_correct_count: (accuracy * sample_count as f64).round() as u64,
@@ -1385,12 +2298,106 @@ fn gpqa_result_from_report(
     })
 }
 
+fn humaneval_result_from_report(
+    model_id: &str,
+    report_path: &Path,
+    elapsed_ms: f64,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_summary: ModelInspectorApiRuntimeSummary,
+) -> Result<BenchmarkResult, String> {
+    let report_text = std::fs::read_to_string(report_path)
+        .map_err(|e| format!("Failed to read EvalScope HumanEval report: {e}"))?;
+    let report_json: serde_json::Value = serde_json::from_str(&report_text)
+        .map_err(|e| format!("Failed to parse EvalScope HumanEval report JSON: {e}"))?;
+    let pass_at_1 = extract_humaneval_pass_at_1(&report_json).unwrap_or(0.0);
+    let sample_count = extract_sample_count_from_json(&report_json).unwrap_or(HUMANEVAL_SAMPLE_COUNT);
+    Ok(BenchmarkResult {
+        prompt_eval_tps: runtime_summary.prompt_eval_tps,
+        token_gen_tps: runtime_summary.token_gen_tps,
+        ttft_ms: runtime_summary.ttft_ms,
+        prompt_eval_ms: runtime_summary.prompt_eval_ms,
+        generation_ms: runtime_summary.generation_ms,
+        vram_peak_mb: runtime_summary.vram_peak_mb,
+        vram_allocated_mb: runtime_summary.vram_allocated_mb,
+        disk_size_mb: 0.0,
+        elapsed_ms,
+        load_ms: runtime_summary.load_ms,
+        test_mode: "official_humaneval".to_string(),
+        status_message: format!("HumanEval EvalScope official harness completed for {model_id}."),
+        native_runtime: Some(format!("EvalScope HumanEval report: {}", report_path.display())),
+        model_tensor_count: Some(model_summary.tensor_count),
+        model_metadata_count: Some(model_summary.metadata_count),
+        copied_tensor_count: tensor_summary.copied_tensor_count,
+        converted_tensor_count: tensor_summary.converted_tensor_count,
+        converted_bytes_before: tensor_summary.converted_bytes_before,
+        converted_bytes_after: tensor_summary.converted_bytes_after,
+        requested_target_count: tensor_summary.requested_target_count,
+        verified_target_count: tensor_summary.verified_target_count,
+        baseline_benchmark: None,
+        quality_eval: None,
+        standard_eval: Some(StandardEvalReport {
+            sample_count,
+            task_count: 1,
+            baseline_accuracy: None,
+            recipe_accuracy: pass_at_1,
+            accuracy_delta: None,
+            correct_to_wrong_count: 0,
+            wrong_to_correct_count: 0,
+            baseline_avg_margin: None,
+            recipe_avg_margin: 0.0,
+            margin_delta: None,
+            tasks: vec![StandardEvalTaskReport {
+                task: "humaneval".to_string(),
+                metric: "pass@1".to_string(),
+                n_shot: 0,
+                sample_count,
+                baseline_correct_count: None,
+                recipe_correct_count: (pass_at_1 * sample_count as f64).round() as u64,
+                correct_to_wrong_count: 0,
+                wrong_to_correct_count: 0,
+                same_prediction_count: 0,
+                baseline_accuracy: None,
+                recipe_accuracy: pass_at_1,
+                accuracy_delta: None,
+                baseline_avg_margin: None,
+                recipe_avg_margin: 0.0,
+                margin_delta: None,
+                baseline_avg_correct_nll: None,
+                recipe_avg_correct_nll: 0.0,
+            }],
+            sample_audits: Vec::new(),
+        }),
+    })
+}
+
+fn extract_humaneval_pass_at_1(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, candidate) in map {
+                let key = key.to_lowercase();
+                if matches!(key.as_str(), "pass@1" | "pass_at_1" | "pass@k" | "score") {
+                    if let Some(score) = normalize_score(candidate.as_f64()) {
+                        return Some(score);
+                    }
+                }
+            }
+            map.values().find_map(extract_humaneval_pass_at_1)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(extract_humaneval_pass_at_1),
+        _ => None,
+    }
+}
+
 fn extract_accuracy_from_json(value: &serde_json::Value) -> Option<f64> {
     match value {
         serde_json::Value::Object(map) => {
             for (key, candidate) in map {
                 let key = key.to_lowercase();
-                if matches!(key.as_str(), "acc" | "accuracy" | "score" | "value") {
+                if matches!(
+                    key.as_str(),
+                    "mean_acc" | "acc_norm" | "acc" | "accuracy" | "score" | "value"
+                ) {
                     if let Some(score) = normalize_score(candidate.as_f64()) {
                         return Some(score);
                     }
@@ -1399,6 +2406,34 @@ fn extract_accuracy_from_json(value: &serde_json::Value) -> Option<f64> {
             map.values().find_map(extract_accuracy_from_json)
         }
         serde_json::Value::Array(items) => items.iter().find_map(extract_accuracy_from_json),
+        _ => None,
+    }
+}
+
+fn extract_metric_from_json(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(metric) = map
+                .get("metric")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+            {
+                return Some(metric.to_string());
+            }
+            if let Some(metrics) = map.get("metrics").and_then(|value| value.as_object()) {
+                for metric in ["mean_acc", "acc_norm", "acc", "accuracy", "score", "value"] {
+                    if metrics
+                        .get(metric)
+                        .and_then(|value| value.as_f64())
+                        .is_some()
+                    {
+                        return Some(metric.to_string());
+                    }
+                }
+            }
+            map.values().find_map(extract_metric_from_json)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(extract_metric_from_json),
         _ => None,
     }
 }
@@ -1479,6 +2514,51 @@ mod tests {
     }
 
     #[test]
+    fn classifies_humaneval_as_needing_harness_when_sandbox_is_missing() {
+        let status = classify_humaneval_status(
+            "python=3.11.8\nevalscope=1.8.0\nhumaneval_task=ok\nsandbox_error=No module named ms_enclave\n",
+            true,
+            Some("Docker".to_string()),
+            String::new(),
+        );
+
+        assert!(!status.ready);
+        assert_eq!(status.status_label, "Needs harness");
+        assert!(status.detail.contains("sandbox_error"));
+    }
+
+    #[test]
+    fn prioritizes_missing_humaneval_harness_over_missing_docker() {
+        let status = classify_humaneval_status(
+            "python=3.11.8\nevalscope=1.8.0\nhumaneval_task=ok\nsandbox_error=No module named ms_enclave\n",
+            false,
+            None,
+            "Docker is not running.".to_string(),
+        );
+
+        assert!(!status.ready);
+        assert_eq!(status.status_label, "Needs harness");
+        assert!(status.detail.contains("sandbox_error"));
+    }
+
+    #[test]
+    fn selects_only_new_humaneval_sandbox_containers_for_cleanup() {
+        let before = ["existing", "shared"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let after = ["existing", "shared", "created-a", "created-b"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        assert_eq!(
+            new_sandbox_container_ids(&before, &after),
+            vec!["created-a".to_string(), "created-b".to_string()]
+        );
+    }
+
+    #[test]
     fn reports_install_when_system_python_exists_but_managed_env_is_missing() {
         let status = managed_env_status(false, true, None, GpqaDatasetState::Missing);
 
@@ -1553,6 +2633,27 @@ mod tests {
         assert!(row.question.starts_with("Two quantum states"));
         assert!(!row.question.contains("Here are some examples"));
         assert!(!row.question.contains("A) 10^-11 eV"));
+    }
+
+    #[test]
+    fn normalizes_humaneval_dataset_row_from_evalscope_json() {
+        let row = humaneval_dataset_row_from_json(
+            3,
+            &json!({
+                "target": "    return value + 1",
+                "metadata": {
+                    "task_id": "HumanEval/2",
+                    "entry_point": "increment",
+                    "prompt": "def increment(value: int) -> int:\n    \"\"\"Return value plus one.\"\"\""
+                }
+            }),
+        );
+
+        assert_eq!(row.index, 3);
+        assert_eq!(row.task_id, "HumanEval/2");
+        assert_eq!(row.entry_point, "increment");
+        assert!(row.prompt.starts_with("def increment"));
+        assert_eq!(row.canonical_solution, "    return value + 1");
     }
 
     #[test]
@@ -1734,12 +2835,16 @@ mod tests {
         let report = json!({
             "task": "gpqa_diamond",
             "metrics": {
-                "acc": 63.1
+                "mean_acc": 63.1
             },
             "sample_count": 198
         });
 
         assert_eq!(extract_accuracy_from_json(&report), Some(0.631));
+        assert_eq!(
+            extract_metric_from_json(&report).as_deref(),
+            Some("mean_acc")
+        );
         assert_eq!(extract_sample_count_from_json(&report), Some(198));
     }
 
@@ -1768,6 +2873,20 @@ mod tests {
             &report_path,
             123.0,
             tensor_summary,
+            ModelInspectorApiModelSummary {
+                tensor_count: 427,
+                metadata_count: 33,
+            },
+            ModelInspectorApiRuntimeSummary {
+                prompt_eval_tps: 100.0,
+                token_gen_tps: 20.0,
+                ttft_ms: 50.0,
+                prompt_eval_ms: 10.0,
+                generation_ms: 25.0,
+                vram_peak_mb: 1024.0,
+                vram_allocated_mb: 900.0,
+                load_ms: 500.0,
+            },
         )
         .unwrap();
         let _ = std::fs::remove_dir_all(&report_dir);
@@ -1778,6 +2897,14 @@ mod tests {
         assert_eq!(result.converted_bytes_after, 80);
         assert_eq!(result.requested_target_count, 2);
         assert_eq!(result.verified_target_count, 2);
-        assert_eq!(result.standard_eval.unwrap().recipe_accuracy, 0.5);
+        assert_eq!(result.model_tensor_count, Some(427));
+        assert_eq!(result.model_metadata_count, Some(33));
+        assert_eq!(result.token_gen_tps, 20.0);
+        assert_eq!(result.ttft_ms, 50.0);
+        assert_eq!(result.load_ms, 500.0);
+        let standard_eval = result.standard_eval.unwrap();
+        assert_eq!(standard_eval.recipe_accuracy, 0.5);
+        assert_eq!(standard_eval.tasks[0].metric, "acc");
+        assert_eq!(standard_eval.tasks[0].sample_count, 198);
     }
 }

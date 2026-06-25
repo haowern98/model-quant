@@ -7,6 +7,7 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -47,8 +48,10 @@ interface WorkbenchShellProps {
   testMode: RecipeTestMode;
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
+  humanevalStatus: HumanEvalStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
+  humanevalConfig: GpqaBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
@@ -64,11 +67,14 @@ interface WorkbenchShellProps {
   onNoTestsSelected: () => void;
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
   onRefreshGpqaStatus: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
+  onOpenHumanEvalDetails: () => void;
+  onRunHumanEvalBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -97,8 +103,10 @@ export function WorkbenchShell({
   testMode,
   selectedRunIds,
   gpqaStatus,
+  humanevalStatus,
   gpqaShotMode,
   gpqaConfig,
+  humanevalConfig,
   modelExplorerFocusVersion,
   onOpenLayer,
   onOpenModel,
@@ -114,11 +122,14 @@ export function WorkbenchShell({
   onNoTestsSelected,
   onGpqaShotModeChange,
   onGpqaConfigChange,
+  onHumanEvalConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
   onRefreshGpqaStatus,
   onOpenGpqaDetails,
   onOpenGpqaDataset,
+  onOpenHumanEvalDetails,
+  onRunHumanEvalBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -133,6 +144,7 @@ export function WorkbenchShell({
   const sidePanelVisible = explorerWidth > 0;
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
+  const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
 
   useEffect(() => {
     if (modelExplorerFocusVersion === 0) return;
@@ -242,11 +254,14 @@ export function WorkbenchShell({
           testMode={testMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
+          humanevalStatus={humanevalStatus}
           gpqaEditorActive={gpqaEditorActive}
+          humanevalEditorActive={humanevalEditorActive}
           onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
+          onOpenHumanEvalDetails={onOpenHumanEvalDetails}
         />
       ) : (
         <ExplorerPanel
@@ -298,7 +313,7 @@ export function WorkbenchShell({
           setExplorerWidth(nextWidth);
         }}
       />
-      <EditorPane
+        <EditorPane
         modelPath={modelPath}
         hasModel={tensors.length > 0}
         running={running}
@@ -315,8 +330,10 @@ export function WorkbenchShell({
         testMode={testMode}
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
+        humanevalStatus={humanevalStatus}
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
+        humanevalConfig={humanevalConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
         onRefreshGpqaStatus={onRefreshGpqaStatus}
@@ -330,6 +347,8 @@ export function WorkbenchShell({
         onNoTestsSelected={onNoTestsSelected}
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
+        onHumanEvalConfigChange={onHumanEvalConfigChange}
+        onRunHumanEvalBenchmark={onRunHumanEvalBenchmark}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}
