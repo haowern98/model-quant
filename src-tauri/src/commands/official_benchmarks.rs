@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -26,6 +27,7 @@ const HUMANEVAL_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
 const GPQA_DEFAULT_CONTEXT_WINDOW: u32 = 20_000;
 const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
+const HUMANEVAL_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -1256,6 +1258,7 @@ fn run_humaneval_blocking(
     );
 
     let start = Instant::now();
+    let sandbox_containers_before = sandbox_container_ids()?;
     let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to start HumanEval harness: {e}"))?;
@@ -1273,6 +1276,9 @@ fn run_humaneval_blocking(
 
     let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("EvalScope stdout"));
     let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("EvalScope stderr"));
+    let mut report_ready_since = None;
+    let mut completed_report = None;
+    let mut forced_report_completion = false;
     let status = loop {
         {
             let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
@@ -1281,6 +1287,21 @@ fn run_humaneval_blocking(
                 .ok_or("Official benchmark process was not available.")?;
             if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
                 break status;
+            }
+        }
+
+        if !forced_report_completion {
+            if let Some(report_path) = ready_humaneval_report_path(&run_dir) {
+                completed_report = Some(report_path);
+                let ready_since = report_ready_since.get_or_insert_with(Instant::now);
+                if ready_since.elapsed() >= HUMANEVAL_SHUTDOWN_GRACE {
+                    let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+                    let child = guard
+                        .as_mut()
+                        .ok_or("Official benchmark process was not available.")?;
+                    terminate_child_tree(child);
+                    forced_report_completion = true;
+                }
             }
         }
         thread::sleep(Duration::from_millis(100));
@@ -1294,7 +1315,8 @@ fn run_humaneval_blocking(
     let stdout = stdout_handle.join().unwrap_or_default();
     let stderr = stderr_handle.join().unwrap_or_default();
     let output = format!("{stdout}\n{stderr}");
-    if !status.success() {
+    cleanup_new_sandbox_containers(&sandbox_containers_before, &app);
+    if !status.success() && !forced_report_completion {
         if output.to_lowercase().contains("cancel") {
             crate::progress::emit_benchmark_output(
                 &app,
@@ -1312,12 +1334,14 @@ fn run_humaneval_blocking(
         ));
     }
 
-    let report_path = find_humaneval_report_path(&run_dir).ok_or_else(|| {
-        format!(
-            "EvalScope finished but did not write a HumanEval report under {}",
-            run_dir.display()
-        )
-    })?;
+    let report_path = completed_report
+        .or_else(|| ready_humaneval_report_path(&run_dir))
+        .ok_or_else(|| {
+            format!(
+                "EvalScope finished but did not write a HumanEval report under {}",
+                run_dir.display()
+            )
+        })?;
     crate::progress::emit_benchmark_output(
         &app,
         format!("EvalScope: HumanEval report {}", report_path.display()),
@@ -1680,6 +1704,94 @@ fn detect_docker_status() -> (bool, Option<String>, String) {
             None,
             format!("Docker was not found or could not be started: {error}"),
         ),
+    }
+}
+
+fn sandbox_container_ids() -> Result<BTreeSet<String>, String> {
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command
+        .args([
+            "ps",
+            "-a",
+            "--filter",
+            "name=sandbox-",
+            "--format",
+            "{{.ID}}",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to list HumanEval sandbox containers: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to list HumanEval sandbox containers: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
+}
+
+fn new_sandbox_container_ids(before: &BTreeSet<String>, after: &BTreeSet<String>) -> Vec<String> {
+    after.difference(before).cloned().collect()
+}
+
+fn cleanup_new_sandbox_containers(before: &BTreeSet<String>, app: &tauri::AppHandle) {
+    let Ok(after) = sandbox_container_ids() else {
+        crate::progress::emit_benchmark_output(
+            app,
+            "EvalScope: could not inspect HumanEval sandbox containers for cleanup",
+        );
+        return;
+    };
+    let created = new_sandbox_container_ids(before, &after);
+    if created.is_empty() {
+        return;
+    }
+
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command.args(["rm", "-f"]).args(&created).output();
+    match output {
+        Ok(output) if output.status.success() => crate::progress::emit_benchmark_output(
+            app,
+            format!(
+                "EvalScope: removed {} HumanEval sandbox container(s)",
+                created.len()
+            ),
+        ),
+        Ok(output) => crate::progress::emit_benchmark_output(
+            app,
+            format!(
+                "EvalScope: failed to remove HumanEval sandbox containers: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ),
+        Err(error) => crate::progress::emit_benchmark_output(
+            app,
+            format!("EvalScope: failed to remove HumanEval sandbox containers: {error}"),
+        ),
+    }
+}
+
+fn terminate_child_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill");
+        hide_child_console(&mut command);
+        let status = command
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .status();
+        if !matches!(status, Ok(status) if status.success()) {
+            let _ = child.kill();
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill();
     }
 }
 
@@ -2098,6 +2210,13 @@ fn find_humaneval_report_path(run_dir: &Path) -> Option<PathBuf> {
     visit(&run_dir.join("reports")).or_else(|| visit(run_dir))
 }
 
+fn ready_humaneval_report_path(run_dir: &Path) -> Option<PathBuf> {
+    let path = find_humaneval_report_path(run_dir)?;
+    let report = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<serde_json::Value>(&report).ok()?;
+    Some(path)
+}
+
 fn gpqa_result_from_report(
     model_id: &str,
     shot_mode: GpqaShotMode,
@@ -2420,6 +2539,23 @@ mod tests {
         assert!(!status.ready);
         assert_eq!(status.status_label, "Needs harness");
         assert!(status.detail.contains("sandbox_error"));
+    }
+
+    #[test]
+    fn selects_only_new_humaneval_sandbox_containers_for_cleanup() {
+        let before = ["existing", "shared"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let after = ["existing", "shared", "created-a", "created-b"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        assert_eq!(
+            new_sandbox_container_ids(&before, &after),
+            vec!["created-a".to_string(), "created-b".to_string()]
+        );
     }
 
     #[test]

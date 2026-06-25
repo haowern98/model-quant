@@ -774,6 +774,7 @@ function HumanEvalBenchmarkView({
       ]);
       setViewStatus(nextStatus);
       setDatasetStatus(nextDatasetStatus);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
     } catch (error) {
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
