@@ -8,6 +8,7 @@ import type {
   QuantType,
   RecipeEvalPreset,
   RecipeTestMode,
+  TerminalBenchStatus,
 } from "../../types";
 import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 
@@ -23,6 +24,7 @@ interface TestingPanelProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
   terminalBenchEditorActive: boolean;
@@ -63,6 +65,7 @@ export function TestingPanel({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
   gpqaEditorActive,
   humanevalEditorActive,
   terminalBenchEditorActive,
@@ -160,7 +163,7 @@ export function TestingPanel({
               title="Terminal-Bench 2.1"
               description="Terminal task benchmark"
               meta="Harbor - terminal-bench-2-1"
-              status="Needs Harbor"
+              status={terminalBenchStatus.statusLabel}
               icon="code"
               active={terminalBenchEditorActive}
               onClick={onOpenTerminalBenchDetails}

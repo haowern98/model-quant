@@ -20,6 +20,7 @@ import {
   cancelOfficialBenchmark,
   getGpqaDiamondStatus,
   getHumanEvalStatus,
+  getTerminalBenchStatus,
   installGpqaDiamondHarness,
   downloadGpqaDiamondDataset,
   deleteGpqaDiamondDataset,
@@ -43,6 +44,7 @@ import type {
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
+  TerminalBenchStatus,
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 
@@ -68,6 +70,16 @@ const DEFAULT_HUMANEVAL_STATUS: HumanEvalStatus = {
   dockerReady: false,
   docker: null,
   detail: "HumanEval readiness has not been checked yet.",
+};
+
+const DEFAULT_TERMINAL_BENCH_STATUS: TerminalBenchStatus = {
+  ready: false,
+  statusLabel: "Needs Harbor",
+  harborReady: false,
+  harbor: null,
+  dockerReady: false,
+  docker: null,
+  detail: "Terminal-Bench readiness has not been checked yet.",
 };
 
 const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
@@ -269,6 +281,9 @@ function App() {
   const [humanevalStatus, setHumanEvalStatus] = useState<HumanEvalStatus>(
     DEFAULT_HUMANEVAL_STATUS,
   );
+  const [terminalBenchStatus, setTerminalBenchStatus] = useState<TerminalBenchStatus>(
+    DEFAULT_TERMINAL_BENCH_STATUS,
+  );
   const [gpqaShotMode, setGpqaShotMode] =
     useState<GpqaShotMode>("five_shot_cot");
   const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
@@ -314,16 +329,38 @@ function App() {
 
   useEffect(() => refreshHumanEvalStatus(), [refreshHumanEvalStatus]);
 
+  const refreshTerminalBenchStatus = useCallback(() => {
+    let cancelled = false;
+    getTerminalBenchStatus()
+      .then((status) => {
+        if (!cancelled) setTerminalBenchStatus(status);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setTerminalBenchStatus({
+            ...DEFAULT_TERMINAL_BENCH_STATUS,
+            detail: (error as Error).message,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => refreshTerminalBenchStatus(), [refreshTerminalBenchStatus]);
+
   useEffect(() => {
     const refreshBenchmarkStatuses = () => {
       void refreshGpqaStatus();
       void refreshHumanEvalStatus();
+      void refreshTerminalBenchStatus();
     };
     window.addEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
     return () => {
       window.removeEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
     };
-  }, [refreshGpqaStatus, refreshHumanEvalStatus]);
+  }, [refreshGpqaStatus, refreshHumanEvalStatus, refreshTerminalBenchStatus]);
 
   const resetForLoadedModel = useCallback(
     (path: string, loadedModel: NonNullable<typeof model>) => {
@@ -855,6 +892,7 @@ function App() {
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          terminalBenchStatus={terminalBenchStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
           humanevalConfig={humanevalConfig}

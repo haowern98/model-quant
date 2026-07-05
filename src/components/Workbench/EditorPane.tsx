@@ -24,6 +24,7 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchStatus,
   TensorInfo,
 } from "../../types";
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
@@ -70,6 +71,7 @@ interface EditorPaneProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
@@ -128,6 +130,7 @@ export function EditorPane({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
@@ -232,6 +235,7 @@ export function EditorPane({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          terminalBenchStatus={terminalBenchStatus}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
           onToggleRunTarget={onToggleRunTarget}
@@ -286,7 +290,7 @@ export function EditorPane({
           onRunBenchmark={onRunHumanEvalBenchmark}
         />
       ) : showingTerminalBenchBenchmark ? (
-        <TerminalBenchView />
+        <TerminalBenchView status={terminalBenchStatus} />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -1088,7 +1092,7 @@ function HumanEvalBenchmarkView({
   );
 }
 
-function TerminalBenchView() {
+function TerminalBenchView({ status }: { status: TerminalBenchStatus }) {
   const [activeTab, setActiveTab] = useState<TerminalBenchTab>("details");
   const [config, setConfig] = useState({
     thinking: "off" as GpqaThinkingMode,
@@ -1293,14 +1297,15 @@ function TerminalBenchView() {
             )}
           </div>
           <aside className="benchmark-page-side">
-            <p className="benchmark-readiness">Harbor integration is not installed yet.</p>
+            <p className="benchmark-readiness">{status.detail}</p>
             <BenchmarkInfoSection title="Harness">
               <BenchmarkInfoRow label="Framework" value="Harbor" />
               <BenchmarkInfoRow label="Dataset" value="terminal-bench-2-1" />
               <BenchmarkInfoRow label="Metric" value="pass@1" />
-              <BenchmarkInfoRow label="Status" value="Needs Harbor" />
+              <BenchmarkInfoRow label="Status" value={status.statusLabel} />
               <BenchmarkInfoRow label="Agent" value="terminus-2" />
-              <BenchmarkInfoRow label="Docker" value="Required" />
+              <BenchmarkInfoRow label="Harbor" value={status.harborReady ? status.harbor ?? "Ready" : "Unavailable"} />
+              <BenchmarkInfoRow label="Docker" value={status.dockerReady ? status.docker ?? "Ready" : "Unavailable"} />
             </BenchmarkInfoSection>
             <BenchmarkInfoSection title="Terminal-Bench Dataset">
               <BenchmarkInfoRow label="Downloaded" value="No" />

@@ -61,6 +61,18 @@ pub struct HumanEvalStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TerminalBenchStatus {
+    pub ready: bool,
+    pub status_label: String,
+    pub harbor_ready: bool,
+    pub harbor: Option<String>,
+    pub docker_ready: bool,
+    pub docker: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HumanEvalDatasetStatus {
     pub dataset_ready: bool,
     pub dataset_status_label: String,
@@ -299,6 +311,13 @@ pub async fn get_humaneval_status(app: tauri::AppHandle) -> Result<HumanEvalStat
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
     tauri::async_runtime::spawn_blocking(move || detect_humaneval_status(app_data_dir))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_terminal_bench_status() -> Result<TerminalBenchStatus, String> {
+    tauri::async_runtime::spawn_blocking(detect_terminal_bench_status)
         .await
         .map_err(|e| e.to_string())
 }
@@ -673,6 +692,11 @@ fn detect_humaneval_status(app_data_dir: PathBuf) -> HumanEvalStatus {
             detail: if docker_ready { error } else { docker_detail },
         },
     }
+}
+
+fn detect_terminal_bench_status() -> TerminalBenchStatus {
+    let (docker_ready, docker, docker_detail) = detect_docker_status();
+    classify_terminal_bench_status(run_harbor_probe(), docker_ready, docker, docker_detail)
 }
 
 fn install_gpqa_diamond_harness_blocking(
@@ -1707,6 +1731,26 @@ fn detect_docker_status() -> (bool, Option<String>, String) {
     }
 }
 
+fn run_harbor_probe() -> Result<String, String> {
+    let mut command = Command::new("uvx");
+    hide_child_console(&mut command);
+    let output = command
+        .args(["--from", "harbor", "harbor", "--help"])
+        .output()
+        .map_err(|e| format!("Harbor was not found or could not be started with uvx: {e}"))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "Harbor probe failed.".to_string()
+        } else {
+            stderr
+        })
+    }
+}
+
 fn sandbox_container_ids() -> Result<BTreeSet<String>, String> {
     let mut command = Command::new("docker");
     hide_child_console(&mut command);
@@ -1902,6 +1946,46 @@ fn classify_humaneval_status(
             docker_detail
         } else {
             String::new()
+        },
+    }
+}
+
+fn classify_terminal_bench_status(
+    harbor_probe: Result<String, String>,
+    docker_ready: bool,
+    docker: Option<String>,
+    docker_detail: String,
+) -> TerminalBenchStatus {
+    let (harbor_ready, harbor, harbor_detail) = match harbor_probe {
+        Ok(_) => (
+            true,
+            Some("uvx harbor".to_string()),
+            "Harbor is available through uvx.".to_string(),
+        ),
+        Err(error) => (false, None, error),
+    };
+    let ready = harbor_ready && docker_ready;
+
+    TerminalBenchStatus {
+        ready,
+        status_label: if !harbor_ready {
+            "Needs Harbor"
+        } else if !docker_ready {
+            "Needs Docker"
+        } else {
+            "Ready"
+        }
+        .to_string(),
+        harbor_ready,
+        harbor,
+        docker_ready,
+        docker,
+        detail: if ready {
+            "Harbor and Docker daemon are verified for Terminal-Bench.".to_string()
+        } else if !harbor_ready {
+            harbor_detail
+        } else {
+            docker_detail
         },
     }
 }
@@ -2556,6 +2640,37 @@ mod tests {
             new_sandbox_container_ids(&before, &after),
             vec!["created-a".to_string(), "created-b".to_string()]
         );
+    }
+
+    #[test]
+    fn classifies_terminal_bench_ready_when_harbor_and_docker_are_available() {
+        let status = classify_terminal_bench_status(
+            Ok("Harbor".to_string()),
+            true,
+            Some("29.1.3".to_string()),
+            "Docker daemon is available.".to_string(),
+        );
+
+        assert!(status.ready);
+        assert_eq!(status.status_label, "Ready");
+        assert!(status.harbor_ready);
+        assert!(status.docker_ready);
+        assert_eq!(status.docker.as_deref(), Some("29.1.3"));
+    }
+
+    #[test]
+    fn classifies_terminal_bench_as_needing_harbor_when_probe_fails() {
+        let status = classify_terminal_bench_status(
+            Err("uvx failed".to_string()),
+            true,
+            Some("29.1.3".to_string()),
+            "Docker daemon is available.".to_string(),
+        );
+
+        assert!(!status.ready);
+        assert_eq!(status.status_label, "Needs Harbor");
+        assert!(!status.harbor_ready);
+        assert!(status.detail.contains("uvx failed"));
     }
 
     #[test]

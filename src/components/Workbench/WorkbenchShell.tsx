@@ -13,6 +13,7 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchStatus,
   TensorInfo,
 } from "../../types";
 import { ActivityBar, type ActivityId } from "./ActivityBar";
@@ -51,6 +52,7 @@ interface WorkbenchShellProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
@@ -112,6 +114,7 @@ export function WorkbenchShell({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
@@ -269,6 +272,7 @@ export function WorkbenchShell({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           terminalBenchEditorActive={terminalBenchEditorActive}
@@ -347,6 +351,7 @@ export function WorkbenchShell({
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
         humanevalStatus={humanevalStatus}
+        terminalBenchStatus={terminalBenchStatus}
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
         humanevalConfig={humanevalConfig}

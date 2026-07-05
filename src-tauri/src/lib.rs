@@ -43,6 +43,7 @@ pub fn run() {
             commands::modelinspector_api::get_modelinspector_api_status,
             commands::official_benchmarks::get_gpqa_diamond_status,
             commands::official_benchmarks::get_humaneval_status,
+            commands::official_benchmarks::get_terminal_bench_status,
             commands::official_benchmarks::get_humaneval_dataset_status,
             commands::official_benchmarks::get_gpqa_diamond_dataset_rows,
             commands::official_benchmarks::get_humaneval_dataset_rows,

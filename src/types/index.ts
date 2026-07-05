@@ -279,6 +279,16 @@ export interface HumanEvalStatus {
   detail: string;
 }
 
+export interface TerminalBenchStatus {
+  ready: boolean;
+  statusLabel: string;
+  harborReady: boolean;
+  harbor: string | null;
+  dockerReady: boolean;
+  docker: string | null;
+  detail: string;
+}
+
 export interface HumanEvalDatasetStatus {
   datasetReady: boolean;
   datasetStatusLabel: string;

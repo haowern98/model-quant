@@ -17,6 +17,7 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  TerminalBenchStatus,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -121,6 +122,10 @@ export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {
 
 export async function getHumanEvalStatus(): Promise<HumanEvalStatus> {
   return invoke<HumanEvalStatus>("get_humaneval_status");
+}
+
+export async function getTerminalBenchStatus(): Promise<TerminalBenchStatus> {
+  return invoke<TerminalBenchStatus>("get_terminal_bench_status");
 }
 
 export async function getHumanEvalDatasetStatus(): Promise<HumanEvalDatasetStatus> {

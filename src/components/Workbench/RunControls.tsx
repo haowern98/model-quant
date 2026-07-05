@@ -6,6 +6,7 @@ import type {
   ProgressEvent,
   RecipeEvalPreset,
   RecipeTestMode,
+  TerminalBenchStatus,
 } from "../../types";
 
 interface RunControlsProps {
@@ -18,6 +19,7 @@ interface RunControlsProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
@@ -35,6 +37,7 @@ export function RunControls({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
@@ -173,7 +176,7 @@ export function RunControls({
               disabled={running}
               onClick={() => onToggleRunTarget("humaneval")}
             />
-            <RunMenuCheckbox label="Terminal-Bench 2.1" status="Needs Harbor" disabled muted />
+            <RunMenuCheckbox label="Terminal-Bench 2.1" status={terminalBenchStatus.statusLabel} disabled muted />
             <RunMenuCheckbox label="MMLU-Pro" status="Download" disabled muted />
             <RunMenuCheckbox label="MMLU-Redux" status="Frozen" disabled muted />
             <RunMenuCheckbox label="SuperGPQA" status="Download" disabled muted />
