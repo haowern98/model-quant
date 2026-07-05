@@ -72,7 +72,11 @@ interface WorkbenchShellProps {
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
-  onRefreshGpqaStatus: () => void;
+  onDeleteGpqaDataset: () => void;
+  onDeleteGpqaHarness: () => void;
+  onRefreshGpqaStatus: () => Promise<void>;
+  onBeginBenchmarkSetup: (message?: string | null) => void;
+  onEndBenchmarkSetup: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
@@ -128,7 +132,11 @@ export function WorkbenchShell({
   onHumanEvalConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
+  onDeleteGpqaDataset,
+  onDeleteGpqaHarness,
   onRefreshGpqaStatus,
+  onBeginBenchmarkSetup,
+  onEndBenchmarkSetup,
   onOpenGpqaDetails,
   onOpenGpqaDataset,
   onOpenHumanEvalDetails,
@@ -339,7 +347,11 @@ export function WorkbenchShell({
         humanevalConfig={humanevalConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
+        onDeleteGpqaDataset={onDeleteGpqaDataset}
+        onDeleteGpqaHarness={onDeleteGpqaHarness}
         onRefreshGpqaStatus={onRefreshGpqaStatus}
+        onBeginBenchmarkSetup={onBeginBenchmarkSetup}
+        onEndBenchmarkSetup={onEndBenchmarkSetup}
         onSelectEditor={onSelectEditor}
         onCloseEditor={onCloseEditor}
         onReorderEditor={onReorderEditor}

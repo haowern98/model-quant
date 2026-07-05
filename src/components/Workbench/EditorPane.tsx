@@ -32,8 +32,6 @@ import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
-  deleteGpqaDiamondDataset,
-  deleteGpqaDiamondHarness,
   deleteHumanEvalDataset,
   deleteHumanEvalHarness,
   downloadHumanEvalDataset,
@@ -80,7 +78,11 @@ interface EditorPaneProps {
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
-  onRefreshGpqaStatus: () => void;
+  onDeleteGpqaDataset: () => void;
+  onDeleteGpqaHarness: () => void;
+  onRefreshGpqaStatus: () => Promise<void>;
+  onBeginBenchmarkSetup: (message?: string | null) => void;
+  onEndBenchmarkSetup: () => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
@@ -134,7 +136,11 @@ export function EditorPane({
   onAssignQuant,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
+  onDeleteGpqaDataset,
+  onDeleteGpqaHarness,
   onRefreshGpqaStatus,
+  onBeginBenchmarkSetup,
+  onEndBenchmarkSetup,
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
@@ -256,7 +262,11 @@ export function EditorPane({
           running={running}
           onInstallHarness={onInstallGpqaHarness}
           onDownloadDataset={onDownloadGpqaDataset}
+          onDeleteDataset={onDeleteGpqaDataset}
+          onDeleteHarness={onDeleteGpqaHarness}
           onRefreshStatus={onRefreshGpqaStatus}
+          onBeginSetup={onBeginBenchmarkSetup}
+          onEndSetup={onEndBenchmarkSetup}
           onShotModeChange={onGpqaShotModeChange}
           onConfigChange={onGpqaConfigChange}
           onRunBenchmark={onTest}
@@ -266,6 +276,8 @@ export function EditorPane({
           status={humanevalStatus}
           config={humanevalConfig}
           running={running}
+          onBeginSetup={onBeginBenchmarkSetup}
+          onEndSetup={onEndBenchmarkSetup}
           onConfigChange={onHumanEvalConfigChange}
           onRunBenchmark={onRunHumanEvalBenchmark}
         />
@@ -334,7 +346,11 @@ function GpqaBenchmarkView({
   running,
   onInstallHarness,
   onDownloadDataset,
+  onDeleteDataset,
+  onDeleteHarness,
   onRefreshStatus,
+  onBeginSetup,
+  onEndSetup,
   onShotModeChange,
   onConfigChange,
   onRunBenchmark,
@@ -346,7 +362,11 @@ function GpqaBenchmarkView({
   running: boolean;
   onInstallHarness: () => void;
   onDownloadDataset: () => void;
-  onRefreshStatus: () => void;
+  onDeleteDataset: () => void;
+  onDeleteHarness: () => void;
+  onRefreshStatus: () => Promise<void>;
+  onBeginSetup: (message?: string | null) => void;
+  onEndSetup: () => void;
   onShotModeChange: (mode: GpqaShotMode) => void;
   onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onRunBenchmark: () => void;
@@ -417,18 +437,22 @@ function GpqaBenchmarkView({
       onDownloadDataset();
       return;
     }
-    deleteGpqaDiamondDataset()
-      .then(() => onRefreshStatus())
-      .catch((error: unknown) => console.error(error));
+    onDeleteDataset();
   };
   const handleHarnessAction = () => {
     if (!harnessReady) {
       onInstallHarness();
       return;
     }
-    deleteGpqaDiamondHarness()
-      .then(() => onRefreshStatus())
-      .catch((error: unknown) => console.error(error));
+    onDeleteHarness();
+  };
+  const handleRefreshStatus = async (message: string) => {
+    onBeginSetup(message);
+    try {
+      await onRefreshStatus();
+    } finally {
+      onEndSetup();
+    }
   };
 
   return (
@@ -459,7 +483,7 @@ function GpqaBenchmarkView({
                   type="button"
                   className="benchmark-action-button secondary"
                   disabled={running}
-                  onClick={onRefreshStatus}
+                  onClick={() => void handleRefreshStatus("Verifying hash")}
                 >
                   Verify hash
                 </button>
@@ -475,7 +499,7 @@ function GpqaBenchmarkView({
                   type="button"
                   className="benchmark-action-button secondary"
                   disabled={running}
-                  onClick={onRefreshStatus}
+                  onClick={() => void handleRefreshStatus("Refreshing status")}
                 >
                   Refresh
                 </button>
@@ -679,12 +703,16 @@ function HumanEvalBenchmarkView({
   status,
   config,
   running,
+  onBeginSetup,
+  onEndSetup,
   onConfigChange,
   onRunBenchmark,
 }: {
   status: HumanEvalStatus;
   config: GpqaBenchmarkConfigInput;
   running: boolean;
+  onBeginSetup: (message?: string | null) => void;
+  onEndSetup: () => void;
   onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onRunBenchmark: () => void;
 }) {
@@ -765,8 +793,9 @@ function HumanEvalBenchmarkView({
     };
   }, [activeTab, datasetStatus.datasetReady]);
 
-  const refreshStatus = async () => {
+  const refreshStatus = async (message = "Refreshing status") => {
     setBusy(true);
+    onBeginSetup(message);
     try {
       const [nextStatus, nextDatasetStatus] = await Promise.all([
         getHumanEvalStatus(),
@@ -779,11 +808,13 @@ function HumanEvalBenchmarkView({
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
       setBusy(false);
+      onEndSetup();
     }
   };
 
   const changeHarness = async () => {
     setBusy(true);
+    onBeginSetup(harnessInstalled ? "Deleting harness" : "Installing harness");
     try {
       setViewStatus(
         harnessInstalled ? await deleteHumanEvalHarness() : await installHumanEvalHarness(),
@@ -793,11 +824,13 @@ function HumanEvalBenchmarkView({
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
       setBusy(false);
+      onEndSetup();
     }
   };
 
   const changeDataset = async () => {
     setBusy(true);
+    onBeginSetup(datasetStatus.datasetReady ? "Deleting dataset" : "Downloading dataset");
     try {
       setDatasetStatus(
         datasetStatus.datasetReady
@@ -809,6 +842,7 @@ function HumanEvalBenchmarkView({
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
       setBusy(false);
+      onEndSetup();
     }
   };
 
@@ -831,7 +865,7 @@ function HumanEvalBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy || (!datasetStatus.datasetReady && !harnessInstalled)}
+                  disabled={busy || running || (!datasetStatus.datasetReady && !harnessInstalled)}
                   onClick={changeDataset}
                 >
                   {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
@@ -839,15 +873,15 @@ function HumanEvalBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy}
-                  onClick={refreshStatus}
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Verifying hash")}
                 >
                   Verify hash
                 </button>
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy}
+                  disabled={busy || running}
                   onClick={changeHarness}
                 >
                   {harnessInstalled ? "Delete harness" : "Install harness"}
@@ -855,8 +889,8 @@ function HumanEvalBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy}
-                  onClick={refreshStatus}
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Refreshing status")}
                 >
                   Refresh
                 </button>

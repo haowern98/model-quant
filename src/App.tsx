@@ -21,6 +21,8 @@ import {
   getHumanEvalStatus,
   installGpqaDiamondHarness,
   downloadGpqaDiamondDataset,
+  deleteGpqaDiamondDataset,
+  deleteGpqaDiamondHarness,
   runGpqaDiamondBenchmark,
   runHumanEvalBenchmark,
   saveRecipe,
@@ -275,26 +277,20 @@ function App() {
     DEFAULT_HUMANEVAL_CONFIG_INPUT,
   );
 
-  const refreshGpqaStatus = useCallback(() => {
-    let cancelled = false;
-    getGpqaDiamondStatus()
-      .then((status) => {
-        if (!cancelled) setGpqaStatus(status);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setGpqaStatus({
-            ...DEFAULT_GPQA_STATUS,
-            detail: (error as Error).message,
-          });
-        }
+  const refreshGpqaStatus = useCallback(async () => {
+    try {
+      setGpqaStatus(await getGpqaDiamondStatus());
+    } catch (error) {
+      setGpqaStatus({
+        ...DEFAULT_GPQA_STATUS,
+        detail: (error as Error).message,
       });
-    return () => {
-      cancelled = true;
-    };
+    }
   }, []);
 
-  useEffect(() => refreshGpqaStatus(), [refreshGpqaStatus, modelPath]);
+  useEffect(() => {
+    void refreshGpqaStatus();
+  }, [refreshGpqaStatus, modelPath]);
 
   const refreshHumanEvalStatus = useCallback(() => {
     let cancelled = false;
@@ -688,7 +684,7 @@ function App() {
   }, []);
 
   const handleInstallGpqaHarness = useCallback(async () => {
-    startOperation();
+    startOperation("Installing harness");
     try {
       const status = await installGpqaDiamondHarness();
       setGpqaStatus(status);
@@ -702,9 +698,37 @@ function App() {
   }, [endOperation, refreshGpqaStatus, startOperation]);
 
   const handleDownloadGpqaDataset = useCallback(async () => {
-    startOperation();
+    startOperation("Downloading dataset");
     try {
       const status = await downloadGpqaDiamondDataset();
+      setGpqaStatus(status);
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+      void refreshGpqaStatus();
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshGpqaStatus, startOperation]);
+
+  const handleDeleteGpqaDataset = useCallback(async () => {
+    startOperation("Deleting dataset");
+    try {
+      const status = await deleteGpqaDiamondDataset();
+      setGpqaStatus(status);
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+      void refreshGpqaStatus();
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshGpqaStatus, startOperation]);
+
+  const handleDeleteGpqaHarness = useCallback(async () => {
+    startOperation("Deleting harness");
+    try {
+      const status = await deleteGpqaDiamondHarness();
       setGpqaStatus(status);
       setAppError(null);
     } catch (e) {
@@ -847,7 +871,11 @@ function App() {
           onHumanEvalConfigChange={setHumanEvalConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}
           onDownloadGpqaDataset={handleDownloadGpqaDataset}
+          onDeleteGpqaDataset={handleDeleteGpqaDataset}
+          onDeleteGpqaHarness={handleDeleteGpqaHarness}
           onRefreshGpqaStatus={refreshGpqaStatus}
+          onBeginBenchmarkSetup={startOperation}
+          onEndBenchmarkSetup={endOperation}
           onOpenGpqaDetails={handleOpenGpqaDetails}
           onOpenGpqaDataset={handleOpenGpqaDataset}
           onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
