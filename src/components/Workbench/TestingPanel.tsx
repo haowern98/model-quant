@@ -25,11 +25,13 @@ interface TestingPanelProps {
   humanevalStatus: HumanEvalStatus;
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
+  terminalBenchEditorActive: boolean;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
   onInstallGpqaHarness: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
+  onOpenTerminalBenchDetails: () => void;
 }
 
 type TestingSectionId = "localChecks" | "benchmarks" | "environment" | "latestRuns";
@@ -63,9 +65,11 @@ export function TestingPanel({
   humanevalStatus,
   gpqaEditorActive,
   humanevalEditorActive,
+  terminalBenchEditorActive,
   onToggleRunTarget,
   onOpenGpqaDetails,
   onOpenHumanEvalDetails,
+  onOpenTerminalBenchDetails,
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
     localChecks: true,
@@ -151,6 +155,15 @@ export function TestingPanel({
               icon="code"
               active={humanevalEditorActive}
               onClick={onOpenHumanEvalDetails}
+            />
+            <BenchmarkCard
+              title="Terminal-Bench 2.1"
+              description="Terminal task benchmark"
+              meta="Harbor - terminal-bench-2-1"
+              status="Needs Harbor"
+              icon="code"
+              active={terminalBenchEditorActive}
+              onClick={onOpenTerminalBenchDetails}
             />
             <BenchmarkCard title="Claw-Eval" description="Agentic tool-use evaluation" status="Needs harness" />
           </div>

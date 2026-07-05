@@ -173,6 +173,7 @@ export function RunControls({
               disabled={running}
               onClick={() => onToggleRunTarget("humaneval")}
             />
+            <RunMenuCheckbox label="Terminal-Bench 2.1" status="Needs Harbor" disabled muted />
             <RunMenuCheckbox label="MMLU-Pro" status="Download" disabled muted />
             <RunMenuCheckbox label="MMLU-Redux" status="Frozen" disabled muted />
             <RunMenuCheckbox label="SuperGPQA" status="Download" disabled muted />

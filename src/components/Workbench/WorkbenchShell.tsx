@@ -80,6 +80,7 @@ interface WorkbenchShellProps {
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
+  onOpenTerminalBenchDetails: () => void;
   onRunHumanEvalBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
@@ -140,6 +141,7 @@ export function WorkbenchShell({
   onOpenGpqaDetails,
   onOpenGpqaDataset,
   onOpenHumanEvalDetails,
+  onOpenTerminalBenchDetails,
   onRunHumanEvalBenchmark,
   onTest,
   onCancelTest,
@@ -156,6 +158,7 @@ export function WorkbenchShell({
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
+  const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
 
   useEffect(() => {
     if (modelExplorerFocusVersion === 0) return;
@@ -268,11 +271,13 @@ export function WorkbenchShell({
           humanevalStatus={humanevalStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
+          terminalBenchEditorActive={terminalBenchEditorActive}
           onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
           onOpenHumanEvalDetails={onOpenHumanEvalDetails}
+          onOpenTerminalBenchDetails={onOpenTerminalBenchDetails}
         />
       ) : (
         <ExplorerPanel

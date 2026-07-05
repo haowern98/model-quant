@@ -7,6 +7,7 @@ import {
   gpqaDetailsEditorTab,
   humanevalDetailsEditorTab,
   layerEditorTab,
+  terminalBenchDetailsEditorTab,
   type EditorTab,
 } from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
@@ -425,6 +426,10 @@ function App() {
 
   const handleOpenHumanEvalDetails = useCallback(() => {
     openEditorTab(humanevalDetailsEditorTab());
+  }, [openEditorTab]);
+
+  const handleOpenTerminalBenchDetails = useCallback(() => {
+    openEditorTab(terminalBenchDetailsEditorTab());
   }, [openEditorTab]);
 
   const handleToggleRunTarget = useCallback(
@@ -879,6 +884,7 @@ function App() {
           onOpenGpqaDetails={handleOpenGpqaDetails}
           onOpenGpqaDataset={handleOpenGpqaDataset}
           onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
+          onOpenTerminalBenchDetails={handleOpenTerminalBenchDetails}
           onRunHumanEvalBenchmark={handleRunHumanEvalBenchmark}
           onTest={handleTest}
           onCancelTest={handleCancelTest}

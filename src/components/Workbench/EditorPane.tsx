@@ -46,6 +46,7 @@ const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
 type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
 type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
+type TerminalBenchTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -170,6 +171,8 @@ export function EditorPane({
           ? "GPQA Diamond Dataset"
           : activeEditor?.kind === "humaneval-details"
             ? "HumanEval"
+            : activeEditor?.kind === "terminal-bench-details"
+              ? "Terminal-Bench 2.1"
       : layerTitle(activeLayerIndex);
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
   const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
@@ -177,6 +180,7 @@ export function EditorPane({
   const showingGpqaDataset = activeEditor?.kind === "gpqa-dataset";
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
+  const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -242,7 +246,7 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark ? "benchmark" : "tensors"}</span>
+        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
       {activeResult ? (
@@ -281,6 +285,8 @@ export function EditorPane({
           onConfigChange={onHumanEvalConfigChange}
           onRunBenchmark={onRunHumanEvalBenchmark}
         />
+      ) : showingTerminalBenchBenchmark ? (
+        <TerminalBenchView />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -1074,6 +1080,233 @@ function HumanEvalBenchmarkView({
               <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
               <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
               <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TerminalBenchView() {
+  const [activeTab, setActiveTab] = useState<TerminalBenchTab>("details");
+  const [config, setConfig] = useState({
+    thinking: "off" as GpqaThinkingMode,
+    temperature: "0",
+    topK: "40",
+    repeatPenalty: "1.1",
+    presencePenalty: "0",
+    topP: "0.95",
+    minP: "0.05",
+    contextWindow: "20000",
+    samples: "",
+    runsPerTask: "1",
+    maxTurns: "1",
+  });
+  const updateIntegerField =
+    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+    };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+    };
+  const updatePresencePenalty = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.currentTarget.value;
+    if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+      setConfig((current) => ({ ...current, presencePenalty: value }));
+    }
+  };
+
+  return (
+    <section className="benchmark-editor-surface">
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-title">
+              <h1>Terminal-Bench 2.1</h1>
+              <div className="benchmark-page-meta">
+                <span>Harbor</span>
+                <span>|</span>
+                <span>terminal-bench-2-1</span>
+                <span>|</span>
+                <span>terminal tasks</span>
+              </div>
+              <p>Official Terminal-Bench 2.1 evaluation shell for terminal task execution through Harbor.</p>
+              <div className="benchmark-page-actions">
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Download dataset
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Verify hash
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Install harness
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Refresh
+                </button>
+                <button type="button" className="benchmark-action-button primary" disabled>
+                  Run Benchmark
+                </button>
+                <button type="button" className="benchmark-icon-button" aria-label="Terminal-Bench settings">
+                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="Terminal-Bench sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Harness</h2>
+                <p>
+                  Terminal-Bench 2.1 evaluates terminal task solving through Harbor. The first
+                  runnable version will use Harbor&apos;s Terminus agent against the app&apos;s
+                  in-process OpenAI-compatible chat API.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains terminal tasks that run inside isolated environments. Docker
+                  and Harbor support are required before this benchmark can run.
+                </p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                <p>Terminal-Bench dataset preview is not wired yet.</p>
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="Terminal-Bench thinking"
+                    value={config.thinking}
+                    onChange={(thinking) => setConfig((current) => ({ ...current, thinking }))}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="Terminal-Bench temperature"
+                    value={config.temperature}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("temperature")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="Terminal-Bench top K sampling"
+                    value={config.topK}
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("topK")}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="Terminal-Bench repeat penalty"
+                    value={config.repeatPenalty}
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("repeatPenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="Terminal-Bench presence penalty"
+                    value={config.presencePenalty}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updatePresencePenalty}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="Terminal-Bench top P sampling"
+                    value={config.topP}
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("topP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="Terminal-Bench min P sampling"
+                    value={config.minP}
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("minP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="Terminal-Bench context window"
+                    value={config.contextWindow}
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("contextWindow")}
+                  />
+                  <BenchmarkInputRow
+                    label="Samples"
+                    inputLabel="Terminal-Bench samples"
+                    value={config.samples}
+                    placeholder="All"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("samples")}
+                  />
+                  <BenchmarkInputRow
+                    label="Runs per task"
+                    inputLabel="Terminal-Bench runs per task"
+                    value={config.runsPerTask}
+                    placeholder="1"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("runsPerTask")}
+                  />
+                  <BenchmarkInputRow
+                    label="Max turns"
+                    inputLabel="Terminal-Bench max turns"
+                    value={config.maxTurns}
+                    placeholder="1"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("maxTurns")}
+                  />
+                </BenchmarkInfoSection>
+              </div>
+            )}
+          </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">Harbor integration is not installed yet.</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="Harbor" />
+              <BenchmarkInfoRow label="Dataset" value="terminal-bench-2-1" />
+              <BenchmarkInfoRow label="Metric" value="pass@1" />
+              <BenchmarkInfoRow label="Status" value="Needs Harbor" />
+              <BenchmarkInfoRow label="Agent" value="terminus-2" />
+              <BenchmarkInfoRow label="Docker" value="Required" />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="Terminal-Bench Dataset">
+              <BenchmarkInfoRow label="Downloaded" value="No" />
+              <BenchmarkInfoRow label="Verified" value="No" />
+              <BenchmarkInfoRow label="Official asset" value="terminal-bench/terminal-bench-2-1" />
+              <BenchmarkInfoRow label="Cache path" value="Not downloaded" />
             </BenchmarkInfoSection>
           </aside>
         </div>
