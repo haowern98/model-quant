@@ -19,6 +19,7 @@ import { ActivityBar, type ActivityId } from "./ActivityBar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
 import type { EditorTab } from "./editorTabModel";
+import { StatusBar } from "./StatusBar";
 import { TestingPanel } from "./TestingPanel";
 
 const EXPLORER_DEFAULT_WIDTH = 365;
@@ -41,6 +42,7 @@ interface WorkbenchShellProps {
   expandedLayers: Set<number>;
   running: boolean;
   cancelling: boolean;
+  statusMessage: string | null;
   progress: ProgressEvent | null;
   outputLines: BenchmarkOutputLine[];
   apiOutputLines: BenchmarkOutputLine[];
@@ -96,6 +98,7 @@ export function WorkbenchShell({
   expandedLayers,
   running,
   cancelling,
+  statusMessage,
   progress,
   outputLines,
   apiOutputLines,
@@ -313,7 +316,7 @@ export function WorkbenchShell({
           setExplorerWidth(nextWidth);
         }}
       />
-        <EditorPane
+      <EditorPane
         modelPath={modelPath}
         hasModel={tensors.length > 0}
         running={running}
@@ -354,6 +357,13 @@ export function WorkbenchShell({
         onSaveRecipe={onSaveRecipe}
         onExport={onExport}
         onDiscardResults={onDiscardResults}
+      />
+      <StatusBar
+        running={running}
+        cancelling={cancelling}
+        statusMessage={statusMessage}
+        progress={progress}
+        selectedRunIds={selectedRunIds}
       />
     </div>
   );

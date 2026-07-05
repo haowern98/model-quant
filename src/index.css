@@ -33,6 +33,7 @@
   --vscode-warning: #d7ba7d;
   --vscode-success: #89d185;
   --vscode-error: #f48771;
+  --status-bar-height: 22px;
   --syntax-blue: #9cdcfe;
   --syntax-amber: #d7ba7d;
 }
@@ -203,7 +204,7 @@ button {
 .app-error-toast {
   position: absolute;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(var(--status-bar-height) + 16px);
   z-index: 20;
   max-width: min(640px, calc(100vw - 32px));
   min-height: 48px;
@@ -558,6 +559,7 @@ button {
   min-height: 0;
   display: grid;
   grid-template-columns: 48px var(--explorer-width, 365px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--status-bar-height);
   background: var(--vscode-editor);
   position: relative;
 }
@@ -596,7 +598,7 @@ body.resizing-bottom-panel .bottom-panel-resizer::after {
 .explorer-resizer {
   position: absolute;
   top: 0;
-  bottom: 0;
+  bottom: var(--status-bar-height);
   left: calc(48px + var(--explorer-width, 365px));
   width: 4px;
   transform: translateX(-2px);
@@ -614,6 +616,42 @@ body.resizing-bottom-panel .bottom-panel-resizer::after {
 
 .bottom-panel-resizer::after {
   inset: 1px 0;
+}
+
+.status-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: var(--status-bar-height);
+  display: flex;
+  align-items: center;
+  background: var(--vscode-blue);
+  color: #fff;
+  font: 12px/var(--status-bar-height) "Segoe UI", system-ui, sans-serif;
+}
+
+.status-bar-item {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+}
+
+.status-bar-run-status .codicon {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+  line-height: 14px;
+}
+
+.status-bar-sync {
+  animation: status-sync-spin 1s linear infinite;
+}
+
+@keyframes status-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 body.resizing-explorer,
@@ -1479,15 +1517,6 @@ body.resizing-bottom-panel * {
   height: 1px;
   margin: 6px 0;
   background: var(--vscode-border-soft);
-}
-
-.run-progress {
-  max-width: 240px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--vscode-muted);
-  font-size: 12px;
 }
 
 .editor-breadcrumbs {

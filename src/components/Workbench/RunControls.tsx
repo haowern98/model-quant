@@ -30,7 +30,6 @@ export function RunControls({
   hasModel,
   running,
   cancelling,
-  progress,
   evalPreset,
   testMode,
   selectedRunIds,
@@ -83,16 +82,9 @@ export function RunControls({
   const hasSelectedApiBenchmark =
     selectedRunIds.includes("gpqa_diamond") || selectedRunIds.includes("humaneval");
   const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedApiBenchmark);
-  const progressMessage =
-    progress?.message.toLowerCase().includes("gpqa")
-      ? "GPQA running"
-      : progress?.message.toLowerCase().includes("humaneval")
-        ? "HumanEval running"
-        : progress?.message;
 
   return (
     <div className="editor-run-controls">
-      {progressMessage && <span className="run-progress">{progressMessage}</span>}
       <select
         aria-label="Eval preset"
         value={evalPreset}

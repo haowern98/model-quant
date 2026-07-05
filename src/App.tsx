@@ -240,6 +240,7 @@ function App() {
     progress,
     running,
     cancelling,
+    statusMessage,
     startOperation,
     requestCancellation,
     endOperation,
@@ -816,6 +817,7 @@ function App() {
           expandedLayers={expandedLayers}
           running={running}
           cancelling={cancelling}
+          statusMessage={statusMessage}
           progress={progress}
           outputLines={outputLines}
           apiOutputLines={apiOutputLines}
