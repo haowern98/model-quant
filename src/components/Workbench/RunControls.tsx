@@ -6,6 +6,7 @@ import type {
   ProgressEvent,
   RecipeEvalPreset,
   RecipeTestMode,
+  TerminalBenchStatus,
 } from "../../types";
 
 interface RunControlsProps {
@@ -18,6 +19,7 @@ interface RunControlsProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
@@ -30,12 +32,12 @@ export function RunControls({
   hasModel,
   running,
   cancelling,
-  progress,
   evalPreset,
   testMode,
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
@@ -78,21 +80,20 @@ export function RunControls({
       ? "Compare Recipe"
       : "Test Recipe";
   const hasSelectedRun = selectedRunIds.some(
-    (id) => id === "ppl_check" || id === "gpqa_diamond" || id === "humaneval",
+    (id) =>
+      id === "ppl_check" ||
+      id === "gpqa_diamond" ||
+      id === "humaneval" ||
+      id === "terminal_bench",
   );
   const hasSelectedApiBenchmark =
-    selectedRunIds.includes("gpqa_diamond") || selectedRunIds.includes("humaneval");
+    selectedRunIds.includes("gpqa_diamond") ||
+    selectedRunIds.includes("humaneval") ||
+    selectedRunIds.includes("terminal_bench");
   const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedApiBenchmark);
-  const progressMessage =
-    progress?.message.toLowerCase().includes("gpqa")
-      ? "GPQA running"
-      : progress?.message.toLowerCase().includes("humaneval")
-        ? "HumanEval running"
-        : progress?.message;
 
   return (
     <div className="editor-run-controls">
-      {progressMessage && <span className="run-progress">{progressMessage}</span>}
       <select
         aria-label="Eval preset"
         value={evalPreset}
@@ -180,6 +181,13 @@ export function RunControls({
               checked={selectedRunIds.includes("humaneval")}
               disabled={running}
               onClick={() => onToggleRunTarget("humaneval")}
+            />
+            <RunMenuCheckbox
+              label="Terminal-Bench 2.1"
+              status={terminalBenchStatus.statusLabel}
+              checked={selectedRunIds.includes("terminal_bench")}
+              disabled={running}
+              onClick={() => onToggleRunTarget("terminal_bench")}
             />
             <RunMenuCheckbox label="MMLU-Pro" status="Download" disabled muted />
             <RunMenuCheckbox label="MMLU-Redux" status="Frozen" disabled muted />

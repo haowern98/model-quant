@@ -24,6 +24,9 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchDatasetStatus,
+  TerminalBenchDatasetRow,
+  TerminalBenchStatus,
   TensorInfo,
 } from "../../types";
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
@@ -32,13 +35,12 @@ import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
-  deleteGpqaDiamondDataset,
-  deleteGpqaDiamondHarness,
   deleteHumanEvalDataset,
   deleteHumanEvalHarness,
   downloadHumanEvalDataset,
   getGpqaDiamondDatasetRows,
   getHumanEvalDatasetRows,
+  getTerminalBenchDatasetRows,
   getHumanEvalDatasetStatus,
   getHumanEvalStatus,
   installHumanEvalHarness,
@@ -48,6 +50,7 @@ const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
 const BOTTOM_PANEL_MIN_HEIGHT = 64;
 type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
 type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
+type TerminalBenchTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -71,6 +74,8 @@ interface EditorPaneProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
+  terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
@@ -80,7 +85,11 @@ interface EditorPaneProps {
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
-  onRefreshGpqaStatus: () => void;
+  onDeleteGpqaDataset: () => void;
+  onDeleteGpqaHarness: () => void;
+  onRefreshGpqaStatus: () => Promise<void>;
+  onBeginBenchmarkSetup: (message?: string | null) => void;
+  onEndBenchmarkSetup: () => void;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
   onToggleRunTarget: (target: BenchmarkRunId) => void;
@@ -88,7 +97,12 @@ interface EditorPaneProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onInstallTerminalBenchHarness: () => void;
+  onDownloadTerminalBenchDataset: () => void;
+  onDeleteTerminalBenchDataset: () => void;
+  onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -125,6 +139,8 @@ export function EditorPane({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
+  terminalBenchDatasetStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
@@ -134,7 +150,11 @@ export function EditorPane({
   onAssignQuant,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
+  onDeleteGpqaDataset,
+  onDeleteGpqaHarness,
   onRefreshGpqaStatus,
+  onBeginBenchmarkSetup,
+  onEndBenchmarkSetup,
   onEvalPresetChange,
   onTestModeChange,
   onToggleRunTarget,
@@ -142,7 +162,12 @@ export function EditorPane({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onInstallTerminalBenchHarness,
+  onDownloadTerminalBenchDataset,
+  onDeleteTerminalBenchDataset,
+  onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -164,6 +189,8 @@ export function EditorPane({
           ? "GPQA Diamond Dataset"
           : activeEditor?.kind === "humaneval-details"
             ? "HumanEval"
+            : activeEditor?.kind === "terminal-bench-details"
+              ? "Terminal-Bench 2.1"
       : layerTitle(activeLayerIndex);
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
   const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
@@ -171,6 +198,7 @@ export function EditorPane({
   const showingGpqaDataset = activeEditor?.kind === "gpqa-dataset";
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
+  const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -222,6 +250,7 @@ export function EditorPane({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          terminalBenchStatus={terminalBenchStatus}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
           onToggleRunTarget={onToggleRunTarget}
@@ -236,7 +265,7 @@ export function EditorPane({
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
         <span>&gt;</span>
-        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark ? "benchmark" : "tensors"}</span>
+        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
       {activeResult ? (
@@ -256,7 +285,11 @@ export function EditorPane({
           running={running}
           onInstallHarness={onInstallGpqaHarness}
           onDownloadDataset={onDownloadGpqaDataset}
+          onDeleteDataset={onDeleteGpqaDataset}
+          onDeleteHarness={onDeleteGpqaHarness}
           onRefreshStatus={onRefreshGpqaStatus}
+          onBeginSetup={onBeginBenchmarkSetup}
+          onEndSetup={onEndBenchmarkSetup}
           onShotModeChange={onGpqaShotModeChange}
           onConfigChange={onGpqaConfigChange}
           onRunBenchmark={onTest}
@@ -266,8 +299,21 @@ export function EditorPane({
           status={humanevalStatus}
           config={humanevalConfig}
           running={running}
+          onBeginSetup={onBeginBenchmarkSetup}
+          onEndSetup={onEndBenchmarkSetup}
           onConfigChange={onHumanEvalConfigChange}
           onRunBenchmark={onRunHumanEvalBenchmark}
+        />
+      ) : showingTerminalBenchBenchmark ? (
+        <TerminalBenchView
+          status={terminalBenchStatus}
+          datasetStatus={terminalBenchDatasetStatus}
+          running={running}
+          onInstallHarness={onInstallTerminalBenchHarness}
+          onDownloadDataset={onDownloadTerminalBenchDataset}
+          onDeleteDataset={onDeleteTerminalBenchDataset}
+          onRefreshStatus={onRefreshTerminalBenchStatus}
+          onRunBenchmark={onRunTerminalBenchBenchmark}
         />
       ) : (
         <section className="tensor-editor-surface">
@@ -334,7 +380,11 @@ function GpqaBenchmarkView({
   running,
   onInstallHarness,
   onDownloadDataset,
+  onDeleteDataset,
+  onDeleteHarness,
   onRefreshStatus,
+  onBeginSetup,
+  onEndSetup,
   onShotModeChange,
   onConfigChange,
   onRunBenchmark,
@@ -346,7 +396,11 @@ function GpqaBenchmarkView({
   running: boolean;
   onInstallHarness: () => void;
   onDownloadDataset: () => void;
-  onRefreshStatus: () => void;
+  onDeleteDataset: () => void;
+  onDeleteHarness: () => void;
+  onRefreshStatus: () => Promise<void>;
+  onBeginSetup: (message?: string | null) => void;
+  onEndSetup: () => void;
   onShotModeChange: (mode: GpqaShotMode) => void;
   onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onRunBenchmark: () => void;
@@ -417,18 +471,22 @@ function GpqaBenchmarkView({
       onDownloadDataset();
       return;
     }
-    deleteGpqaDiamondDataset()
-      .then(() => onRefreshStatus())
-      .catch((error: unknown) => console.error(error));
+    onDeleteDataset();
   };
   const handleHarnessAction = () => {
     if (!harnessReady) {
       onInstallHarness();
       return;
     }
-    deleteGpqaDiamondHarness()
-      .then(() => onRefreshStatus())
-      .catch((error: unknown) => console.error(error));
+    onDeleteHarness();
+  };
+  const handleRefreshStatus = async (message: string) => {
+    onBeginSetup(message);
+    try {
+      await onRefreshStatus();
+    } finally {
+      onEndSetup();
+    }
   };
 
   return (
@@ -459,7 +517,7 @@ function GpqaBenchmarkView({
                   type="button"
                   className="benchmark-action-button secondary"
                   disabled={running}
-                  onClick={onRefreshStatus}
+                  onClick={() => void handleRefreshStatus("Verifying hash")}
                 >
                   Verify hash
                 </button>
@@ -475,7 +533,7 @@ function GpqaBenchmarkView({
                   type="button"
                   className="benchmark-action-button secondary"
                   disabled={running}
-                  onClick={onRefreshStatus}
+                  onClick={() => void handleRefreshStatus("Refreshing status")}
                 >
                   Refresh
                 </button>
@@ -679,12 +737,16 @@ function HumanEvalBenchmarkView({
   status,
   config,
   running,
+  onBeginSetup,
+  onEndSetup,
   onConfigChange,
   onRunBenchmark,
 }: {
   status: HumanEvalStatus;
   config: GpqaBenchmarkConfigInput;
   running: boolean;
+  onBeginSetup: (message?: string | null) => void;
+  onEndSetup: () => void;
   onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onRunBenchmark: () => void;
 }) {
@@ -765,8 +827,9 @@ function HumanEvalBenchmarkView({
     };
   }, [activeTab, datasetStatus.datasetReady]);
 
-  const refreshStatus = async () => {
+  const refreshStatus = async (message = "Refreshing status") => {
     setBusy(true);
+    onBeginSetup(message);
     try {
       const [nextStatus, nextDatasetStatus] = await Promise.all([
         getHumanEvalStatus(),
@@ -779,11 +842,13 @@ function HumanEvalBenchmarkView({
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
       setBusy(false);
+      onEndSetup();
     }
   };
 
   const changeHarness = async () => {
     setBusy(true);
+    onBeginSetup(harnessInstalled ? "Deleting harness" : "Installing harness");
     try {
       setViewStatus(
         harnessInstalled ? await deleteHumanEvalHarness() : await installHumanEvalHarness(),
@@ -793,11 +858,13 @@ function HumanEvalBenchmarkView({
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
       setBusy(false);
+      onEndSetup();
     }
   };
 
   const changeDataset = async () => {
     setBusy(true);
+    onBeginSetup(datasetStatus.datasetReady ? "Deleting dataset" : "Downloading dataset");
     try {
       setDatasetStatus(
         datasetStatus.datasetReady
@@ -809,6 +876,7 @@ function HumanEvalBenchmarkView({
       setViewStatus((current) => ({ ...current, detail: (error as Error).message }));
     } finally {
       setBusy(false);
+      onEndSetup();
     }
   };
 
@@ -831,7 +899,7 @@ function HumanEvalBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy || (!datasetStatus.datasetReady && !harnessInstalled)}
+                  disabled={busy || running || (!datasetStatus.datasetReady && !harnessInstalled)}
                   onClick={changeDataset}
                 >
                   {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
@@ -839,15 +907,15 @@ function HumanEvalBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy}
-                  onClick={refreshStatus}
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Verifying hash")}
                 >
                   Verify hash
                 </button>
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy}
+                  disabled={busy || running}
                   onClick={changeHarness}
                 >
                   {harnessInstalled ? "Delete harness" : "Install harness"}
@@ -855,8 +923,8 @@ function HumanEvalBenchmarkView({
                 <button
                   type="button"
                   className="benchmark-action-button secondary"
-                  disabled={busy}
-                  onClick={refreshStatus}
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Refreshing status")}
                 >
                   Refresh
                 </button>
@@ -1036,6 +1104,348 @@ function HumanEvalBenchmarkView({
               <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetReady ? "Yes" : "No"} />
               <BenchmarkInfoRow label="Samples" value="164" />
               <BenchmarkInfoRow label="License" value="MIT" />
+              <BenchmarkInfoRow label="Official asset" value={datasetStatus.datasetUrl} />
+              <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
+              <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TerminalBenchView({
+  status,
+  datasetStatus,
+  running,
+  onInstallHarness,
+  onDownloadDataset,
+  onDeleteDataset,
+  onRefreshStatus,
+  onRunBenchmark,
+}: {
+  status: TerminalBenchStatus;
+  datasetStatus: TerminalBenchDatasetStatus;
+  running: boolean;
+  onInstallHarness: () => void;
+  onDownloadDataset: () => void;
+  onDeleteDataset: () => void;
+  onRefreshStatus: () => void;
+  onRunBenchmark: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<TerminalBenchTab>("details");
+  const [config, setConfig] = useState({
+    thinking: "off" as GpqaThinkingMode,
+    temperature: "0",
+    topK: "40",
+    repeatPenalty: "1.1",
+    presencePenalty: "0",
+    topP: "0.95",
+    minP: "0.05",
+    contextWindow: "20000",
+    samples: "",
+    runsPerTask: "1",
+    maxTurns: "1",
+  });
+  const [datasetRows, setDatasetRows] = useState<TerminalBenchDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
+  const updateIntegerField =
+    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+    };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+    };
+  const updatePresencePenalty = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.currentTarget.value;
+    if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+      setConfig((current) => ({ ...current, presencePenalty: value }));
+    }
+  };
+  const handleDatasetAction = () => {
+    if (datasetStatus.datasetReady) {
+      onDeleteDataset();
+      return;
+    }
+    onDownloadDataset();
+  };
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getTerminalBenchDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetStatus.datasetPath, datasetStatus.datasetReady]);
+
+  return (
+    <section className="benchmark-editor-surface">
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-title">
+              <h1>Terminal-Bench 2.1</h1>
+              <div className="benchmark-page-meta">
+                <span>Harbor</span>
+                <span>|</span>
+                <span>terminal-bench-2-1</span>
+                <span>|</span>
+                <span>terminal tasks</span>
+              </div>
+              <p>Official Terminal-Bench 2.1 evaluation shell for terminal task execution through Harbor.</p>
+              <div className="benchmark-page-actions">
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running || (!datasetStatus.datasetReady && !status.harborReady)}
+                  onClick={handleDatasetAction}
+                >
+                  {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running}
+                  onClick={onRefreshStatus}
+                >
+                  Verify hash
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running || status.harborReady}
+                  onClick={onInstallHarness}
+                >
+                  {status.harborReady ? "Delete harness" : "Install harness"}
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running}
+                  onClick={onRefreshStatus}
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={running || !status.ready || !datasetStatus.datasetReady}
+                  onClick={onRunBenchmark}
+                >
+                  Run Benchmark
+                </button>
+                <button type="button" className="benchmark-icon-button" aria-label="Terminal-Bench settings">
+                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="Terminal-Bench sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Harness</h2>
+                <p>
+                  Terminal-Bench 2.1 evaluates terminal task solving through Harbor. The first
+                  runnable version will use Harbor&apos;s Terminus agent against the app&apos;s
+                  in-process OpenAI-compatible chat API.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains terminal tasks that run inside isolated environments. Docker
+                  and Harbor support are required before this benchmark can run.
+                </p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                {!datasetStatus.datasetReady ? (
+                  <p>Download and verify the Terminal-Bench dataset to preview tasks.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset rows...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset rows found.</p>
+                ) : (
+                  <div
+                    className="benchmark-dataset-table terminal-bench-dataset-table"
+                    role="table"
+                    aria-label="Terminal-Bench dataset rows"
+                  >
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Task</span>
+                      <span role="columnheader">Instruction</span>
+                      <span role="columnheader">Path</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.path}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">{row.taskId || "Unavailable"}</span>
+                        <span role="cell">{row.instruction || "Unavailable"}</span>
+                        <span role="cell">{row.path || "Unavailable"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="Terminal-Bench thinking"
+                    value={config.thinking}
+                    onChange={(thinking) => setConfig((current) => ({ ...current, thinking }))}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="Terminal-Bench temperature"
+                    value={config.temperature}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("temperature")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="Terminal-Bench top K sampling"
+                    value={config.topK}
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("topK")}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="Terminal-Bench repeat penalty"
+                    value={config.repeatPenalty}
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("repeatPenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="Terminal-Bench presence penalty"
+                    value={config.presencePenalty}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updatePresencePenalty}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="Terminal-Bench top P sampling"
+                    value={config.topP}
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("topP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="Terminal-Bench min P sampling"
+                    value={config.minP}
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("minP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="Terminal-Bench context window"
+                    value={config.contextWindow}
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("contextWindow")}
+                  />
+                  <BenchmarkInputRow
+                    label="Samples"
+                    inputLabel="Terminal-Bench samples"
+                    value={config.samples}
+                    placeholder="All"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("samples")}
+                  />
+                  <BenchmarkInputRow
+                    label="Runs per task"
+                    inputLabel="Terminal-Bench runs per task"
+                    value={config.runsPerTask}
+                    placeholder="1"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("runsPerTask")}
+                  />
+                  <BenchmarkInputRow
+                    label="Max turns"
+                    inputLabel="Terminal-Bench max turns"
+                    value={config.maxTurns}
+                    placeholder="1"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("maxTurns")}
+                  />
+                </BenchmarkInfoSection>
+              </div>
+            )}
+          </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">{status.detail}</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="Harbor" />
+              <BenchmarkInfoRow label="Dataset" value="terminal-bench-2-1" />
+              <BenchmarkInfoRow label="Metric" value="pass@1" />
+              <BenchmarkInfoRow label="Status" value={status.statusLabel} />
+              <BenchmarkInfoRow label="Agent" value="terminus-2" />
+              <BenchmarkInfoRow label="Harbor" value={status.harborReady ? status.harbor ?? "Ready" : "Unavailable"} />
+              <BenchmarkInfoRow label="Docker" value={status.dockerReady ? status.docker ?? "Ready" : "Unavailable"} />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="Terminal-Bench Dataset">
+              <BenchmarkInfoRow label="Downloaded" value={datasetStatus.datasetPath ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetReady ? "Yes" : "No"} />
               <BenchmarkInfoRow label="Official asset" value={datasetStatus.datasetUrl} />
               <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
               <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />

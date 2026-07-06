@@ -13,12 +13,15 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchDatasetStatus,
+  TerminalBenchStatus,
   TensorInfo,
 } from "../../types";
 import { ActivityBar, type ActivityId } from "./ActivityBar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
 import type { EditorTab } from "./editorTabModel";
+import { StatusBar } from "./StatusBar";
 import { TestingPanel } from "./TestingPanel";
 
 const EXPLORER_DEFAULT_WIDTH = 365;
@@ -41,6 +44,7 @@ interface WorkbenchShellProps {
   expandedLayers: Set<number>;
   running: boolean;
   cancelling: boolean;
+  statusMessage: string | null;
   progress: ProgressEvent | null;
   outputLines: BenchmarkOutputLine[];
   apiOutputLines: BenchmarkOutputLine[];
@@ -49,6 +53,8 @@ interface WorkbenchShellProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  terminalBenchStatus: TerminalBenchStatus;
+  terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
@@ -70,11 +76,21 @@ interface WorkbenchShellProps {
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
-  onRefreshGpqaStatus: () => void;
+  onDeleteGpqaDataset: () => void;
+  onDeleteGpqaHarness: () => void;
+  onRefreshGpqaStatus: () => Promise<void>;
+  onBeginBenchmarkSetup: (message?: string | null) => void;
+  onEndBenchmarkSetup: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
+  onOpenTerminalBenchDetails: () => void;
+  onInstallTerminalBenchHarness: () => void;
+  onDownloadTerminalBenchDataset: () => void;
+  onDeleteTerminalBenchDataset: () => void;
+  onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -96,6 +112,7 @@ export function WorkbenchShell({
   expandedLayers,
   running,
   cancelling,
+  statusMessage,
   progress,
   outputLines,
   apiOutputLines,
@@ -104,6 +121,8 @@ export function WorkbenchShell({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  terminalBenchStatus,
+  terminalBenchDatasetStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
@@ -125,11 +144,21 @@ export function WorkbenchShell({
   onHumanEvalConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
+  onDeleteGpqaDataset,
+  onDeleteGpqaHarness,
   onRefreshGpqaStatus,
+  onBeginBenchmarkSetup,
+  onEndBenchmarkSetup,
   onOpenGpqaDetails,
   onOpenGpqaDataset,
   onOpenHumanEvalDetails,
+  onOpenTerminalBenchDetails,
+  onInstallTerminalBenchHarness,
+  onDownloadTerminalBenchDataset,
+  onDeleteTerminalBenchDataset,
+  onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -145,6 +174,7 @@ export function WorkbenchShell({
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
+  const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
 
   useEffect(() => {
     if (modelExplorerFocusVersion === 0) return;
@@ -255,13 +285,16 @@ export function WorkbenchShell({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
+          terminalBenchEditorActive={terminalBenchEditorActive}
           onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
           onOpenHumanEvalDetails={onOpenHumanEvalDetails}
+          onOpenTerminalBenchDetails={onOpenTerminalBenchDetails}
         />
       ) : (
         <ExplorerPanel
@@ -313,7 +346,7 @@ export function WorkbenchShell({
           setExplorerWidth(nextWidth);
         }}
       />
-        <EditorPane
+      <EditorPane
         modelPath={modelPath}
         hasModel={tensors.length > 0}
         running={running}
@@ -331,12 +364,18 @@ export function WorkbenchShell({
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
         humanevalStatus={humanevalStatus}
+        terminalBenchStatus={terminalBenchStatus}
+        terminalBenchDatasetStatus={terminalBenchDatasetStatus}
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
         humanevalConfig={humanevalConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
+        onDeleteGpqaDataset={onDeleteGpqaDataset}
+        onDeleteGpqaHarness={onDeleteGpqaHarness}
         onRefreshGpqaStatus={onRefreshGpqaStatus}
+        onBeginBenchmarkSetup={onBeginBenchmarkSetup}
+        onEndBenchmarkSetup={onEndBenchmarkSetup}
         onSelectEditor={onSelectEditor}
         onCloseEditor={onCloseEditor}
         onReorderEditor={onReorderEditor}
@@ -348,12 +387,24 @@ export function WorkbenchShell({
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
         onHumanEvalConfigChange={onHumanEvalConfigChange}
+        onInstallTerminalBenchHarness={onInstallTerminalBenchHarness}
+        onDownloadTerminalBenchDataset={onDownloadTerminalBenchDataset}
+        onDeleteTerminalBenchDataset={onDeleteTerminalBenchDataset}
+        onRefreshTerminalBenchStatus={onRefreshTerminalBenchStatus}
         onRunHumanEvalBenchmark={onRunHumanEvalBenchmark}
+        onRunTerminalBenchBenchmark={onRunTerminalBenchBenchmark}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}
         onExport={onExport}
         onDiscardResults={onDiscardResults}
+      />
+      <StatusBar
+        running={running}
+        cancelling={cancelling}
+        statusMessage={statusMessage}
+        progress={progress}
+        selectedRunIds={selectedRunIds}
       />
     </div>
   );

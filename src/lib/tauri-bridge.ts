@@ -17,6 +17,9 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  TerminalBenchDatasetRow,
+  TerminalBenchDatasetStatus,
+  TerminalBenchStatus,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -123,8 +126,16 @@ export async function getHumanEvalStatus(): Promise<HumanEvalStatus> {
   return invoke<HumanEvalStatus>("get_humaneval_status");
 }
 
+export async function getTerminalBenchStatus(): Promise<TerminalBenchStatus> {
+  return invoke<TerminalBenchStatus>("get_terminal_bench_status");
+}
+
 export async function getHumanEvalDatasetStatus(): Promise<HumanEvalDatasetStatus> {
   return invoke<HumanEvalDatasetStatus>("get_humaneval_dataset_status");
+}
+
+export async function getTerminalBenchDatasetStatus(): Promise<TerminalBenchDatasetStatus> {
+  return invoke<TerminalBenchDatasetStatus>("get_terminal_bench_dataset_status");
 }
 
 export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {
@@ -133,6 +144,10 @@ export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {
 
 export async function getHumanEvalDatasetRows(): Promise<HumanEvalDatasetRow[]> {
   return invoke<HumanEvalDatasetRow[]>("get_humaneval_dataset_rows");
+}
+
+export async function getTerminalBenchDatasetRows(): Promise<TerminalBenchDatasetRow[]> {
+  return invoke<TerminalBenchDatasetRow[]>("get_terminal_bench_dataset_rows");
 }
 
 export async function installGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
@@ -151,12 +166,20 @@ export async function downloadHumanEvalDataset(): Promise<HumanEvalDatasetStatus
   return invoke<HumanEvalDatasetStatus>("download_humaneval_dataset");
 }
 
+export async function downloadTerminalBenchDataset(): Promise<TerminalBenchDatasetStatus> {
+  return invoke<TerminalBenchDatasetStatus>("download_terminal_bench_dataset");
+}
+
 export async function deleteGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
   return invoke<GpqaDiamondStatus>("delete_gpqa_diamond_dataset");
 }
 
 export async function deleteHumanEvalDataset(): Promise<HumanEvalDatasetStatus> {
   return invoke<HumanEvalDatasetStatus>("delete_humaneval_dataset");
+}
+
+export async function deleteTerminalBenchDataset(): Promise<TerminalBenchDatasetStatus> {
+  return invoke<TerminalBenchDatasetStatus>("delete_terminal_bench_dataset");
 }
 
 export async function deleteGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {
@@ -194,6 +217,18 @@ export async function runHumanEvalBenchmark(
     apiKey,
     modelId,
     config,
+  });
+}
+
+export async function runTerminalBenchBenchmark(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+): Promise<BenchmarkResult> {
+  return invoke<BenchmarkResult>("run_terminal_bench_benchmark", {
+    baseUrl,
+    apiKey,
+    modelId,
   });
 }
 

@@ -24,6 +24,8 @@ const GPQA_DATASET_MARKER_VERSION: u32 = 1;
 const HUMANEVAL_SAMPLE_COUNT: u64 = 164;
 const HUMANEVAL_DATASET_ID: &str = "opencompass/humaneval";
 const HUMANEVAL_DATASET_MARKER_VERSION: u32 = 1;
+const TERMINAL_BENCH_DATASET_ID: &str = "terminal-bench/terminal-bench-2-1";
+const TERMINAL_BENCH_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
 const GPQA_DEFAULT_CONTEXT_WINDOW: u32 = 20_000;
 const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
@@ -61,7 +63,30 @@ pub struct HumanEvalStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TerminalBenchStatus {
+    pub ready: bool,
+    pub status_label: String,
+    pub harbor_ready: bool,
+    pub harbor: Option<String>,
+    pub docker_ready: bool,
+    pub docker: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HumanEvalDatasetStatus {
+    pub dataset_ready: bool,
+    pub dataset_status_label: String,
+    pub dataset_path: Option<String>,
+    pub dataset_hash: Option<String>,
+    pub dataset_url: String,
+    pub expected_dataset_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalBenchDatasetStatus {
     pub dataset_ready: bool,
     pub dataset_status_label: String,
     pub dataset_path: Option<String>,
@@ -87,6 +112,15 @@ pub struct HumanEvalDatasetRow {
     pub entry_point: String,
     pub prompt: String,
     pub canonical_solution: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalBenchDatasetRow {
+    pub index: usize,
+    pub task_id: String,
+    pub instruction: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -304,6 +338,13 @@ pub async fn get_humaneval_status(app: tauri::AppHandle) -> Result<HumanEvalStat
 }
 
 #[tauri::command]
+pub async fn get_terminal_bench_status() -> Result<TerminalBenchStatus, String> {
+    tauri::async_runtime::spawn_blocking(detect_terminal_bench_status)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_humaneval_dataset_status(
     app: tauri::AppHandle,
 ) -> Result<HumanEvalDatasetStatus, String> {
@@ -312,6 +353,17 @@ pub async fn get_humaneval_dataset_status(
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
     Ok(detect_humaneval_dataset_status(&app_data_dir))
+}
+
+#[tauri::command]
+pub async fn get_terminal_bench_dataset_status(
+    app: tauri::AppHandle,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    Ok(detect_terminal_bench_dataset_status(&app_data_dir))
 }
 
 #[tauri::command]
@@ -384,6 +436,23 @@ pub async fn download_humaneval_dataset(
 }
 
 #[tauri::command]
+pub async fn download_terminal_bench_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        download_terminal_bench_dataset_blocking(app_data_dir, app, child)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn delete_gpqa_diamond_dataset(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -416,6 +485,25 @@ pub async fn delete_humaneval_dataset(
         ensure_official_benchmark_idle(&child)?;
         remove_path_if_exists(&humaneval_dataset_cache_root(&app_data_dir))?;
         Ok(detect_humaneval_dataset_status(&app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_terminal_bench_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&terminal_bench_dataset_cache_root(&app_data_dir))?;
+        Ok(detect_terminal_bench_dataset_status(&app_data_dir))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -496,6 +584,19 @@ pub async fn get_humaneval_dataset_rows(
 }
 
 #[tauri::command]
+pub async fn get_terminal_bench_dataset_rows(
+    app: tauri::AppHandle,
+) -> Result<Vec<TerminalBenchDatasetRow>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || read_terminal_bench_dataset_rows(&app_data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn run_gpqa_diamond_benchmark(
     base_url: String,
     api_key: String,
@@ -548,6 +649,44 @@ pub async fn run_humaneval_benchmark(
             api_key,
             model_id,
             config,
+            tensor_summary,
+            model_summary,
+            runtime_totals,
+            app,
+            child,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn run_terminal_bench_benchmark(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    app: tauri::AppHandle,
+    api_state: State<'_, ModelInspectorApiState>,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<BenchmarkResult, String> {
+    if base_url.trim().is_empty() || api_key.trim().is_empty() || model_id.trim().is_empty() {
+        return Err("ModelInspector API did not return a usable benchmark endpoint.".to_string());
+    }
+    let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
+    let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        run_terminal_bench_smoke_blocking(
+            base_url,
+            api_key,
+            model_id,
+            app_data_dir,
             tensor_summary,
             model_summary,
             runtime_totals,
@@ -673,6 +812,11 @@ fn detect_humaneval_status(app_data_dir: PathBuf) -> HumanEvalStatus {
             detail: if docker_ready { error } else { docker_detail },
         },
     }
+}
+
+fn detect_terminal_bench_status() -> TerminalBenchStatus {
+    let (docker_ready, docker, docker_detail) = detect_docker_status();
+    classify_terminal_bench_status(run_harbor_probe(), docker_ready, docker, docker_detail)
 }
 
 fn install_gpqa_diamond_harness_blocking(
@@ -963,6 +1107,59 @@ print("humaneval_samples=" + str(sample_count))
         "HumanEval dataset downloaded and verified.",
     );
     Ok(detect_humaneval_dataset_status(&app_data_dir))
+}
+
+fn download_terminal_bench_dataset_blocking(
+    app_data_dir: PathBuf,
+    app: tauri::AppHandle,
+    child_slot: Arc<Mutex<Option<Child>>>,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let status = detect_terminal_bench_status();
+    if !status.harbor_ready {
+        return Err(format!(
+            "Terminal-Bench needs Harbor before downloading the dataset. {}",
+            status.detail
+        ));
+    }
+
+    let progress = crate::progress::ProgressEmitter::new(app);
+    let dataset_root = terminal_bench_dataset_cache_root(&app_data_dir);
+    std::fs::create_dir_all(&dataset_root).map_err(|e| e.to_string())?;
+    progress.emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.2,
+        "Downloading Terminal-Bench dataset...",
+    );
+    run_managed_child(
+        "uvx",
+        vec![
+            "--from".to_string(),
+            "harbor".to_string(),
+            "harbor".to_string(),
+            "download".to_string(),
+            TERMINAL_BENCH_DATASET_ID.to_string(),
+            "--output-dir".to_string(),
+            dataset_root.to_string_lossy().to_string(),
+            "--overwrite".to_string(),
+        ],
+        &child_slot,
+    )?;
+    let marker = json!({
+        "version": TERMINAL_BENCH_DATASET_MARKER_VERSION,
+        "dataset": "terminal-bench-2-1",
+        "source": TERMINAL_BENCH_DATASET_ID,
+    });
+    std::fs::write(
+        terminal_bench_dataset_marker_path(&app_data_dir),
+        serde_json::to_string_pretty(&marker).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    progress.emit(
+        crate::progress::ProgressStage::Benchmarking,
+        1.0,
+        "Terminal-Bench dataset downloaded and verified.",
+    );
+    Ok(detect_terminal_bench_dataset_status(&app_data_dir))
 }
 
 fn run_gpqa_diamond_blocking(
@@ -1459,6 +1656,14 @@ fn humaneval_dataset_rows_path(app_data_dir: &Path) -> PathBuf {
     humaneval_dataset_cache_root(app_data_dir).join("humaneval_rows.json")
 }
 
+fn terminal_bench_dataset_cache_root(app_data_dir: &Path) -> PathBuf {
+    gpqa_dataset_cache_root(app_data_dir).join("terminal-bench-2-1")
+}
+
+fn terminal_bench_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
+    terminal_bench_dataset_cache_root(app_data_dir).join("terminal_bench_dataset_ready.json")
+}
+
 fn gpqa_run_dir(app_data_dir: &Path) -> PathBuf {
     gpqa_env_dir(app_data_dir).join("runs")
 }
@@ -1707,6 +1912,26 @@ fn detect_docker_status() -> (bool, Option<String>, String) {
     }
 }
 
+fn run_harbor_probe() -> Result<String, String> {
+    let mut command = Command::new("uvx");
+    hide_child_console(&mut command);
+    let output = command
+        .args(["--from", "harbor", "harbor", "--help"])
+        .output()
+        .map_err(|e| format!("Harbor was not found or could not be started with uvx: {e}"))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "Harbor probe failed.".to_string()
+        } else {
+            stderr
+        })
+    }
+}
+
 fn sandbox_container_ids() -> Result<BTreeSet<String>, String> {
     let mut command = Command::new("docker");
     hide_child_console(&mut command);
@@ -1906,6 +2131,46 @@ fn classify_humaneval_status(
     }
 }
 
+fn classify_terminal_bench_status(
+    harbor_probe: Result<String, String>,
+    docker_ready: bool,
+    docker: Option<String>,
+    docker_detail: String,
+) -> TerminalBenchStatus {
+    let (harbor_ready, harbor, harbor_detail) = match harbor_probe {
+        Ok(_) => (
+            true,
+            Some("uvx harbor".to_string()),
+            "Harbor is available through uvx.".to_string(),
+        ),
+        Err(error) => (false, None, error),
+    };
+    let ready = harbor_ready && docker_ready;
+
+    TerminalBenchStatus {
+        ready,
+        status_label: if !harbor_ready {
+            "Needs Harbor"
+        } else if !docker_ready {
+            "Needs Docker"
+        } else {
+            "Ready"
+        }
+        .to_string(),
+        harbor_ready,
+        harbor,
+        docker_ready,
+        docker,
+        detail: if ready {
+            "Harbor and Docker daemon are verified for Terminal-Bench.".to_string()
+        } else if !harbor_ready {
+            harbor_detail
+        } else {
+            docker_detail
+        },
+    }
+}
+
 fn detect_humaneval_dataset_status(app_data_dir: &Path) -> HumanEvalDatasetStatus {
     let state = detect_humaneval_dataset_state(app_data_dir);
     HumanEvalDatasetStatus {
@@ -1915,6 +2180,53 @@ fn detect_humaneval_dataset_status(app_data_dir: &Path) -> HumanEvalDatasetStatu
         dataset_hash: dataset_hash_string(&state),
         dataset_url: HUMANEVAL_DATASET_ID.to_string(),
         expected_dataset_hash: "EvalScope dataset cache marker".to_string(),
+    }
+}
+
+fn detect_terminal_bench_dataset_status(app_data_dir: &Path) -> TerminalBenchDatasetStatus {
+    let state = detect_terminal_bench_dataset_state(app_data_dir);
+    TerminalBenchDatasetStatus {
+        dataset_ready: matches!(state, GpqaDatasetState::Verified { .. }),
+        dataset_status_label: dataset_status_label(&state).to_string(),
+        dataset_path: dataset_path_string(&state),
+        dataset_hash: dataset_hash_string(&state),
+        dataset_url: TERMINAL_BENCH_DATASET_ID.to_string(),
+        expected_dataset_hash: "Harbor dataset cache marker".to_string(),
+    }
+}
+
+fn detect_terminal_bench_dataset_state(app_data_dir: &Path) -> GpqaDatasetState {
+    let path = terminal_bench_dataset_marker_path(app_data_dir);
+    if !path.exists() {
+        return GpqaDatasetState::Missing;
+    }
+
+    match std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
+        }) {
+        Ok(marker)
+            if marker.get("version").and_then(|value| value.as_u64())
+                == Some(TERMINAL_BENCH_DATASET_MARKER_VERSION as u64)
+                && marker.get("dataset").and_then(|value| value.as_str())
+                    == Some("terminal-bench-2-1") =>
+        {
+            GpqaDatasetState::Verified {
+                path,
+                hash: format!("marker-v{TERMINAL_BENCH_DATASET_MARKER_VERSION}"),
+            }
+        }
+        Ok(_) => GpqaDatasetState::Invalid {
+            path,
+            hash: None,
+            detail: "Terminal-Bench Harbor dataset marker is invalid.".to_string(),
+        },
+        Err(error) => GpqaDatasetState::Invalid {
+            path,
+            hash: None,
+            detail: format!("Failed to read Terminal-Bench dataset marker: {error}"),
+        },
     }
 }
 
@@ -2115,6 +2427,389 @@ fn humaneval_dataset_row_from_json(index: usize, row: &serde_json::Value) -> Hum
     }
 }
 
+fn read_terminal_bench_dataset_rows(
+    app_data_dir: &Path,
+) -> Result<Vec<TerminalBenchDatasetRow>, String> {
+    if !matches!(
+        detect_terminal_bench_dataset_state(app_data_dir),
+        GpqaDatasetState::Verified { .. }
+    ) {
+        return Err("Terminal-Bench dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let root = terminal_bench_dataset_cache_root(app_data_dir);
+    let task_root = root.join("terminal-bench-2-1");
+    let mut task_dirs = std::fs::read_dir(&task_root)
+        .map_err(|e| format!("Failed to read Terminal-Bench dataset directory: {e}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("instruction.md").exists())
+        .collect::<Vec<_>>();
+    task_dirs.sort();
+
+    task_dirs
+        .iter()
+        .enumerate()
+        .map(|(index, path)| terminal_bench_dataset_row_from_task_dir(index + 1, path, &root))
+        .collect()
+}
+
+fn terminal_bench_dataset_row_from_task_dir(
+    index: usize,
+    task_dir: &Path,
+    dataset_root: &Path,
+) -> Result<TerminalBenchDatasetRow, String> {
+    let task_id = task_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let instruction = std::fs::read_to_string(task_dir.join("instruction.md"))
+        .map_err(|e| format!("Failed to read Terminal-Bench task instruction: {e}"))?
+        .trim()
+        .to_string();
+    let path = task_dir
+        .strip_prefix(dataset_root)
+        .unwrap_or(task_dir)
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("\\");
+
+    Ok(TerminalBenchDatasetRow {
+        index,
+        task_id,
+        instruction,
+        path,
+    })
+}
+
+fn run_terminal_bench_smoke_blocking(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    app_data_dir: PathBuf,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
+    app: tauri::AppHandle,
+    child_slot: Arc<Mutex<Option<Child>>>,
+) -> Result<BenchmarkResult, String> {
+    let status = detect_terminal_bench_status();
+    if !status.ready {
+        return Err(format!(
+            "Terminal-Bench is not ready. Current status: {}. {}",
+            status.status_label, status.detail
+        ));
+    }
+    let dataset_status = detect_terminal_bench_dataset_status(&app_data_dir);
+    if !dataset_status.dataset_ready {
+        return Err("Terminal-Bench dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let task_dir = terminal_bench_first_task_dir(&app_data_dir)?;
+    let task_name = task_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("terminal-bench-task")
+        .to_string();
+    let run_dir = gpqa_run_dir(&app_data_dir).join(format!("terminal-bench-{}", unix_millis()));
+    std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
+
+    let mut command = Command::new("uvx");
+    hide_child_console(&mut command);
+    command
+        .args(terminal_bench_harbor_smoke_args(
+            &task_dir, &run_dir, &base_url, &api_key, &model_id,
+        ))
+        .env("OPENAI_API_KEY", api_key)
+        .env("OPENAI_BASE_URL", base_url)
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("Harbor: starting Terminal-Bench 2.1 smoke task {task_name}"),
+    );
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("Harbor: work directory {}", run_dir.display()),
+    );
+    crate::progress::ProgressEmitter::new(app.clone()).emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.05,
+        "Terminal-Bench running",
+    );
+
+    {
+        let guard = child_slot.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            return Err("An official benchmark is already running.".to_string());
+        }
+    }
+
+    let start = Instant::now();
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to start Terminal-Bench Harbor run: {e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    {
+        let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            let _ = child.kill();
+            return Err("An official benchmark is already running.".to_string());
+        }
+        *guard = Some(child);
+    }
+
+    let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("Harbor stdout"));
+    let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("Harbor stderr"));
+    let status = loop {
+        {
+            let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+            let child = guard
+                .as_mut()
+                .ok_or("Official benchmark process was not available.")?;
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                break status;
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    {
+        let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+        let _ = guard.take();
+    }
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+    let output = format!("{stdout}\n{stderr}");
+    if !status.success() {
+        if output.to_lowercase().contains("cancel") {
+            crate::progress::emit_benchmark_output(
+                &app,
+                "Harbor: Terminal-Bench 2.1 smoke run cancelled",
+            );
+            return Err("Terminal-Bench benchmark cancelled".to_string());
+        }
+        crate::progress::emit_benchmark_output(
+            &app,
+            format!("Harbor: Terminal-Bench 2.1 smoke run failed with status {status}"),
+        );
+        return Err(format!(
+            "Terminal-Bench Harbor run failed with status {status}: {}",
+            output.trim()
+        ));
+    }
+
+    let (metric, sample_count, score) =
+        parse_terminal_bench_harbor_score(&output).ok_or_else(|| {
+            format!(
+                "Harbor finished but did not print a Terminal-Bench score table. Output directory: {}",
+                run_dir.display()
+            )
+        })?;
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("Harbor: Terminal-Bench 2.1 score {metric}={score:.3}"),
+    );
+    crate::progress::emit_benchmark_output(&app, "Harbor: Terminal-Bench 2.1 smoke run finished");
+
+    Ok(terminal_bench_result_from_harbor_score(
+        &model_id,
+        &task_name,
+        &run_dir,
+        metric,
+        sample_count,
+        score,
+        start.elapsed().as_millis() as f64,
+        tensor_summary,
+        model_summary,
+        runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
+    ))
+}
+
+fn terminal_bench_first_task_dir(app_data_dir: &Path) -> Result<PathBuf, String> {
+    let task_root = terminal_bench_dataset_cache_root(app_data_dir).join("terminal-bench-2-1");
+    let mut task_dirs = std::fs::read_dir(&task_root)
+        .map_err(|e| format!("Failed to read Terminal-Bench dataset directory: {e}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("instruction.md").exists())
+        .collect::<Vec<_>>();
+    task_dirs.sort();
+    task_dirs
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Terminal-Bench dataset contains no runnable task folders.".to_string())
+}
+
+fn terminal_bench_harbor_smoke_args(
+    task_dir: &Path,
+    jobs_dir: &Path,
+    base_url: &str,
+    _api_key: &str,
+    model_id: &str,
+) -> Vec<String> {
+    vec![
+        "--from".to_string(),
+        "harbor".to_string(),
+        "harbor".to_string(),
+        "run".to_string(),
+        "--path".to_string(),
+        task_dir.to_string_lossy().to_string(),
+        "--jobs-dir".to_string(),
+        jobs_dir.to_string_lossy().to_string(),
+        "--job-name".to_string(),
+        "modelinspector-terminal-bench-smoke".to_string(),
+        "--agent".to_string(),
+        "terminus-2".to_string(),
+        "--model".to_string(),
+        terminal_bench_litellm_model_name(model_id),
+        "--ak".to_string(),
+        format!("api_base={base_url}"),
+        "--ak".to_string(),
+        "temperature=0".to_string(),
+        "--n-tasks".to_string(),
+        "1".to_string(),
+        "--n-concurrent".to_string(),
+        "1".to_string(),
+        "--n-attempts".to_string(),
+        "1".to_string(),
+        "--max-retries".to_string(),
+        "0".to_string(),
+        "--yes".to_string(),
+        "--delete".to_string(),
+    ]
+}
+
+fn terminal_bench_litellm_model_name(model_id: &str) -> String {
+    if model_id.starts_with("openai/") {
+        model_id.to_string()
+    } else {
+        format!("openai/{model_id}")
+    }
+}
+
+fn parse_terminal_bench_harbor_score(output: &str) -> Option<(String, u64, f64)> {
+    const HARBOR_TABLE_SEPARATOR: char = '\u{2502}';
+    let mut header: Option<(usize, usize)> = None;
+    for line in output.lines() {
+        if !line.contains(HARBOR_TABLE_SEPARATOR) {
+            continue;
+        }
+        let cells = line
+            .split(HARBOR_TABLE_SEPARATOR)
+            .map(str::trim)
+            .filter(|cell| !cell.is_empty())
+            .collect::<Vec<_>>();
+        if let (Some(trials_index), Some(mean_index)) = (
+            cells.iter().position(|cell| *cell == "Trials"),
+            cells.iter().position(|cell| *cell == "Mean"),
+        ) {
+            if cells.iter().any(|cell| *cell == "Exceptions") {
+                header = Some((trials_index, mean_index));
+            }
+            continue;
+        }
+        let Some((trials_index, mean_index)) = header else {
+            continue;
+        };
+        let Some(trials) = cells.get(trials_index) else {
+            continue;
+        };
+        let Some(mean) = cells.get(mean_index) else {
+            continue;
+        };
+        let Ok(sample_count) = trials.parse::<u64>() else {
+            continue;
+        };
+        let Ok(score) = mean.parse::<f64>() else {
+            continue;
+        };
+        return Some(("mean".to_string(), sample_count, score));
+    }
+    None
+}
+
+fn terminal_bench_result_from_harbor_score(
+    model_id: &str,
+    task_name: &str,
+    run_dir: &Path,
+    metric: String,
+    sample_count: u64,
+    score: f64,
+    elapsed_ms: f64,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_summary: ModelInspectorApiRuntimeSummary,
+) -> BenchmarkResult {
+    BenchmarkResult {
+        prompt_eval_tps: runtime_summary.prompt_eval_tps,
+        token_gen_tps: runtime_summary.token_gen_tps,
+        ttft_ms: runtime_summary.ttft_ms,
+        prompt_eval_ms: runtime_summary.prompt_eval_ms,
+        generation_ms: runtime_summary.generation_ms,
+        vram_peak_mb: runtime_summary.vram_peak_mb,
+        vram_allocated_mb: runtime_summary.vram_allocated_mb,
+        disk_size_mb: 0.0,
+        elapsed_ms,
+        load_ms: runtime_summary.load_ms,
+        test_mode: "official_terminal_bench".to_string(),
+        status_message: format!("Terminal-Bench 2.1 Harbor smoke run completed for {model_id}."),
+        native_runtime: Some(format!(
+            "Harbor Terminal-Bench output directory: {}",
+            run_dir.display()
+        )),
+        model_tensor_count: Some(model_summary.tensor_count),
+        model_metadata_count: Some(model_summary.metadata_count),
+        copied_tensor_count: tensor_summary.copied_tensor_count,
+        converted_tensor_count: tensor_summary.converted_tensor_count,
+        converted_bytes_before: tensor_summary.converted_bytes_before,
+        converted_bytes_after: tensor_summary.converted_bytes_after,
+        requested_target_count: tensor_summary.requested_target_count,
+        verified_target_count: tensor_summary.verified_target_count,
+        baseline_benchmark: None,
+        quality_eval: None,
+        standard_eval: Some(StandardEvalReport {
+            sample_count,
+            task_count: 1,
+            baseline_accuracy: None,
+            recipe_accuracy: score,
+            accuracy_delta: None,
+            correct_to_wrong_count: 0,
+            wrong_to_correct_count: 0,
+            baseline_avg_margin: None,
+            recipe_avg_margin: 0.0,
+            margin_delta: None,
+            tasks: vec![StandardEvalTaskReport {
+                task: task_name.to_string(),
+                metric,
+                n_shot: 0,
+                sample_count,
+                baseline_correct_count: None,
+                recipe_correct_count: (score * sample_count as f64).round() as u64,
+                correct_to_wrong_count: 0,
+                wrong_to_correct_count: 0,
+                same_prediction_count: 0,
+                baseline_accuracy: None,
+                recipe_accuracy: score,
+                accuracy_delta: None,
+                baseline_avg_margin: None,
+                recipe_avg_margin: 0.0,
+                margin_delta: None,
+                baseline_avg_correct_nll: None,
+                recipe_avg_correct_nll: 0.0,
+            }],
+            sample_audits: Vec::new(),
+        }),
+    }
+}
+
 fn gpqa_question_from_input(row: &serde_json::Value) -> Option<String> {
     let content = row
         .get("input")?
@@ -2311,7 +3006,8 @@ fn humaneval_result_from_report(
     let report_json: serde_json::Value = serde_json::from_str(&report_text)
         .map_err(|e| format!("Failed to parse EvalScope HumanEval report JSON: {e}"))?;
     let pass_at_1 = extract_humaneval_pass_at_1(&report_json).unwrap_or(0.0);
-    let sample_count = extract_sample_count_from_json(&report_json).unwrap_or(HUMANEVAL_SAMPLE_COUNT);
+    let sample_count =
+        extract_sample_count_from_json(&report_json).unwrap_or(HUMANEVAL_SAMPLE_COUNT);
     Ok(BenchmarkResult {
         prompt_eval_tps: runtime_summary.prompt_eval_tps,
         token_gen_tps: runtime_summary.token_gen_tps,
@@ -2325,7 +3021,10 @@ fn humaneval_result_from_report(
         load_ms: runtime_summary.load_ms,
         test_mode: "official_humaneval".to_string(),
         status_message: format!("HumanEval EvalScope official harness completed for {model_id}."),
-        native_runtime: Some(format!("EvalScope HumanEval report: {}", report_path.display())),
+        native_runtime: Some(format!(
+            "EvalScope HumanEval report: {}",
+            report_path.display()
+        )),
         model_tensor_count: Some(model_summary.tensor_count),
         model_metadata_count: Some(model_summary.metadata_count),
         copied_tensor_count: tensor_summary.copied_tensor_count,
@@ -2559,6 +3258,37 @@ mod tests {
     }
 
     #[test]
+    fn classifies_terminal_bench_ready_when_harbor_and_docker_are_available() {
+        let status = classify_terminal_bench_status(
+            Ok("Harbor".to_string()),
+            true,
+            Some("29.1.3".to_string()),
+            "Docker daemon is available.".to_string(),
+        );
+
+        assert!(status.ready);
+        assert_eq!(status.status_label, "Ready");
+        assert!(status.harbor_ready);
+        assert!(status.docker_ready);
+        assert_eq!(status.docker.as_deref(), Some("29.1.3"));
+    }
+
+    #[test]
+    fn classifies_terminal_bench_as_needing_harbor_when_probe_fails() {
+        let status = classify_terminal_bench_status(
+            Err("uvx failed".to_string()),
+            true,
+            Some("29.1.3".to_string()),
+            "Docker daemon is available.".to_string(),
+        );
+
+        assert!(!status.ready);
+        assert_eq!(status.status_label, "Needs Harbor");
+        assert!(!status.harbor_ready);
+        assert!(status.detail.contains("uvx failed"));
+    }
+
+    #[test]
     fn reports_install_when_system_python_exists_but_managed_env_is_missing() {
         let status = managed_env_status(false, true, None, GpqaDatasetState::Missing);
 
@@ -2654,6 +3384,77 @@ mod tests {
         assert_eq!(row.entry_point, "increment");
         assert!(row.prompt.starts_with("def increment"));
         assert_eq!(row.canonical_solution, "    return value + 1");
+    }
+
+    #[test]
+    fn parses_terminal_bench_task_folder_for_preview() {
+        let root = std::env::temp_dir().join(format!("terminal-bench-row-test-{}", unix_millis()));
+        let task_dir = root.join("terminal-bench-2-1").join("hello-terminal");
+        std::fs::create_dir_all(&task_dir).unwrap();
+        std::fs::write(task_dir.join("instruction.md"), "Do the terminal task.\n").unwrap();
+
+        let row = terminal_bench_dataset_row_from_task_dir(2, &task_dir, &root).unwrap();
+
+        assert_eq!(row.index, 2);
+        assert_eq!(row.task_id, "hello-terminal");
+        assert_eq!(row.instruction, "Do the terminal task.");
+        assert_eq!(row.path, "terminal-bench-2-1\\hello-terminal");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn builds_terminal_bench_harbor_smoke_args() {
+        let task = PathBuf::from(r"C:\tasks\adaptive-rejection-sampler");
+        let jobs = PathBuf::from(r"C:\runs\terminal-bench-smoke");
+        let args = terminal_bench_harbor_smoke_args(
+            &task,
+            &jobs,
+            "http://127.0.0.1:1234/v1",
+            "local-key",
+            "demo.gguf",
+        );
+
+        assert!(args.contains(&"--path".to_string()));
+        assert!(args.contains(&task.to_string_lossy().to_string()));
+        assert!(args.contains(&"--agent".to_string()));
+        assert!(args.contains(&"terminus-2".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"openai/demo.gguf".to_string()));
+        assert!(args.contains(&"--ak".to_string()));
+        assert!(args.contains(&"api_base=http://127.0.0.1:1234/v1".to_string()));
+        assert!(!args.iter().any(|arg| arg.contains("local-key")));
+        assert!(args.contains(&"--n-tasks".to_string()));
+        assert!(args.contains(&"1".to_string()));
+        assert!(args.contains(&"--delete".to_string()));
+    }
+
+    #[test]
+    fn parses_terminal_bench_score_from_harbor_table() {
+        let output = "\
+\u{2502} Trials \u{2502} Exceptions \u{2502}  Mean \u{2502}
+\u{2502}      1 \u{2502}          0 \u{2502} 0.750 \u{2502}";
+
+        let parsed = parse_terminal_bench_harbor_score(output).unwrap();
+
+        assert_eq!(parsed.0, "mean");
+        assert_eq!(parsed.1, 1);
+        assert_eq!(parsed.2, 0.75);
+    }
+
+    #[test]
+    fn parses_terminal_bench_exception_table_as_zero_score() {
+        let output = "\
+\u{2502} Trials \u{2502} Exceptions \u{2502}  Mean \u{2502}
+\u{2502}      0 \u{2502}          1 \u{2502} 0.000 \u{2502}
+\u{2502} Exception           \u{2502} Count \u{2502}
+\u{2502} InternalServerError \u{2502}     1 \u{2502}";
+
+        let parsed = parse_terminal_bench_harbor_score(output).unwrap();
+
+        assert_eq!(parsed.0, "mean");
+        assert_eq!(parsed.1, 0);
+        assert_eq!(parsed.2, 0.0);
     }
 
     #[test]

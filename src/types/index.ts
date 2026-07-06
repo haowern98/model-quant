@@ -166,6 +166,7 @@ export type BenchmarkRunId =
   | "ppl_check"
   | "gpqa_diamond"
   | "humaneval"
+  | "terminal_bench"
   | "mmlu_pro"
   | "mmlu_redux"
   | "supergpqa"
@@ -279,6 +280,16 @@ export interface HumanEvalStatus {
   detail: string;
 }
 
+export interface TerminalBenchStatus {
+  ready: boolean;
+  statusLabel: string;
+  harborReady: boolean;
+  harbor: string | null;
+  dockerReady: boolean;
+  docker: string | null;
+  detail: string;
+}
+
 export interface HumanEvalDatasetStatus {
   datasetReady: boolean;
   datasetStatusLabel: string;
@@ -286,6 +297,22 @@ export interface HumanEvalDatasetStatus {
   datasetHash: string | null;
   datasetUrl: string;
   expectedDatasetHash: string;
+}
+
+export interface TerminalBenchDatasetStatus {
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+}
+
+export interface TerminalBenchDatasetRow {
+  index: number;
+  taskId: string;
+  instruction: string;
+  path: string;
 }
 
 export interface HumanEvalDatasetRow {

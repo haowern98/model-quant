@@ -5,6 +5,7 @@ export function useProgress() {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -25,13 +26,15 @@ export function useProgress() {
     return () => { unlisten?.(); };
   }, []);
 
-  const startOperation = () => {
+  const startOperation = (message: string | null = null) => {
     setRunning(true);
     setCancelling(false);
+    setStatusMessage(message);
     setProgress(null);
   };
   const requestCancellation = () => {
     setCancelling(true);
+    setStatusMessage("Cancelling test");
     setProgress({
       stage: "benchmarking",
       percent: 0,
@@ -41,6 +44,7 @@ export function useProgress() {
   const endOperation = () => {
     setRunning(false);
     setCancelling(false);
+    setStatusMessage(null);
     setProgress(null);
   };
 
@@ -48,6 +52,7 @@ export function useProgress() {
     progress,
     running,
     cancelling,
+    statusMessage,
     startOperation,
     requestCancellation,
     endOperation,
