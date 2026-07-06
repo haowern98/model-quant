@@ -24,6 +24,8 @@ const GPQA_DATASET_MARKER_VERSION: u32 = 1;
 const HUMANEVAL_SAMPLE_COUNT: u64 = 164;
 const HUMANEVAL_DATASET_ID: &str = "opencompass/humaneval";
 const HUMANEVAL_DATASET_MARKER_VERSION: u32 = 1;
+const TERMINAL_BENCH_DATASET_ID: &str = "terminal-bench/terminal-bench-2-1";
+const TERMINAL_BENCH_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
 const GPQA_DEFAULT_CONTEXT_WINDOW: u32 = 20_000;
 const GPQA_DEFAULT_TEMPERATURE: f64 = 0.0;
@@ -74,6 +76,17 @@ pub struct TerminalBenchStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HumanEvalDatasetStatus {
+    pub dataset_ready: bool,
+    pub dataset_status_label: String,
+    pub dataset_path: Option<String>,
+    pub dataset_hash: Option<String>,
+    pub dataset_url: String,
+    pub expected_dataset_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalBenchDatasetStatus {
     pub dataset_ready: bool,
     pub dataset_status_label: String,
     pub dataset_path: Option<String>,
@@ -334,6 +347,17 @@ pub async fn get_humaneval_dataset_status(
 }
 
 #[tauri::command]
+pub async fn get_terminal_bench_dataset_status(
+    app: tauri::AppHandle,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    Ok(detect_terminal_bench_dataset_status(&app_data_dir))
+}
+
+#[tauri::command]
 pub async fn install_gpqa_diamond_harness(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -403,6 +427,23 @@ pub async fn download_humaneval_dataset(
 }
 
 #[tauri::command]
+pub async fn download_terminal_bench_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        download_terminal_bench_dataset_blocking(app_data_dir, app, child)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn delete_gpqa_diamond_dataset(
     app: tauri::AppHandle,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -435,6 +476,25 @@ pub async fn delete_humaneval_dataset(
         ensure_official_benchmark_idle(&child)?;
         remove_path_if_exists(&humaneval_dataset_cache_root(&app_data_dir))?;
         Ok(detect_humaneval_dataset_status(&app_data_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_terminal_bench_dataset(
+    app: tauri::AppHandle,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_official_benchmark_idle(&child)?;
+        remove_path_if_exists(&terminal_bench_dataset_cache_root(&app_data_dir))?;
+        Ok(detect_terminal_bench_dataset_status(&app_data_dir))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -989,6 +1049,59 @@ print("humaneval_samples=" + str(sample_count))
     Ok(detect_humaneval_dataset_status(&app_data_dir))
 }
 
+fn download_terminal_bench_dataset_blocking(
+    app_data_dir: PathBuf,
+    app: tauri::AppHandle,
+    child_slot: Arc<Mutex<Option<Child>>>,
+) -> Result<TerminalBenchDatasetStatus, String> {
+    let status = detect_terminal_bench_status();
+    if !status.harbor_ready {
+        return Err(format!(
+            "Terminal-Bench needs Harbor before downloading the dataset. {}",
+            status.detail
+        ));
+    }
+
+    let progress = crate::progress::ProgressEmitter::new(app);
+    let dataset_root = terminal_bench_dataset_cache_root(&app_data_dir);
+    std::fs::create_dir_all(&dataset_root).map_err(|e| e.to_string())?;
+    progress.emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.2,
+        "Downloading Terminal-Bench dataset...",
+    );
+    run_managed_child(
+        "uvx",
+        vec![
+            "--from".to_string(),
+            "harbor".to_string(),
+            "harbor".to_string(),
+            "download".to_string(),
+            TERMINAL_BENCH_DATASET_ID.to_string(),
+            "--output-dir".to_string(),
+            dataset_root.to_string_lossy().to_string(),
+            "--overwrite".to_string(),
+        ],
+        &child_slot,
+    )?;
+    let marker = json!({
+        "version": TERMINAL_BENCH_DATASET_MARKER_VERSION,
+        "dataset": "terminal-bench-2-1",
+        "source": TERMINAL_BENCH_DATASET_ID,
+    });
+    std::fs::write(
+        terminal_bench_dataset_marker_path(&app_data_dir),
+        serde_json::to_string_pretty(&marker).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    progress.emit(
+        crate::progress::ProgressStage::Benchmarking,
+        1.0,
+        "Terminal-Bench dataset downloaded and verified.",
+    );
+    Ok(detect_terminal_bench_dataset_status(&app_data_dir))
+}
+
 fn run_gpqa_diamond_blocking(
     base_url: String,
     api_key: String,
@@ -1481,6 +1594,14 @@ fn humaneval_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
 
 fn humaneval_dataset_rows_path(app_data_dir: &Path) -> PathBuf {
     humaneval_dataset_cache_root(app_data_dir).join("humaneval_rows.json")
+}
+
+fn terminal_bench_dataset_cache_root(app_data_dir: &Path) -> PathBuf {
+    gpqa_dataset_cache_root(app_data_dir).join("terminal-bench-2-1")
+}
+
+fn terminal_bench_dataset_marker_path(app_data_dir: &Path) -> PathBuf {
+    terminal_bench_dataset_cache_root(app_data_dir).join("terminal_bench_dataset_ready.json")
 }
 
 fn gpqa_run_dir(app_data_dir: &Path) -> PathBuf {
@@ -2002,6 +2123,53 @@ fn detect_humaneval_dataset_status(app_data_dir: &Path) -> HumanEvalDatasetStatu
     }
 }
 
+fn detect_terminal_bench_dataset_status(app_data_dir: &Path) -> TerminalBenchDatasetStatus {
+    let state = detect_terminal_bench_dataset_state(app_data_dir);
+    TerminalBenchDatasetStatus {
+        dataset_ready: matches!(state, GpqaDatasetState::Verified { .. }),
+        dataset_status_label: dataset_status_label(&state).to_string(),
+        dataset_path: dataset_path_string(&state),
+        dataset_hash: dataset_hash_string(&state),
+        dataset_url: TERMINAL_BENCH_DATASET_ID.to_string(),
+        expected_dataset_hash: "Harbor dataset cache marker".to_string(),
+    }
+}
+
+fn detect_terminal_bench_dataset_state(app_data_dir: &Path) -> GpqaDatasetState {
+    let path = terminal_bench_dataset_marker_path(app_data_dir);
+    if !path.exists() {
+        return GpqaDatasetState::Missing;
+    }
+
+    match std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
+        }) {
+        Ok(marker)
+            if marker.get("version").and_then(|value| value.as_u64())
+                == Some(TERMINAL_BENCH_DATASET_MARKER_VERSION as u64)
+                && marker.get("dataset").and_then(|value| value.as_str())
+                    == Some("terminal-bench-2-1") =>
+        {
+            GpqaDatasetState::Verified {
+                path,
+                hash: format!("marker-v{TERMINAL_BENCH_DATASET_MARKER_VERSION}"),
+            }
+        }
+        Ok(_) => GpqaDatasetState::Invalid {
+            path,
+            hash: None,
+            detail: "Terminal-Bench Harbor dataset marker is invalid.".to_string(),
+        },
+        Err(error) => GpqaDatasetState::Invalid {
+            path,
+            hash: None,
+            detail: format!("Failed to read Terminal-Bench dataset marker: {error}"),
+        },
+    }
+}
+
 fn detect_humaneval_dataset_state(app_data_dir: &Path) -> GpqaDatasetState {
     let path = humaneval_dataset_marker_path(app_data_dir);
     if !path.exists() {
@@ -2395,7 +2563,8 @@ fn humaneval_result_from_report(
     let report_json: serde_json::Value = serde_json::from_str(&report_text)
         .map_err(|e| format!("Failed to parse EvalScope HumanEval report JSON: {e}"))?;
     let pass_at_1 = extract_humaneval_pass_at_1(&report_json).unwrap_or(0.0);
-    let sample_count = extract_sample_count_from_json(&report_json).unwrap_or(HUMANEVAL_SAMPLE_COUNT);
+    let sample_count =
+        extract_sample_count_from_json(&report_json).unwrap_or(HUMANEVAL_SAMPLE_COUNT);
     Ok(BenchmarkResult {
         prompt_eval_tps: runtime_summary.prompt_eval_tps,
         token_gen_tps: runtime_summary.token_gen_tps,
@@ -2409,7 +2578,10 @@ fn humaneval_result_from_report(
         load_ms: runtime_summary.load_ms,
         test_mode: "official_humaneval".to_string(),
         status_message: format!("HumanEval EvalScope official harness completed for {model_id}."),
-        native_runtime: Some(format!("EvalScope HumanEval report: {}", report_path.display())),
+        native_runtime: Some(format!(
+            "EvalScope HumanEval report: {}",
+            report_path.display()
+        )),
         model_tensor_count: Some(model_summary.tensor_count),
         model_metadata_count: Some(model_summary.metadata_count),
         copied_tensor_count: tensor_summary.copied_tensor_count,

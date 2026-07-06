@@ -21,9 +21,12 @@ import {
   getGpqaDiamondStatus,
   getHumanEvalStatus,
   getTerminalBenchStatus,
+  getTerminalBenchDatasetStatus,
   installGpqaDiamondHarness,
   downloadGpqaDiamondDataset,
+  downloadTerminalBenchDataset,
   deleteGpqaDiamondDataset,
+  deleteTerminalBenchDataset,
   deleteGpqaDiamondHarness,
   runGpqaDiamondBenchmark,
   runHumanEvalBenchmark,
@@ -44,6 +47,7 @@ import type {
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
+  TerminalBenchDatasetStatus,
   TerminalBenchStatus,
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
@@ -80,6 +84,15 @@ const DEFAULT_TERMINAL_BENCH_STATUS: TerminalBenchStatus = {
   dockerReady: false,
   docker: null,
   detail: "Terminal-Bench readiness has not been checked yet.",
+};
+
+const DEFAULT_TERMINAL_BENCH_DATASET_STATUS: TerminalBenchDatasetStatus = {
+  datasetReady: false,
+  datasetStatusLabel: "Missing",
+  datasetPath: null,
+  datasetHash: null,
+  datasetUrl: "terminal-bench/terminal-bench-2-1",
+  expectedDatasetHash: "Harbor dataset cache marker",
 };
 
 const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
@@ -284,6 +297,8 @@ function App() {
   const [terminalBenchStatus, setTerminalBenchStatus] = useState<TerminalBenchStatus>(
     DEFAULT_TERMINAL_BENCH_STATUS,
   );
+  const [terminalBenchDatasetStatus, setTerminalBenchDatasetStatus] =
+    useState<TerminalBenchDatasetStatus>(DEFAULT_TERMINAL_BENCH_DATASET_STATUS);
   const [gpqaShotMode, setGpqaShotMode] =
     useState<GpqaShotMode>("five_shot_cot");
   const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
@@ -329,38 +344,50 @@ function App() {
 
   useEffect(() => refreshHumanEvalStatus(), [refreshHumanEvalStatus]);
 
-  const refreshTerminalBenchStatus = useCallback(() => {
-    let cancelled = false;
-    getTerminalBenchStatus()
-      .then((status) => {
-        if (!cancelled) setTerminalBenchStatus(status);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setTerminalBenchStatus({
-            ...DEFAULT_TERMINAL_BENCH_STATUS,
-            detail: (error as Error).message,
-          });
-        }
+  const refreshTerminalBenchStatus = useCallback(async () => {
+    try {
+      setTerminalBenchStatus(await getTerminalBenchStatus());
+    } catch (error) {
+      setTerminalBenchStatus({
+        ...DEFAULT_TERMINAL_BENCH_STATUS,
+        detail: (error as Error).message,
       });
-    return () => {
-      cancelled = true;
-    };
+    }
   }, []);
 
-  useEffect(() => refreshTerminalBenchStatus(), [refreshTerminalBenchStatus]);
+  useEffect(() => {
+    void refreshTerminalBenchStatus();
+  }, [refreshTerminalBenchStatus]);
+
+  const refreshTerminalBenchDatasetStatus = useCallback(async () => {
+    try {
+      setTerminalBenchDatasetStatus(await getTerminalBenchDatasetStatus());
+    } catch {
+      setTerminalBenchDatasetStatus(DEFAULT_TERMINAL_BENCH_DATASET_STATUS);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshTerminalBenchDatasetStatus();
+  }, [refreshTerminalBenchDatasetStatus]);
 
   useEffect(() => {
     const refreshBenchmarkStatuses = () => {
       void refreshGpqaStatus();
       void refreshHumanEvalStatus();
       void refreshTerminalBenchStatus();
+      void refreshTerminalBenchDatasetStatus();
     };
     window.addEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
     return () => {
       window.removeEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
     };
-  }, [refreshGpqaStatus, refreshHumanEvalStatus, refreshTerminalBenchStatus]);
+  }, [
+    refreshGpqaStatus,
+    refreshHumanEvalStatus,
+    refreshTerminalBenchStatus,
+    refreshTerminalBenchDatasetStatus,
+  ]);
 
   const resetForLoadedModel = useCallback(
     (path: string, loadedModel: NonNullable<typeof model>) => {
@@ -781,6 +808,57 @@ function App() {
     }
   }, [endOperation, refreshGpqaStatus, startOperation]);
 
+  const handleInstallTerminalBenchHarness = useCallback(async () => {
+    startOperation("Installing Terminal-Bench harness");
+    try {
+      await refreshTerminalBenchStatus();
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshTerminalBenchStatus, startOperation]);
+
+  const handleRefreshTerminalBenchStatus = useCallback(async () => {
+    startOperation("Refreshing Terminal-Bench status");
+    try {
+      await refreshTerminalBenchStatus();
+      await refreshTerminalBenchDatasetStatus();
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshTerminalBenchDatasetStatus, refreshTerminalBenchStatus, startOperation]);
+
+  const handleDownloadTerminalBenchDataset = useCallback(async () => {
+    startOperation("Downloading Terminal-Bench dataset");
+    try {
+      setTerminalBenchDatasetStatus(await downloadTerminalBenchDataset());
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+      void refreshTerminalBenchDatasetStatus();
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshTerminalBenchDatasetStatus, startOperation]);
+
+  const handleDeleteTerminalBenchDataset = useCallback(async () => {
+    startOperation("Deleting Terminal-Bench dataset");
+    try {
+      setTerminalBenchDatasetStatus(await deleteTerminalBenchDataset());
+      setAppError(null);
+    } catch (e) {
+      setAppError((e as Error).message);
+      void refreshTerminalBenchDatasetStatus();
+    } finally {
+      endOperation();
+    }
+  }, [endOperation, refreshTerminalBenchDatasetStatus, startOperation]);
+
   const handleCancelTest = useCallback(async () => {
     if (!running || cancelling) return;
     requestCancellation();
@@ -893,6 +971,7 @@ function App() {
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
           terminalBenchStatus={terminalBenchStatus}
+          terminalBenchDatasetStatus={terminalBenchDatasetStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
           humanevalConfig={humanevalConfig}
@@ -923,6 +1002,10 @@ function App() {
           onOpenGpqaDataset={handleOpenGpqaDataset}
           onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
           onOpenTerminalBenchDetails={handleOpenTerminalBenchDetails}
+          onInstallTerminalBenchHarness={handleInstallTerminalBenchHarness}
+          onDownloadTerminalBenchDataset={handleDownloadTerminalBenchDataset}
+          onDeleteTerminalBenchDataset={handleDeleteTerminalBenchDataset}
+          onRefreshTerminalBenchStatus={handleRefreshTerminalBenchStatus}
           onRunHumanEvalBenchmark={handleRunHumanEvalBenchmark}
           onTest={handleTest}
           onCancelTest={handleCancelTest}

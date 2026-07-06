@@ -298,6 +298,15 @@ export interface HumanEvalDatasetStatus {
   expectedDatasetHash: string;
 }
 
+export interface TerminalBenchDatasetStatus {
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+}
+
 export interface HumanEvalDatasetRow {
   index: number;
   taskId: string;

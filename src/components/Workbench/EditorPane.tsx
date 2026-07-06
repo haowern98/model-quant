@@ -24,6 +24,7 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchDatasetStatus,
   TerminalBenchStatus,
   TensorInfo,
 } from "../../types";
@@ -72,6 +73,7 @@ interface EditorPaneProps {
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
   terminalBenchStatus: TerminalBenchStatus;
+  terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
@@ -93,6 +95,10 @@ interface EditorPaneProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onInstallTerminalBenchHarness: () => void;
+  onDownloadTerminalBenchDataset: () => void;
+  onDeleteTerminalBenchDataset: () => void;
+  onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
@@ -131,6 +137,7 @@ export function EditorPane({
   gpqaStatus,
   humanevalStatus,
   terminalBenchStatus,
+  terminalBenchDatasetStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
@@ -152,6 +159,10 @@ export function EditorPane({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onInstallTerminalBenchHarness,
+  onDownloadTerminalBenchDataset,
+  onDeleteTerminalBenchDataset,
+  onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
   onTest,
   onCancelTest,
@@ -290,7 +301,15 @@ export function EditorPane({
           onRunBenchmark={onRunHumanEvalBenchmark}
         />
       ) : showingTerminalBenchBenchmark ? (
-        <TerminalBenchView status={terminalBenchStatus} />
+        <TerminalBenchView
+          status={terminalBenchStatus}
+          datasetStatus={terminalBenchDatasetStatus}
+          running={running}
+          onInstallHarness={onInstallTerminalBenchHarness}
+          onDownloadDataset={onDownloadTerminalBenchDataset}
+          onDeleteDataset={onDeleteTerminalBenchDataset}
+          onRefreshStatus={onRefreshTerminalBenchStatus}
+        />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -1092,7 +1111,23 @@ function HumanEvalBenchmarkView({
   );
 }
 
-function TerminalBenchView({ status }: { status: TerminalBenchStatus }) {
+function TerminalBenchView({
+  status,
+  datasetStatus,
+  running,
+  onInstallHarness,
+  onDownloadDataset,
+  onDeleteDataset,
+  onRefreshStatus,
+}: {
+  status: TerminalBenchStatus;
+  datasetStatus: TerminalBenchDatasetStatus;
+  running: boolean;
+  onInstallHarness: () => void;
+  onDownloadDataset: () => void;
+  onDeleteDataset: () => void;
+  onRefreshStatus: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<TerminalBenchTab>("details");
   const [config, setConfig] = useState({
     thinking: "off" as GpqaThinkingMode,
@@ -1125,6 +1160,13 @@ function TerminalBenchView({ status }: { status: TerminalBenchStatus }) {
       setConfig((current) => ({ ...current, presencePenalty: value }));
     }
   };
+  const handleDatasetAction = () => {
+    if (datasetStatus.datasetReady) {
+      onDeleteDataset();
+      return;
+    }
+    onDownloadDataset();
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -1142,16 +1184,36 @@ function TerminalBenchView({ status }: { status: TerminalBenchStatus }) {
               </div>
               <p>Official Terminal-Bench 2.1 evaluation shell for terminal task execution through Harbor.</p>
               <div className="benchmark-page-actions">
-                <button type="button" className="benchmark-action-button secondary" disabled>
-                  Download dataset
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running || (!datasetStatus.datasetReady && !status.harborReady)}
+                  onClick={handleDatasetAction}
+                >
+                  {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running}
+                  onClick={onRefreshStatus}
+                >
                   Verify hash
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
-                  Install harness
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running || status.harborReady}
+                  onClick={onInstallHarness}
+                >
+                  {status.harborReady ? "Delete harness" : "Install harness"}
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={running}
+                  onClick={onRefreshStatus}
+                >
                   Refresh
                 </button>
                 <button type="button" className="benchmark-action-button primary" disabled>
@@ -1308,10 +1370,12 @@ function TerminalBenchView({ status }: { status: TerminalBenchStatus }) {
               <BenchmarkInfoRow label="Docker" value={status.dockerReady ? status.docker ?? "Ready" : "Unavailable"} />
             </BenchmarkInfoSection>
             <BenchmarkInfoSection title="Terminal-Bench Dataset">
-              <BenchmarkInfoRow label="Downloaded" value="No" />
-              <BenchmarkInfoRow label="Verified" value="No" />
-              <BenchmarkInfoRow label="Official asset" value="terminal-bench/terminal-bench-2-1" />
-              <BenchmarkInfoRow label="Cache path" value="Not downloaded" />
+              <BenchmarkInfoRow label="Downloaded" value={datasetStatus.datasetPath ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetReady ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Official asset" value={datasetStatus.datasetUrl} />
+              <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
+              <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
+              <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
             </BenchmarkInfoSection>
           </aside>
         </div>
