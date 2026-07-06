@@ -166,6 +166,7 @@ export type BenchmarkRunId =
   | "ppl_check"
   | "gpqa_diamond"
   | "humaneval"
+  | "terminal_bench"
   | "mmlu_pro"
   | "mmlu_redux"
   | "supergpqa"

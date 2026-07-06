@@ -30,6 +30,7 @@ import {
   deleteGpqaDiamondHarness,
   runGpqaDiamondBenchmark,
   runHumanEvalBenchmark,
+  runTerminalBenchBenchmark,
   saveRecipe,
   loadRecipe,
   exportGguf,
@@ -498,7 +499,14 @@ function App() {
 
   const handleToggleRunTarget = useCallback(
     (target: BenchmarkRunId) => {
-      if (target !== "ppl_check" && target !== "gpqa_diamond" && target !== "humaneval") return;
+      if (
+        target !== "ppl_check" &&
+        target !== "gpqa_diamond" &&
+        target !== "humaneval" &&
+        target !== "terminal_bench"
+      ) {
+        return;
+      }
       setSelectedRunIds((current) =>
         current.includes(target)
           ? current.filter((id) => id !== target)
@@ -570,7 +578,11 @@ function App() {
         setAppError("Open a GGUF model before running tests.");
       } else if (
         selectedRunIds.some(
-          (id) => id === "ppl_check" || id === "gpqa_diamond" || id === "humaneval",
+          (id) =>
+            id === "ppl_check" ||
+            id === "gpqa_diamond" ||
+            id === "humaneval" ||
+            id === "terminal_bench",
         )
       ) {
         setAppError("Open a GGUF model before running selected tests.");
@@ -585,13 +597,22 @@ function App() {
       (id) =>
         id === "ppl_check" ||
         (id === "gpqa_diamond" && gpqaStatus.ready) ||
-        (id === "humaneval" && humanevalStatus.ready),
+        (id === "humaneval" && humanevalStatus.ready) ||
+        (id === "terminal_bench" &&
+          terminalBenchStatus.ready &&
+          terminalBenchDatasetStatus.datasetReady),
     );
     if (runQueue.length === 0) {
       if (selectedRunIds.includes("gpqa_diamond") && !gpqaStatus.ready) {
         setAppError(`GPQA Diamond is not ready. Current status: ${gpqaStatus.statusLabel}.`);
       } else if (selectedRunIds.includes("humaneval") && !humanevalStatus.ready) {
         setAppError(`HumanEval is not ready. Current status: ${humanevalStatus.statusLabel}.`);
+      } else if (selectedRunIds.includes("terminal_bench")) {
+        setAppError(
+          terminalBenchStatus.ready
+            ? "Terminal-Bench dataset is not downloaded or verified yet."
+            : `Terminal-Bench is not ready. Current status: ${terminalBenchStatus.statusLabel}.`,
+        );
       }
       return;
     }
@@ -663,6 +684,27 @@ function App() {
         }
       }
 
+      if (runQueue.includes("terminal_bench")) {
+        const apiStatus = await startModelInspectorApi({
+          benchmarkLabel: "ModelInspector API",
+          contextWindow: 20_000,
+          defaultEnableThinking: false,
+        });
+        if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+          throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+        }
+        try {
+          latestResult = await runTerminalBenchBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+          );
+          openEvalResults(latestResult);
+        } finally {
+          await stopModelInspectorApi();
+        }
+      }
+
       setAppError(null);
     } catch (e) {
       const message = (e as Error).message;
@@ -679,6 +721,9 @@ function App() {
     gpqaStatus.ready,
     humanevalStatus.ready,
     humanevalStatus.statusLabel,
+    terminalBenchStatus.ready,
+    terminalBenchStatus.statusLabel,
+    terminalBenchDatasetStatus.datasetReady,
     gpqaShotMode,
     gpqaConfig,
     humanevalConfig,
@@ -743,6 +788,62 @@ function App() {
     humanevalStatus.ready,
     humanevalStatus.statusLabel,
     humanevalConfig,
+    startOperation,
+    endOperation,
+    openEvalResults,
+  ]);
+
+  const handleRunTerminalBenchBenchmark = useCallback(async () => {
+    if (!recipe || !modelPath) {
+      setAppError("Open a GGUF model before running Terminal-Bench.");
+      return;
+    }
+    if (recipe.baseModel !== modelPath) {
+      setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
+      return;
+    }
+    if (!terminalBenchStatus.ready) {
+      setAppError(`Terminal-Bench is not ready. Current status: ${terminalBenchStatus.statusLabel}.`);
+      return;
+    }
+    if (!terminalBenchDatasetStatus.datasetReady) {
+      setAppError("Terminal-Bench dataset is not downloaded or verified yet.");
+      return;
+    }
+
+    startOperation();
+    try {
+      const apiStatus = await startModelInspectorApi({
+        benchmarkLabel: "ModelInspector API",
+        contextWindow: 20_000,
+        defaultEnableThinking: false,
+      });
+      if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+        throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+      }
+      try {
+        const result = await runTerminalBenchBenchmark(
+          apiStatus.baseUrl,
+          apiStatus.apiKey,
+          apiStatus.modelId,
+        );
+        openEvalResults(result);
+      } finally {
+        await stopModelInspectorApi();
+      }
+      setAppError(null);
+    } catch (e) {
+      const message = (e as Error).message;
+      if (!message.toLowerCase().includes("cancelled")) setAppError(message);
+    } finally {
+      endOperation();
+    }
+  }, [
+    recipe,
+    modelPath,
+    terminalBenchStatus.ready,
+    terminalBenchStatus.statusLabel,
+    terminalBenchDatasetStatus.datasetReady,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1007,6 +1108,7 @@ function App() {
           onDeleteTerminalBenchDataset={handleDeleteTerminalBenchDataset}
           onRefreshTerminalBenchStatus={handleRefreshTerminalBenchStatus}
           onRunHumanEvalBenchmark={handleRunHumanEvalBenchmark}
+          onRunTerminalBenchBenchmark={handleRunTerminalBenchBenchmark}
           onTest={handleTest}
           onCancelTest={handleCancelTest}
           onSaveRecipe={handleSaveRecipe}

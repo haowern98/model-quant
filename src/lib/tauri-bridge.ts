@@ -220,6 +220,18 @@ export async function runHumanEvalBenchmark(
   });
 }
 
+export async function runTerminalBenchBenchmark(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+): Promise<BenchmarkResult> {
+  return invoke<BenchmarkResult>("run_terminal_bench_benchmark", {
+    baseUrl,
+    apiKey,
+    modelId,
+  });
+}
+
 export async function cancelOfficialBenchmark(): Promise<void> {
   return invoke<void>("cancel_official_benchmark");
 }

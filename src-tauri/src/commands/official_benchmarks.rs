@@ -661,6 +661,38 @@ pub async fn run_humaneval_benchmark(
 }
 
 #[tauri::command]
+pub async fn run_terminal_bench_benchmark(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    app: tauri::AppHandle,
+    api_state: State<'_, ModelInspectorApiState>,
+) -> Result<BenchmarkResult, String> {
+    if base_url.trim().is_empty() || api_key.trim().is_empty() || model_id.trim().is_empty() {
+        return Err("ModelInspector API did not return a usable benchmark endpoint.".to_string());
+    }
+    let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
+    let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        run_terminal_bench_preflight_blocking(
+            model_id,
+            app_data_dir,
+            tensor_summary,
+            model_summary,
+            runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn cancel_official_benchmark(runner: State<'_, OfficialBenchmarkRunner>) {
     if let Ok(mut guard) = runner.child.lock() {
         if let Some(child) = guard.as_mut() {
@@ -2446,6 +2478,116 @@ fn terminal_bench_dataset_row_from_task_dir(
     })
 }
 
+fn run_terminal_bench_preflight_blocking(
+    model_id: String,
+    app_data_dir: PathBuf,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_summary: ModelInspectorApiRuntimeSummary,
+) -> Result<BenchmarkResult, String> {
+    let status = detect_terminal_bench_status();
+    if !status.ready {
+        return Err(format!(
+            "Terminal-Bench is not ready. Current status: {}. {}",
+            status.status_label, status.detail
+        ));
+    }
+    let dataset_status = detect_terminal_bench_dataset_status(&app_data_dir);
+    if !dataset_status.dataset_ready {
+        return Err("Terminal-Bench dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let mut result = terminal_bench_preflight_result(
+        &model_id,
+        model_summary.tensor_count,
+        model_summary.metadata_count,
+    );
+    result.prompt_eval_tps = runtime_summary.prompt_eval_tps;
+    result.token_gen_tps = runtime_summary.token_gen_tps;
+    result.ttft_ms = runtime_summary.ttft_ms;
+    result.prompt_eval_ms = runtime_summary.prompt_eval_ms;
+    result.generation_ms = runtime_summary.generation_ms;
+    result.vram_peak_mb = runtime_summary.vram_peak_mb;
+    result.vram_allocated_mb = runtime_summary.vram_allocated_mb;
+    result.load_ms = runtime_summary.load_ms;
+    result.copied_tensor_count = tensor_summary.copied_tensor_count;
+    result.converted_tensor_count = tensor_summary.converted_tensor_count;
+    result.converted_bytes_before = tensor_summary.converted_bytes_before;
+    result.converted_bytes_after = tensor_summary.converted_bytes_after;
+    result.requested_target_count = tensor_summary.requested_target_count;
+    result.verified_target_count = tensor_summary.verified_target_count;
+    Ok(result)
+}
+
+fn terminal_bench_preflight_result(
+    model_id: &str,
+    tensor_count: u64,
+    metadata_count: u64,
+) -> BenchmarkResult {
+    BenchmarkResult {
+        prompt_eval_tps: 0.0,
+        token_gen_tps: 0.0,
+        ttft_ms: 0.0,
+        prompt_eval_ms: 0.0,
+        generation_ms: 0.0,
+        vram_peak_mb: 0.0,
+        vram_allocated_mb: 0.0,
+        disk_size_mb: 0.0,
+        elapsed_ms: 0.0,
+        load_ms: 0.0,
+        test_mode: "official_terminal_bench_preflight".to_string(),
+        status_message: format!(
+            "Terminal-Bench preflight passed for {model_id}. Benchmark execution is not wired yet."
+        ),
+        native_runtime: Some(
+            "Terminal-Bench preflight only: Harbor, Docker, dataset, and API are ready."
+                .to_string(),
+        ),
+        model_tensor_count: Some(tensor_count),
+        model_metadata_count: Some(metadata_count),
+        copied_tensor_count: 0,
+        converted_tensor_count: 0,
+        converted_bytes_before: 0,
+        converted_bytes_after: 0,
+        requested_target_count: 0,
+        verified_target_count: 0,
+        baseline_benchmark: None,
+        quality_eval: None,
+        standard_eval: Some(StandardEvalReport {
+            sample_count: 0,
+            task_count: 1,
+            baseline_accuracy: None,
+            recipe_accuracy: 0.0,
+            accuracy_delta: None,
+            correct_to_wrong_count: 0,
+            wrong_to_correct_count: 0,
+            baseline_avg_margin: None,
+            recipe_avg_margin: 0.0,
+            margin_delta: None,
+            tasks: vec![StandardEvalTaskReport {
+                task: "terminal-bench-2-1".to_string(),
+                metric: "preflight".to_string(),
+                n_shot: 0,
+                sample_count: 0,
+                baseline_correct_count: None,
+                recipe_correct_count: 0,
+                correct_to_wrong_count: 0,
+                wrong_to_correct_count: 0,
+                same_prediction_count: 0,
+                baseline_accuracy: None,
+                recipe_accuracy: 0.0,
+                accuracy_delta: None,
+                baseline_avg_margin: None,
+                recipe_avg_margin: 0.0,
+                margin_delta: None,
+                baseline_avg_correct_nll: None,
+                recipe_avg_correct_nll: 0.0,
+            }],
+            sample_audits: Vec::new(),
+        }),
+    }
+}
+
 fn gpqa_question_from_input(row: &serde_json::Value) -> Option<String> {
     let content = row
         .get("input")?
@@ -3037,6 +3179,22 @@ mod tests {
         assert_eq!(row.path, "terminal-bench-2-1\\hello-terminal");
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn builds_terminal_bench_preflight_result() {
+        let result = terminal_bench_preflight_result("demo.gguf", 42, 7);
+
+        assert_eq!(result.test_mode, "official_terminal_bench_preflight");
+        assert!(result
+            .status_message
+            .contains("Terminal-Bench preflight passed"));
+        assert_eq!(result.model_tensor_count, Some(42));
+        assert_eq!(result.model_metadata_count, Some(7));
+        assert_eq!(
+            result.standard_eval.unwrap().tasks[0].task,
+            "terminal-bench-2-1"
+        );
     }
 
     #[test]

@@ -80,10 +80,16 @@ export function RunControls({
       ? "Compare Recipe"
       : "Test Recipe";
   const hasSelectedRun = selectedRunIds.some(
-    (id) => id === "ppl_check" || id === "gpqa_diamond" || id === "humaneval",
+    (id) =>
+      id === "ppl_check" ||
+      id === "gpqa_diamond" ||
+      id === "humaneval" ||
+      id === "terminal_bench",
   );
   const hasSelectedApiBenchmark =
-    selectedRunIds.includes("gpqa_diamond") || selectedRunIds.includes("humaneval");
+    selectedRunIds.includes("gpqa_diamond") ||
+    selectedRunIds.includes("humaneval") ||
+    selectedRunIds.includes("terminal_bench");
   const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedApiBenchmark);
 
   return (
@@ -176,7 +182,13 @@ export function RunControls({
               disabled={running}
               onClick={() => onToggleRunTarget("humaneval")}
             />
-            <RunMenuCheckbox label="Terminal-Bench 2.1" status={terminalBenchStatus.statusLabel} disabled muted />
+            <RunMenuCheckbox
+              label="Terminal-Bench 2.1"
+              status={terminalBenchStatus.statusLabel}
+              checked={selectedRunIds.includes("terminal_bench")}
+              disabled={running}
+              onClick={() => onToggleRunTarget("terminal_bench")}
+            />
             <RunMenuCheckbox label="MMLU-Pro" status="Download" disabled muted />
             <RunMenuCheckbox label="MMLU-Redux" status="Frozen" disabled muted />
             <RunMenuCheckbox label="SuperGPQA" status="Download" disabled muted />

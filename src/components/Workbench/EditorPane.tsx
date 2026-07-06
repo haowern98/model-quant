@@ -102,6 +102,7 @@ interface EditorPaneProps {
   onDeleteTerminalBenchDataset: () => void;
   onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -166,6 +167,7 @@ export function EditorPane({
   onDeleteTerminalBenchDataset,
   onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -311,6 +313,7 @@ export function EditorPane({
           onDownloadDataset={onDownloadTerminalBenchDataset}
           onDeleteDataset={onDeleteTerminalBenchDataset}
           onRefreshStatus={onRefreshTerminalBenchStatus}
+          onRunBenchmark={onRunTerminalBenchBenchmark}
         />
       ) : (
         <section className="tensor-editor-surface">
@@ -1121,6 +1124,7 @@ function TerminalBenchView({
   onDownloadDataset,
   onDeleteDataset,
   onRefreshStatus,
+  onRunBenchmark,
 }: {
   status: TerminalBenchStatus;
   datasetStatus: TerminalBenchDatasetStatus;
@@ -1129,6 +1133,7 @@ function TerminalBenchView({
   onDownloadDataset: () => void;
   onDeleteDataset: () => void;
   onRefreshStatus: () => void;
+  onRunBenchmark: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<TerminalBenchTab>("details");
   const [config, setConfig] = useState({
@@ -1251,7 +1256,12 @@ function TerminalBenchView({
                 >
                   Refresh
                 </button>
-                <button type="button" className="benchmark-action-button primary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={running || !status.ready || !datasetStatus.datasetReady}
+                  onClick={onRunBenchmark}
+                >
                   Run Benchmark
                 </button>
                 <button type="button" className="benchmark-icon-button" aria-label="Terminal-Bench settings">

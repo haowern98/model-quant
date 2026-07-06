@@ -90,6 +90,7 @@ interface WorkbenchShellProps {
   onDeleteTerminalBenchDataset: () => void;
   onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
   onSaveRecipe: () => void;
@@ -157,6 +158,7 @@ export function WorkbenchShell({
   onDeleteTerminalBenchDataset,
   onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
   onSaveRecipe,
@@ -390,6 +392,7 @@ export function WorkbenchShell({
         onDeleteTerminalBenchDataset={onDeleteTerminalBenchDataset}
         onRefreshTerminalBenchStatus={onRefreshTerminalBenchStatus}
         onRunHumanEvalBenchmark={onRunHumanEvalBenchmark}
+        onRunTerminalBenchBenchmark={onRunTerminalBenchBenchmark}
         onTest={onTest}
         onCancelTest={onCancelTest}
         onSaveRecipe={onSaveRecipe}
