@@ -48,6 +48,7 @@ pub fn run() {
             commands::official_benchmarks::get_terminal_bench_dataset_status,
             commands::official_benchmarks::get_gpqa_diamond_dataset_rows,
             commands::official_benchmarks::get_humaneval_dataset_rows,
+            commands::official_benchmarks::get_terminal_bench_dataset_rows,
             commands::official_benchmarks::install_gpqa_diamond_harness,
             commands::official_benchmarks::install_humaneval_harness,
             commands::official_benchmarks::download_gpqa_diamond_dataset,

@@ -307,6 +307,13 @@ export interface TerminalBenchDatasetStatus {
   expectedDatasetHash: string;
 }
 
+export interface TerminalBenchDatasetRow {
+  index: number;
+  taskId: string;
+  instruction: string;
+  path: string;
+}
+
 export interface HumanEvalDatasetRow {
   index: number;
   taskId: string;

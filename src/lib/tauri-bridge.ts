@@ -17,6 +17,7 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  TerminalBenchDatasetRow,
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
 } from "../types";
@@ -143,6 +144,10 @@ export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {
 
 export async function getHumanEvalDatasetRows(): Promise<HumanEvalDatasetRow[]> {
   return invoke<HumanEvalDatasetRow[]>("get_humaneval_dataset_rows");
+}
+
+export async function getTerminalBenchDatasetRows(): Promise<TerminalBenchDatasetRow[]> {
+  return invoke<TerminalBenchDatasetRow[]>("get_terminal_bench_dataset_rows");
 }
 
 export async function installGpqaDiamondHarness(): Promise<GpqaDiamondStatus> {

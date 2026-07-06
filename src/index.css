@@ -1750,6 +1750,10 @@ body.resizing-bottom-panel * {
   border-bottom: 1px solid var(--vscode-border-subtle);
 }
 
+.terminal-bench-dataset-table .benchmark-dataset-row {
+  grid-template-columns: 44px minmax(180px, 0.7fr) minmax(360px, 1.6fr) minmax(220px, 0.9fr);
+}
+
 .benchmark-dataset-row.header {
   position: sticky;
   top: 0;

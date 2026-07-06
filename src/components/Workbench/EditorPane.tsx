@@ -25,6 +25,7 @@ import type {
   RecipeProfile,
   RecipeTestMode,
   TerminalBenchDatasetStatus,
+  TerminalBenchDatasetRow,
   TerminalBenchStatus,
   TensorInfo,
 } from "../../types";
@@ -39,6 +40,7 @@ import {
   downloadHumanEvalDataset,
   getGpqaDiamondDatasetRows,
   getHumanEvalDatasetRows,
+  getTerminalBenchDatasetRows,
   getHumanEvalDatasetStatus,
   getHumanEvalStatus,
   installHumanEvalHarness,
@@ -1142,6 +1144,9 @@ function TerminalBenchView({
     runsPerTask: "1",
     maxTurns: "1",
   });
+  const [datasetRows, setDatasetRows] = useState<TerminalBenchDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const updateIntegerField =
     (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns") =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -1167,6 +1172,36 @@ function TerminalBenchView({
     }
     onDownloadDataset();
   };
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getTerminalBenchDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetStatus.datasetPath, datasetStatus.datasetReady]);
 
   return (
     <section className="benchmark-editor-surface">
@@ -1259,7 +1294,36 @@ function TerminalBenchView({
             ) : activeTab === "dataset" ? (
               <div className="benchmark-copy">
                 <h2>Dataset Preview</h2>
-                <p>Terminal-Bench dataset preview is not wired yet.</p>
+                {!datasetStatus.datasetReady ? (
+                  <p>Download and verify the Terminal-Bench dataset to preview tasks.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset rows...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset rows found.</p>
+                ) : (
+                  <div
+                    className="benchmark-dataset-table terminal-bench-dataset-table"
+                    role="table"
+                    aria-label="Terminal-Bench dataset rows"
+                  >
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Task</span>
+                      <span role="columnheader">Instruction</span>
+                      <span role="columnheader">Path</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.path}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">{row.taskId || "Unavailable"}</span>
+                        <span role="cell">{row.instruction || "Unavailable"}</span>
+                        <span role="cell">{row.path || "Unavailable"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="benchmark-copy">

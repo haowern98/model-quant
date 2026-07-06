@@ -114,6 +114,15 @@ pub struct HumanEvalDatasetRow {
     pub canonical_solution: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalBenchDatasetRow {
+    pub index: usize,
+    pub task_id: String,
+    pub instruction: String,
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GpqaShotMode {
@@ -570,6 +579,19 @@ pub async fn get_humaneval_dataset_rows(
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
     tauri::async_runtime::spawn_blocking(move || read_humaneval_dataset_rows(&app_data_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_terminal_bench_dataset_rows(
+    app: tauri::AppHandle,
+) -> Result<Vec<TerminalBenchDatasetRow>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || read_terminal_bench_dataset_rows(&app_data_dir))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -2367,6 +2389,63 @@ fn humaneval_dataset_row_from_json(index: usize, row: &serde_json::Value) -> Hum
     }
 }
 
+fn read_terminal_bench_dataset_rows(
+    app_data_dir: &Path,
+) -> Result<Vec<TerminalBenchDatasetRow>, String> {
+    if !matches!(
+        detect_terminal_bench_dataset_state(app_data_dir),
+        GpqaDatasetState::Verified { .. }
+    ) {
+        return Err("Terminal-Bench dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let root = terminal_bench_dataset_cache_root(app_data_dir);
+    let task_root = root.join("terminal-bench-2-1");
+    let mut task_dirs = std::fs::read_dir(&task_root)
+        .map_err(|e| format!("Failed to read Terminal-Bench dataset directory: {e}"))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("instruction.md").exists())
+        .collect::<Vec<_>>();
+    task_dirs.sort();
+
+    task_dirs
+        .iter()
+        .enumerate()
+        .map(|(index, path)| terminal_bench_dataset_row_from_task_dir(index + 1, path, &root))
+        .collect()
+}
+
+fn terminal_bench_dataset_row_from_task_dir(
+    index: usize,
+    task_dir: &Path,
+    dataset_root: &Path,
+) -> Result<TerminalBenchDatasetRow, String> {
+    let task_id = task_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let instruction = std::fs::read_to_string(task_dir.join("instruction.md"))
+        .map_err(|e| format!("Failed to read Terminal-Bench task instruction: {e}"))?
+        .trim()
+        .to_string();
+    let path = task_dir
+        .strip_prefix(dataset_root)
+        .unwrap_or(task_dir)
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("\\");
+
+    Ok(TerminalBenchDatasetRow {
+        index,
+        task_id,
+        instruction,
+        path,
+    })
+}
+
 fn gpqa_question_from_input(row: &serde_json::Value) -> Option<String> {
     let content = row
         .get("input")?
@@ -2941,6 +3020,23 @@ mod tests {
         assert_eq!(row.entry_point, "increment");
         assert!(row.prompt.starts_with("def increment"));
         assert_eq!(row.canonical_solution, "    return value + 1");
+    }
+
+    #[test]
+    fn parses_terminal_bench_task_folder_for_preview() {
+        let root = std::env::temp_dir().join(format!("terminal-bench-row-test-{}", unix_millis()));
+        let task_dir = root.join("terminal-bench-2-1").join("hello-terminal");
+        std::fs::create_dir_all(&task_dir).unwrap();
+        std::fs::write(task_dir.join("instruction.md"), "Do the terminal task.\n").unwrap();
+
+        let row = terminal_bench_dataset_row_from_task_dir(2, &task_dir, &root).unwrap();
+
+        assert_eq!(row.index, 2);
+        assert_eq!(row.task_id, "hello-terminal");
+        assert_eq!(row.instruction, "Do the terminal task.");
+        assert_eq!(row.path, "terminal-bench-2-1\\hello-terminal");
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
