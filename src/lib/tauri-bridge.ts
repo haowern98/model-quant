@@ -17,6 +17,7 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  TerminalBenchBenchmarkConfig,
   TerminalBenchDatasetRow,
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
@@ -224,11 +225,13 @@ export async function runTerminalBenchBenchmark(
   baseUrl: string,
   apiKey: string,
   modelId: string,
+  config: TerminalBenchBenchmarkConfig,
 ): Promise<BenchmarkResult> {
   return invoke<BenchmarkResult>("run_terminal_bench_benchmark", {
     baseUrl,
     apiKey,
     modelId,
+    config,
   });
 }
 
