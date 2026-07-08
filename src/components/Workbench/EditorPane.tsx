@@ -9,6 +9,7 @@ import {
 } from "react";
 import { TensorTable } from "../DetailPanel/TensorTable";
 import type {
+  BenchmarkResult,
   BenchmarkOutputLine,
   BenchmarkRunId,
   GpqaBenchmarkConfigInput,
@@ -118,6 +119,13 @@ function basename(path: string | null): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
+function benchmarkResultLabel(result: BenchmarkResult): string | null {
+  if (result.testMode === "official_gpqa_diamond") return "GPQA Diamond";
+  if (result.testMode === "official_humaneval") return "HumanEval";
+  if (result.testMode === "official_terminal_bench") return "Terminal-Bench 2.1";
+  return null;
+}
+
 export function EditorPane({
   modelPath,
   hasModel,
@@ -186,6 +194,7 @@ export function EditorPane({
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
   const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
+  const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -248,9 +257,21 @@ export function EditorPane({
       </div>
 
       <div className="editor-breadcrumbs">
-        <span>{showingBenchmark ? "Benchmarks" : basename(modelPath)}</span>
-        <span>&gt;</span>
-        <span>{activeBreadcrumb}</span>
+        {activeResultBenchmark ? (
+          <>
+            <span>Benchmarks</span>
+            <span>&gt;</span>
+            <span>{activeResultBenchmark}</span>
+            <span>&gt;</span>
+            <span>Eval Results</span>
+          </>
+        ) : (
+          <>
+            <span>{showingBenchmark ? "Benchmarks" : basename(modelPath)}</span>
+            <span>&gt;</span>
+            <span>{activeBreadcrumb}</span>
+          </>
+        )}
       </div>
 
       {activeResult ? (
