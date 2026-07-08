@@ -1478,6 +1478,7 @@ body.resizing-bottom-panel * {
   padding: 0 18px;
   text-align: left;
   font: inherit;
+  font-size: 13px;
 }
 
 .run-action-menu button:hover:not(:disabled) {
