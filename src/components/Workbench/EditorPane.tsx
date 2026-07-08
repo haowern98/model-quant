@@ -113,6 +113,7 @@ interface EditorPaneProps {
   onExport: () => void;
   onDiscardResults: () => void;
   bottomPanelVisible: boolean;
+  onHideBottomPanel: () => void;
 }
 
 function basename(path: string | null): string {
@@ -182,6 +183,7 @@ export function EditorPane({
   onExport,
   onDiscardResults,
   bottomPanelVisible,
+  onHideBottomPanel,
 }: EditorPaneProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
@@ -369,6 +371,7 @@ export function EditorPane({
             profile={profile}
             outputLines={outputLines}
             apiOutputLines={apiOutputLines}
+            onClose={onHideBottomPanel}
           />
         </>
       ) : null}

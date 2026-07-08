@@ -15,6 +15,7 @@ interface BottomPanelProps {
   profile: RecipeProfile | null;
   outputLines: BenchmarkOutputLine[];
   apiOutputLines: BenchmarkOutputLine[];
+  onClose: () => void;
 }
 
 export function BottomPanel({
@@ -23,6 +24,7 @@ export function BottomPanel({
   profile,
   outputLines,
   apiOutputLines,
+  onClose,
 }: BottomPanelProps) {
   const [activeTab, setActiveTab] =
     useState<"size" | "hardware" | "output" | "apiOutput">("size");
@@ -78,6 +80,15 @@ export function BottomPanel({
           onClick={() => setActiveTab("apiOutput")}
         >
           API OUTPUT
+        </button>
+        <button
+          type="button"
+          className="bottom-panel-close"
+          aria-label="Hide bottom panel"
+          title="Hide bottom panel"
+          onClick={onClose}
+        >
+          <span className="tab-close" aria-hidden="true" />
         </button>
       </div>
       {activeTab === "hardware" ? (

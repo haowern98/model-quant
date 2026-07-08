@@ -60,6 +60,7 @@ interface WorkbenchShellProps {
   terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
   bottomPanelVisible: boolean;
+  onHideBottomPanel: () => void;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -131,6 +132,7 @@ export function WorkbenchShell({
   terminalBenchConfig,
   modelExplorerFocusVersion,
   bottomPanelVisible,
+  onHideBottomPanel,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -398,6 +400,7 @@ export function WorkbenchShell({
         onExport={onExport}
         onDiscardResults={onDiscardResults}
         bottomPanelVisible={bottomPanelVisible}
+        onHideBottomPanel={onHideBottomPanel}
       />
       <StatusBar
         running={running}

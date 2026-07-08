@@ -1237,6 +1237,7 @@ function App() {
           terminalBenchConfig={terminalBenchConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}
           bottomPanelVisible={bottomPanelVisible}
+          onHideBottomPanel={() => setBottomPanelVisible(false)}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}

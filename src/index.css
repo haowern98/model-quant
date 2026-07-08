@@ -2193,6 +2193,47 @@ body.resizing-bottom-panel * {
   vertical-align: -1px;
 }
 
+.bottom-tabs .bottom-panel-close {
+  width: 18px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  border-radius: 3px;
+}
+
+.bottom-tabs .bottom-panel-close:hover {
+  background: #333333;
+}
+
+.bottom-tabs .bottom-panel-close .tab-close {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  color: #cccccc;
+  position: relative;
+}
+
+.bottom-tabs .bottom-panel-close .tab-close::before,
+.bottom-tabs .bottom-panel-close .tab-close::after {
+  content: "";
+  position: absolute;
+  width: 11px;
+  height: 1.75px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.bottom-tabs .bottom-panel-close .tab-close::before {
+  transform: rotate(45deg);
+}
+
+.bottom-tabs .bottom-panel-close .tab-close::after {
+  transform: rotate(-45deg);
+}
+
 .bottom-content {
   padding: 14px 16px;
   display: grid;
