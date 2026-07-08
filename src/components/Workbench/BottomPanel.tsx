@@ -83,7 +83,15 @@ export function BottomPanel({
         </button>
         <button
           type="button"
-          className="bottom-panel-close"
+          className="bottom-panel-action bottom-panel-fullscreen"
+          aria-label="Maximize bottom panel"
+          title="Maximize bottom panel"
+        >
+          <span className="codicon codicon-screen-full" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="bottom-panel-action bottom-panel-close"
           aria-label="Hide bottom panel"
           title="Hide bottom panel"
           onClick={onClose}

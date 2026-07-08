@@ -2193,17 +2193,27 @@ body.resizing-bottom-panel * {
   vertical-align: -1px;
 }
 
-.bottom-tabs .bottom-panel-close {
+.bottom-tabs .bottom-panel-action {
   width: 18px;
   height: 24px;
   display: grid;
   place-items: center;
-  margin-left: auto;
   border-radius: 3px;
 }
 
-.bottom-tabs .bottom-panel-close:hover {
+.bottom-tabs .bottom-panel-fullscreen {
+  margin-left: auto;
+  margin-right: -14px;
+}
+
+.bottom-tabs .bottom-panel-action:hover {
   background: #333333;
+}
+
+.bottom-tabs .bottom-panel-fullscreen .codicon {
+  margin-right: 0;
+  font-size: 14px;
+  color: #cccccc;
 }
 
 .bottom-tabs .bottom-panel-close .tab-close {
