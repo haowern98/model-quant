@@ -359,6 +359,7 @@ export interface TerminalBenchBenchmarkConfigInput {
   samples: string;
   runsPerTask: string;
   maxTurns: string;
+  timeoutMultiplier: string;
   temperature: string;
   thinking: GpqaThinkingMode;
   topK: string;
@@ -373,6 +374,7 @@ export interface TerminalBenchBenchmarkConfig {
   samples?: number;
   runsPerTask: number;
   maxTurns: number;
+  timeoutMultiplier: number;
   temperature: number;
   thinking: GpqaThinkingMode;
   topK?: number;

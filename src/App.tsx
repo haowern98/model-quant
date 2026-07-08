@@ -126,6 +126,7 @@ const DEFAULT_TERMINAL_BENCH_CONFIG_INPUT: TerminalBenchBenchmarkConfigInput = {
   samples: "1",
   runsPerTask: "1",
   maxTurns: "1",
+  timeoutMultiplier: "3",
   temperature: "0",
   thinking: "off",
   topK: "40",
@@ -287,6 +288,15 @@ function resolveTerminalBenchConfigInput(
   );
   if (typeof maxTurns === "string") return maxTurns;
 
+  const timeoutMultiplier = parseOptionalIntegerField(
+    input.timeoutMultiplier,
+    3,
+    1,
+    1000,
+    "Terminal-Bench timeout multiplier",
+  );
+  if (typeof timeoutMultiplier === "string") return timeoutMultiplier;
+
   const temperatureText = input.temperature.trim();
   const temperature =
     temperatureText === "" ? GPQA_DEFAULT_TEMPERATURE : Number(temperatureText);
@@ -324,6 +334,7 @@ function resolveTerminalBenchConfigInput(
     samples,
     runsPerTask,
     maxTurns,
+    timeoutMultiplier,
     temperature,
     thinking: input.thinking,
     topK,

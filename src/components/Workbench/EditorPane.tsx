@@ -1151,7 +1151,7 @@ function TerminalBenchView({
   const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
   const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const updateIntegerField =
-    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns") =>
+    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns" | "timeoutMultiplier") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1425,6 +1425,14 @@ function TerminalBenchView({
                     placeholder="1"
                     inputMode="numeric"
                     onChange={updateIntegerField("maxTurns")}
+                  />
+                  <BenchmarkInputRow
+                    label="Timeout multiplier"
+                    inputLabel="Terminal-Bench timeout multiplier"
+                    value={config.timeoutMultiplier}
+                    placeholder="3"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("timeoutMultiplier")}
                   />
                 </BenchmarkInfoSection>
               </div>

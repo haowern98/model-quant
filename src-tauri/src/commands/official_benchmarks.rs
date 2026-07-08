@@ -167,6 +167,7 @@ pub struct TerminalBenchRunConfig {
     pub samples: Option<u64>,
     pub runs_per_task: Option<u64>,
     pub max_turns: Option<u64>,
+    pub timeout_multiplier: Option<u64>,
     pub temperature: Option<f64>,
     pub thinking: Option<GpqaThinkingMode>,
     pub top_k: Option<i32>,
@@ -208,6 +209,7 @@ struct EffectiveTerminalBenchRunConfig {
     samples: Option<u64>,
     runs_per_task: u64,
     max_turns: u64,
+    timeout_multiplier: u64,
     temperature: f64,
     top_k: Option<i32>,
     repeat_penalty: Option<f64>,
@@ -294,6 +296,7 @@ fn effective_terminal_bench_run_config(
         samples: Some(1),
         runs_per_task: Some(1),
         max_turns: Some(1),
+        timeout_multiplier: Some(3),
         temperature: None,
         thinking: None,
         top_k: None,
@@ -316,6 +319,10 @@ fn effective_terminal_bench_run_config(
     let max_turns = config.max_turns.unwrap_or(1);
     if max_turns == 0 || max_turns > 1000 {
         return Err("Terminal-Bench max turns must be between 1 and 1000.".to_string());
+    }
+    let timeout_multiplier = config.timeout_multiplier.unwrap_or(3);
+    if timeout_multiplier == 0 || timeout_multiplier > 1000 {
+        return Err("Terminal-Bench timeout multiplier must be between 1 and 1000.".to_string());
     }
     let temperature = config.temperature.unwrap_or(GPQA_DEFAULT_TEMPERATURE);
     if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
@@ -352,6 +359,7 @@ fn effective_terminal_bench_run_config(
         samples: config.samples,
         runs_per_task,
         max_turns,
+        timeout_multiplier,
         temperature,
         top_k: config.top_k,
         repeat_penalty: config.repeat_penalty,
@@ -2742,6 +2750,7 @@ fn run_terminal_bench_benchmark_blocking(
     let (task_dir, task_name) = terminal_bench_task_path(&app_data_dir);
     let run_dir = gpqa_run_dir(&app_data_dir).join(format!("terminal-bench-{}", unix_millis()));
     std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
+    let terminal_bench_agent = write_terminal_bench_terminus_shim(&run_dir)?;
 
     let mut command = Command::new("uvx");
     hide_child_console(&mut command);
@@ -2752,9 +2761,11 @@ fn run_terminal_bench_benchmark_blocking(
             &base_url,
             &model_id,
             &effective_config,
+            terminal_bench_agent,
         ))
         .env("OPENAI_API_KEY", api_key)
         .env("OPENAI_BASE_URL", base_url)
+        .env("PYTHONPATH", &run_dir)
         .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2904,12 +2915,32 @@ fn terminal_bench_task_images(task_root: &Path) -> Result<BTreeSet<String>, Stri
     Ok(images)
 }
 
+const TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH: &str =
+    "modelinspector_terminus2:ModelInspectorTerminus2";
+
+fn write_terminal_bench_terminus_shim(run_dir: &Path) -> Result<&'static str, String> {
+    let script = r#"from harbor.agents.terminus_2.terminus_2 import Terminus2
+from harbor.agents.terminus_2.tmux_session import TmuxSession
+
+# Windows rejects Harbor's default 65k docker exec paste command.
+TmuxSession._PASTE_BASE64_CHUNK_LEN = 8000
+
+
+class ModelInspectorTerminus2(Terminus2):
+    pass
+"#;
+    std::fs::write(run_dir.join("modelinspector_terminus2.py"), script)
+        .map_err(|e| format!("Failed to write Terminal-Bench Terminus shim: {e}"))?;
+    Ok(TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH)
+}
+
 fn terminal_bench_harbor_benchmark_args(
     task_dir: &Path,
     jobs_dir: &Path,
     base_url: &str,
     model_id: &str,
     config: &EffectiveTerminalBenchRunConfig,
+    agent_import_path: &str,
 ) -> Vec<String> {
     let mut args = vec![
         "--from".to_string(),
@@ -2923,7 +2954,7 @@ fn terminal_bench_harbor_benchmark_args(
         "--job-name".to_string(),
         "modelinspector-terminal-bench".to_string(),
         "--agent".to_string(),
-        "terminus-2".to_string(),
+        agent_import_path.to_string(),
         "--model".to_string(),
         terminal_bench_litellm_model_name(model_id),
         "--ak".to_string(),
@@ -2948,6 +2979,8 @@ fn terminal_bench_harbor_benchmark_args(
         "1".to_string(),
         "--n-attempts".to_string(),
         config.runs_per_task.to_string(),
+        "--agent-timeout-multiplier".to_string(),
+        config.timeout_multiplier.to_string(),
         "--max-retries".to_string(),
         "0".to_string(),
         "--yes".to_string(),
@@ -3710,6 +3743,7 @@ mod tests {
             samples: Some(3),
             runs_per_task: 2,
             max_turns: 4,
+            timeout_multiplier: 3,
             temperature: 0.25,
             top_k: Some(40),
             repeat_penalty: Some(1.1),
@@ -3723,12 +3757,13 @@ mod tests {
             "http://127.0.0.1:1234/v1",
             "demo.gguf",
             &config,
+            TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH,
         );
 
         assert!(args.contains(&"--path".to_string()));
         assert!(args.contains(&task.to_string_lossy().to_string()));
         assert!(args.contains(&"--agent".to_string()));
-        assert!(args.contains(&"terminus-2".to_string()));
+        assert!(args.contains(&"modelinspector_terminus2:ModelInspectorTerminus2".to_string()));
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"openai/demo.gguf".to_string()));
         assert!(args.contains(&"--ak".to_string()));
@@ -3740,9 +3775,28 @@ mod tests {
         assert!(!args.iter().any(|arg| arg.contains("local-key")));
         assert!(args.contains(&"--n-attempts".to_string()));
         assert!(args.contains(&"2".to_string()));
+        assert!(args.contains(&"--agent-timeout-multiplier".to_string()));
         assert!(args.contains(&"--n-tasks".to_string()));
         assert!(args.contains(&"3".to_string()));
         assert!(args.contains(&"--delete".to_string()));
+    }
+
+    #[test]
+    fn writes_terminal_bench_terminus_windows_paste_shim() {
+        let root = std::env::temp_dir().join(format!("terminal-bench-shim-test-{}", unix_millis()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let import_path = write_terminal_bench_terminus_shim(&root).unwrap();
+        let script = std::fs::read_to_string(root.join("modelinspector_terminus2.py")).unwrap();
+
+        assert_eq!(
+            import_path,
+            "modelinspector_terminus2:ModelInspectorTerminus2"
+        );
+        assert!(script.contains("TmuxSession._PASTE_BASE64_CHUNK_LEN = 8000"));
+        assert!(script.contains("class ModelInspectorTerminus2(Terminus2):"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
