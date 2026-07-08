@@ -80,6 +80,7 @@ interface WorkbenchShellProps {
   onDeleteGpqaDataset: () => void;
   onDeleteGpqaHarness: () => void;
   onRefreshGpqaStatus: () => Promise<void>;
+  onRefreshAllBenchmarks: () => void;
   onBeginBenchmarkSetup: (message?: string | null) => void;
   onEndBenchmarkSetup: () => void;
   onOpenGpqaDetails: () => void;
@@ -149,6 +150,7 @@ export function WorkbenchShell({
   onDeleteGpqaDataset,
   onDeleteGpqaHarness,
   onRefreshGpqaStatus,
+  onRefreshAllBenchmarks,
   onBeginBenchmarkSetup,
   onEndBenchmarkSetup,
   onOpenGpqaDetails,
@@ -276,13 +278,14 @@ export function WorkbenchShell({
       />
       {activeActivity === "testing" ? (
         <TestingPanel
+          running={running}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
           terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           terminalBenchEditorActive={terminalBenchEditorActive}
-          onInstallGpqaHarness={onInstallGpqaHarness}
+          onRefreshAllBenchmarks={onRefreshAllBenchmarks}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
           onOpenHumanEvalDetails={onOpenHumanEvalDetails}

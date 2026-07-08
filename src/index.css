@@ -316,6 +316,10 @@ button {
   height: 100%;
   padding: 0 9px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
 }
 
 .menu button:hover,

@@ -486,6 +486,34 @@ function App() {
     void refreshTerminalBenchDatasetStatus();
   }, [refreshTerminalBenchDatasetStatus]);
 
+  const refreshAllBenchmarkStatuses = useCallback(async () => {
+    startOperation("Refreshing benchmark statuses");
+    try {
+      await Promise.all([
+        refreshGpqaStatus(),
+        getHumanEvalStatus()
+          .then(setHumanEvalStatus)
+          .catch((error) => {
+            setHumanEvalStatus({
+              ...DEFAULT_HUMANEVAL_STATUS,
+              detail: (error as Error).message,
+            });
+          }),
+        refreshTerminalBenchStatus(),
+        refreshTerminalBenchDatasetStatus(),
+      ]);
+      setAppError(null);
+    } finally {
+      endOperation();
+    }
+  }, [
+    endOperation,
+    refreshGpqaStatus,
+    refreshTerminalBenchDatasetStatus,
+    refreshTerminalBenchStatus,
+    startOperation,
+  ]);
+
   useEffect(() => {
     const refreshBenchmarkStatuses = () => {
       void refreshGpqaStatus();
@@ -1223,6 +1251,7 @@ function App() {
           onDeleteGpqaDataset={handleDeleteGpqaDataset}
           onDeleteGpqaHarness={handleDeleteGpqaHarness}
           onRefreshGpqaStatus={refreshGpqaStatus}
+          onRefreshAllBenchmarks={refreshAllBenchmarkStatuses}
           onBeginBenchmarkSetup={startOperation}
           onEndBenchmarkSetup={endOperation}
           onOpenGpqaDetails={handleOpenGpqaDetails}

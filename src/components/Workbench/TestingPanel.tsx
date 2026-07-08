@@ -7,13 +7,14 @@ import type {
 import { ExplorerSectionHeader } from "./ExplorerTree";
 
 interface TestingPanelProps {
+  running: boolean;
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
   terminalBenchStatus: TerminalBenchStatus;
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
   terminalBenchEditorActive: boolean;
-  onInstallGpqaHarness: () => void;
+  onRefreshAllBenchmarks: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
@@ -23,12 +24,14 @@ interface TestingPanelProps {
 type TestingSectionId = "benchmarks" | "environment" | "latestRuns";
 
 export function TestingPanel({
+  running,
   gpqaStatus,
   humanevalStatus,
   terminalBenchStatus,
   gpqaEditorActive,
   humanevalEditorActive,
   terminalBenchEditorActive,
+  onRefreshAllBenchmarks,
   onOpenGpqaDetails,
   onOpenHumanEvalDetails,
   onOpenTerminalBenchDetails,
@@ -57,6 +60,18 @@ export function TestingPanel({
           label="BENCHMARKS"
           expanded={sections.benchmarks}
           onClick={() => toggleSection("benchmarks")}
+          action={
+            <button
+              type="button"
+              className="tree-action-button"
+              aria-label="Refresh All"
+              title="Refresh All"
+              disabled={running}
+              onClick={onRefreshAllBenchmarks}
+            >
+              <span className="codicon codicon-refresh" aria-hidden="true" />
+            </button>
+          }
         />
         {sections.benchmarks && (
           <div className="explorer-section-body benchmark-card-list testing-panel-body">
