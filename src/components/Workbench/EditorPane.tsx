@@ -185,6 +185,7 @@ export function EditorPane({
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
+  const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -247,11 +248,9 @@ export function EditorPane({
       </div>
 
       <div className="editor-breadcrumbs">
-        <span>{basename(modelPath)}</span>
+        <span>{showingBenchmark ? "Benchmarks" : basename(modelPath)}</span>
         <span>&gt;</span>
         <span>{activeBreadcrumb}</span>
-        <span>&gt;</span>
-        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark ? "benchmark" : "tensors"}</span>
       </div>
 
       {activeResult ? (
