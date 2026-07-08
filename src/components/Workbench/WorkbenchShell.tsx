@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import type {
   AssignPattern,
   BenchmarkRunId,
-  BenchmarkResult,
   BenchmarkOutputLine,
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
@@ -41,7 +40,6 @@ interface WorkbenchShellProps {
   activeLayerIndex: number | null;
   openEditors: EditorTab[];
   activeEditorId: string | null;
-  latestBenchmarkResult: BenchmarkResult | null;
   expandedLayers: Set<number>;
   running: boolean;
   cancelling: boolean;
@@ -111,7 +109,6 @@ export function WorkbenchShell({
   activeLayerIndex,
   openEditors,
   activeEditorId,
-  latestBenchmarkResult,
   expandedLayers,
   running,
   cancelling,
@@ -279,22 +276,12 @@ export function WorkbenchShell({
       />
       {activeActivity === "testing" ? (
         <TestingPanel
-          modelPath={modelPath}
-          assignments={assignments}
-          latestBenchmarkResult={latestBenchmarkResult}
-          running={running}
-          cancelling={cancelling}
-          progress={progress}
-          evalPreset={evalPreset}
-          testMode={testMode}
-          selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
           terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           terminalBenchEditorActive={terminalBenchEditorActive}
-          onToggleRunTarget={onToggleRunTarget}
           onInstallGpqaHarness={onInstallGpqaHarness}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}

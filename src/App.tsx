@@ -1152,13 +1152,6 @@ function App() {
     activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
-  const latestBenchmarkResult =
-    [...openEditors]
-      .reverse()
-      .find(
-        (editor): editor is Extract<EditorTab, { kind: "eval-results" }> =>
-          editor.kind === "eval-results",
-      )?.result ?? null;
   const visibleError = modelError ?? appError;
 
   return (
@@ -1190,7 +1183,6 @@ function App() {
           activeLayerIndex={selectedLayerIndex}
           openEditors={openEditors}
           activeEditorId={activeEditorId}
-          latestBenchmarkResult={latestBenchmarkResult}
           expandedLayers={expandedLayers}
           running={running}
           cancelling={cancelling}

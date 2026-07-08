@@ -137,15 +137,6 @@ export function RunControls({
             role="menu"
             aria-label="Test run options"
           >
-            <div className="run-menu-section-label">LOCAL CHECKS</div>
-            <RunMenuCheckbox
-              label="PPL Check"
-              status={hasModel ? "Ready" : "Open model"}
-              checked={selectedRunIds.includes("ppl_check")}
-              disabled={running}
-              onClick={() => onToggleRunTarget("ppl_check")}
-            />
-            <div className="run-menu-separator" role="separator" />
             <div className="run-menu-section-label">OFFICIAL BENCHMARKS</div>
             <RunMenuCheckbox
               label="GPQA Diamond"
