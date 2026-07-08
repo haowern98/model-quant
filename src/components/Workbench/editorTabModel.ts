@@ -10,6 +10,7 @@ export type EditorTab =
       id: `layer:${number}`;
       kind: "layer";
       layerIndex: number;
+      label?: string;
     }
   | {
       id: `eval-results:${string}`;
@@ -33,11 +34,12 @@ export type EditorTab =
       kind: "terminal-bench-details";
     };
 
-export function layerEditorTab(layerIndex: number): EditorTab {
+export function layerEditorTab(layerIndex: number, label?: string): EditorTab {
   return {
     id: `layer:${layerIndex}`,
     kind: "layer",
     layerIndex,
+    label,
   };
 }
 
@@ -83,6 +85,7 @@ export function editorTabLabel(tab: EditorTab): string {
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";
   if (tab.kind === "humaneval-details") return "HumanEval";
   if (tab.kind === "terminal-bench-details") return "Terminal-Bench 2.1";
+  if (tab.label) return tab.label;
   if (tab.layerIndex < 0) return "Global tensors";
   return `Layer ${tab.layerIndex}`;
 }

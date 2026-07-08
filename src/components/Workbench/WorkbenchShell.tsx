@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import type {
   AssignPattern,
   BenchmarkRunId,
-  BenchmarkResult,
   BenchmarkOutputLine,
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
@@ -41,7 +40,6 @@ interface WorkbenchShellProps {
   activeLayerIndex: number | null;
   openEditors: EditorTab[];
   activeEditorId: string | null;
-  latestBenchmarkResult: BenchmarkResult | null;
   expandedLayers: Set<number>;
   running: boolean;
   cancelling: boolean;
@@ -61,6 +59,8 @@ interface WorkbenchShellProps {
   humanevalConfig: GpqaBenchmarkConfigInput;
   terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
+  bottomPanelVisible: boolean;
+  onHideBottomPanel: () => void;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -82,6 +82,7 @@ interface WorkbenchShellProps {
   onDeleteGpqaDataset: () => void;
   onDeleteGpqaHarness: () => void;
   onRefreshGpqaStatus: () => Promise<void>;
+  onRefreshAllBenchmarks: () => void;
   onBeginBenchmarkSetup: (message?: string | null) => void;
   onEndBenchmarkSetup: () => void;
   onOpenGpqaDetails: () => void;
@@ -111,7 +112,6 @@ export function WorkbenchShell({
   activeLayerIndex,
   openEditors,
   activeEditorId,
-  latestBenchmarkResult,
   expandedLayers,
   running,
   cancelling,
@@ -131,6 +131,8 @@ export function WorkbenchShell({
   humanevalConfig,
   terminalBenchConfig,
   modelExplorerFocusVersion,
+  bottomPanelVisible,
+  onHideBottomPanel,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -152,6 +154,7 @@ export function WorkbenchShell({
   onDeleteGpqaDataset,
   onDeleteGpqaHarness,
   onRefreshGpqaStatus,
+  onRefreshAllBenchmarks,
   onBeginBenchmarkSetup,
   onEndBenchmarkSetup,
   onOpenGpqaDetails,
@@ -279,23 +282,14 @@ export function WorkbenchShell({
       />
       {activeActivity === "testing" ? (
         <TestingPanel
-          modelPath={modelPath}
-          assignments={assignments}
-          latestBenchmarkResult={latestBenchmarkResult}
           running={running}
-          cancelling={cancelling}
-          progress={progress}
-          evalPreset={evalPreset}
-          testMode={testMode}
-          selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
           terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           terminalBenchEditorActive={terminalBenchEditorActive}
-          onToggleRunTarget={onToggleRunTarget}
-          onInstallGpqaHarness={onInstallGpqaHarness}
+          onRefreshAllBenchmarks={onRefreshAllBenchmarks}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
           onOpenHumanEvalDetails={onOpenHumanEvalDetails}
@@ -405,6 +399,8 @@ export function WorkbenchShell({
         onSaveRecipe={onSaveRecipe}
         onExport={onExport}
         onDiscardResults={onDiscardResults}
+        bottomPanelVisible={bottomPanelVisible}
+        onHideBottomPanel={onHideBottomPanel}
       />
       <StatusBar
         running={running}

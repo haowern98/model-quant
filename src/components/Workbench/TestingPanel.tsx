@@ -1,92 +1,45 @@
 import { useState } from "react";
 import type {
-  BenchmarkRunId,
-  BenchmarkResult,
   GpqaDiamondStatus,
   HumanEvalStatus,
-  ProgressEvent,
-  QuantType,
-  RecipeEvalPreset,
-  RecipeTestMode,
   TerminalBenchStatus,
 } from "../../types";
-import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
+import { ExplorerSectionHeader } from "./ExplorerTree";
 
 interface TestingPanelProps {
-  modelPath: string | null;
-  assignments: Record<string, QuantType>;
-  latestBenchmarkResult: BenchmarkResult | null;
   running: boolean;
-  cancelling: boolean;
-  progress: ProgressEvent | null;
-  evalPreset: RecipeEvalPreset;
-  testMode: RecipeTestMode;
-  selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
   terminalBenchStatus: TerminalBenchStatus;
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
   terminalBenchEditorActive: boolean;
-  onToggleRunTarget: (target: BenchmarkRunId) => void;
-  onInstallGpqaHarness: () => void;
+  onRefreshAllBenchmarks: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
   onOpenTerminalBenchDetails: () => void;
 }
 
-type TestingSectionId = "localChecks" | "benchmarks" | "environment" | "latestRuns";
-
-function modeLabel(mode: RecipeTestMode): string {
-  return mode === "compare_baseline" ? "Compare" : "Single";
-}
-
-function statusLabel({
-  running,
-  cancelling,
-  progress,
-  latestBenchmarkResult,
-}: Pick<TestingPanelProps, "running" | "cancelling" | "progress" | "latestBenchmarkResult">) {
-  if (cancelling) return "Cancelling";
-  if (running) return progress?.message ?? "Running";
-  if (latestBenchmarkResult) return "Latest run ready";
-  return "Ready";
-}
+type TestingSectionId = "benchmarks" | "latestRuns";
 
 export function TestingPanel({
-  modelPath,
-  assignments,
-  latestBenchmarkResult,
   running,
-  cancelling,
-  progress,
-  testMode,
-  selectedRunIds,
   gpqaStatus,
   humanevalStatus,
   terminalBenchStatus,
   gpqaEditorActive,
   humanevalEditorActive,
   terminalBenchEditorActive,
-  onToggleRunTarget,
+  onRefreshAllBenchmarks,
   onOpenGpqaDetails,
   onOpenHumanEvalDetails,
   onOpenTerminalBenchDetails,
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
-    localChecks: true,
     benchmarks: true,
-    environment: true,
     latestRuns: true,
   });
-
-  const changedTargetCount = Object.keys(assignments).length;
-  const verifiedTargets =
-    latestBenchmarkResult?.requestedTargetCount !== undefined &&
-    latestBenchmarkResult?.verifiedTargetCount !== undefined
-      ? `${latestBenchmarkResult.verifiedTargetCount}/${latestBenchmarkResult.requestedTargetCount}`
-      : "0/0";
 
   const toggleSection = (section: TestingSectionId) => {
     setSections((current) => ({ ...current, [section]: !current[section] }));
@@ -101,41 +54,23 @@ export function TestingPanel({
         </button>
       </div>
 
-      <section className="testing-section">
-        <ExplorerSectionHeader
-          label="LOCAL CHECKS"
-          expanded={sections.localChecks}
-          onClick={() => toggleSection("localChecks")}
-        />
-        {sections.localChecks && (
-          <div className="explorer-section-body">
-            <ExplorerTreeRow
-              label="PPL Check"
-              right={modelPath ? "Ready" : "Open model"}
-              expanded={false}
-              active
-              ariaLabel={`PPL Check ${modelPath ? "Ready" : "Open model"}`}
-            />
-            <button
-              type="button"
-              className="testing-detail-action"
-              disabled={!modelPath || running}
-              onClick={() => onToggleRunTarget("ppl_check")}
-            >
-              {selectedRunIds.includes("ppl_check") ? "Selected" : "Select"}
-            </button>
-            <TestingDetailRow label="Mode" value={modeLabel(testMode)} />
-            <TestingDetailRow label="Changed targets" value={changedTargetCount} />
-            <TestingDetailRow label="Verified targets" value={verifiedTargets} />
-          </div>
-        )}
-      </section>
-
       <section className="testing-section testing-benchmarks-section">
         <ExplorerSectionHeader
           label="BENCHMARKS"
           expanded={sections.benchmarks}
           onClick={() => toggleSection("benchmarks")}
+          action={
+            <button
+              type="button"
+              className="tree-action-button benchmark-refresh-button"
+              aria-label="Refresh All"
+              title="Refresh All"
+              disabled={running}
+              onClick={onRefreshAllBenchmarks}
+            >
+              <span className="codicon codicon-refresh" aria-hidden="true" />
+            </button>
+          }
         />
         {sections.benchmarks && (
           <div className="explorer-section-body benchmark-card-list testing-panel-body">
@@ -175,33 +110,13 @@ export function TestingPanel({
 
       <section className="testing-section">
         <ExplorerSectionHeader
-          label="ENVIRONMENT"
-          expanded={sections.environment}
-          onClick={() => toggleSection("environment")}
-        />
-        {sections.environment && (
-          <div className="explorer-section-body">
-            <TestingDetailRow label="Python" value={gpqaStatus.python ?? "Unavailable"} />
-            <TestingDetailRow label="EvalScope" value={gpqaStatus.evalscope ?? "Unavailable"} />
-            <TestingDetailRow label="Dataset cache" value="Open" />
-          </div>
-        )}
-      </section>
-
-      <section className="testing-section">
-        <ExplorerSectionHeader
           label="LATEST RUNS"
           expanded={sections.latestRuns}
           onClick={() => toggleSection("latestRuns")}
         />
         {sections.latestRuns && (
           <div className="explorer-section-body">
-            <ExplorerTreeRow label="GPQA Diamond" right="63.1%" ariaLabel="GPQA Diamond 63.1%" />
-            <ExplorerTreeRow
-              label="PPL Check"
-              right={statusLabel({ running, cancelling, progress, latestBenchmarkResult })}
-              ariaLabel="PPL Check latest status"
-            />
+            <TestingDetailRow label="GPQA Diamond" value="63.1%" />
           </div>
         )}
       </section>

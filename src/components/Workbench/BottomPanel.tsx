@@ -15,6 +15,9 @@ interface BottomPanelProps {
   profile: RecipeProfile | null;
   outputLines: BenchmarkOutputLine[];
   apiOutputLines: BenchmarkOutputLine[];
+  onClose: () => void;
+  maximized: boolean;
+  onToggleMaximized: () => void;
 }
 
 export function BottomPanel({
@@ -23,9 +26,12 @@ export function BottomPanel({
   profile,
   outputLines,
   apiOutputLines,
+  onClose,
+  maximized,
+  onToggleMaximized,
 }: BottomPanelProps) {
   const [activeTab, setActiveTab] =
-    useState<"size" | "hardware" | "output" | "apiOutput">("size");
+    useState<"size" | "hardware" | "output" | "apiOutput">("hardware");
   const totalTargetBytes = tensors.reduce((sum, tensor) => {
     const quant = assignments[tensor.name] ?? toTargetQuant(tensor.currentQuant);
     const bits = QUANT_TYPES.find((item) => item.value === quant)?.bitsPerWeight ?? 4.5;
@@ -41,29 +47,12 @@ export function BottomPanel({
         <button
           type="button"
           role="tab"
-          className={activeTab === "size" ? "active" : ""}
-          aria-label="SIZE PROFILE"
-          aria-selected={activeTab === "size"}
-          onClick={() => setActiveTab("size")}
-        >
-          SIZE PROFILE
-        </button>
-        <button
-          type="button"
-          role="tab"
           className={activeTab === "hardware" ? "active" : ""}
           aria-label="HARDWARE"
           aria-selected={activeTab === "hardware"}
           onClick={() => setActiveTab("hardware")}
         >
-          <span className="codicon codicon-pulse" aria-hidden="true" />
           HARDWARE
-        </button>
-        <button type="button" role="tab" aria-label="EVAL RESULTS">
-          EVAL RESULTS
-        </button>
-        <button type="button" role="tab" aria-label="SAMPLE AUDIT">
-          SAMPLE AUDIT
         </button>
         <button
           type="button"
@@ -84,6 +73,27 @@ export function BottomPanel({
           onClick={() => setActiveTab("apiOutput")}
         >
           API OUTPUT
+        </button>
+        <button
+          type="button"
+          className="bottom-panel-action bottom-panel-fullscreen"
+          aria-label={maximized ? "Restore bottom panel" : "Maximize bottom panel"}
+          title={maximized ? "Restore bottom panel" : "Maximize bottom panel"}
+          onClick={onToggleMaximized}
+        >
+          <span
+            className={`codicon codicon-${maximized ? "screen-normal" : "screen-full"}`}
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          type="button"
+          className="bottom-panel-action bottom-panel-close"
+          aria-label="Hide bottom panel"
+          title="Hide bottom panel"
+          onClick={onClose}
+        >
+          <span className="tab-close" aria-hidden="true" />
         </button>
       </div>
       {activeTab === "hardware" ? (

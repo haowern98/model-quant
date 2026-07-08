@@ -316,6 +316,10 @@ button {
   height: 100%;
   padding: 0 9px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
 }
 
 .menu button:hover,
@@ -1051,6 +1055,11 @@ body.resizing-bottom-panel * {
   border-radius: 3px;
 }
 
+.benchmark-refresh-button .codicon {
+  font-size: 14px;
+  transform: translateY(1px);
+}
+
 .tree-action-spacer {
   width: 24px;
   height: 20px;
@@ -1194,6 +1203,14 @@ body.resizing-bottom-panel * {
   display: grid;
   grid-template-rows: 35px 29px minmax(0, 1fr) 4px var(--bottom-panel-height, 143px);
   background: var(--vscode-editor);
+}
+
+.editor-pane.bottom-panel-hidden {
+  grid-template-rows: 35px 29px minmax(0, 1fr);
+}
+
+.editor-pane.bottom-panel-maximized {
+  grid-template-rows: 35px 29px 0 1fr;
 }
 
 .editor-tabs-bar {
@@ -1557,7 +1574,7 @@ body.resizing-bottom-panel * {
   overflow: hidden;
   background: var(--vscode-editor);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 78px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .eval-results-editor {
@@ -2000,6 +2017,7 @@ body.resizing-bottom-panel * {
 .tensor-table-scroll {
   min-width: 100%;
   overflow-x: auto;
+  padding-right: 18px;
 }
 
 .tensor-empty-state {
@@ -2132,49 +2150,6 @@ body.resizing-bottom-panel * {
   vertical-align: 1px;
 }
 
-.editor-minimap {
-  position: relative;
-  background: var(--vscode-editor);
-  border-left: 1px solid var(--vscode-border-subtle);
-  padding: 56px 10px 0;
-  overflow: hidden;
-}
-
-.editor-minimap::before {
-  content: "";
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  top: 56px;
-  height: 88px;
-  border: 1px solid rgba(133, 133, 133, 0.22);
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.editor-minimap span {
-  display: block;
-  width: 54px;
-  height: 2px;
-  margin-bottom: 5px;
-  background: rgba(204, 204, 204, 0.2);
-}
-
-.editor-minimap span:nth-child(3n) {
-  width: 38px;
-}
-
-.editor-minimap span:nth-child(4n) {
-  width: 24px;
-}
-
-.editor-minimap span.blue {
-  background: rgba(156, 220, 254, 0.45);
-}
-
-.editor-minimap span.amber {
-  background: rgba(215, 186, 125, 0.5);
-}
-
 .bottom-panel {
   min-height: 0;
   background: var(--vscode-panel);
@@ -2220,6 +2195,57 @@ body.resizing-bottom-panel * {
   margin-right: 4px;
   font-size: 12px;
   vertical-align: -1px;
+}
+
+.bottom-tabs .bottom-panel-action {
+  width: 18px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+}
+
+.bottom-tabs .bottom-panel-fullscreen {
+  margin-left: auto;
+  margin-right: -14px;
+}
+
+.bottom-tabs .bottom-panel-action:hover {
+  background: #333333;
+}
+
+.bottom-tabs .bottom-panel-fullscreen .codicon {
+  margin-right: 0;
+  font-size: 14px;
+  color: #cccccc;
+}
+
+.bottom-tabs .bottom-panel-close .tab-close {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  color: #cccccc;
+  position: relative;
+}
+
+.bottom-tabs .bottom-panel-close .tab-close::before,
+.bottom-tabs .bottom-panel-close .tab-close::after {
+  content: "";
+  position: absolute;
+  width: 11px;
+  height: 1.75px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.bottom-tabs .bottom-panel-close .tab-close::before {
+  transform: rotate(45deg);
+}
+
+.bottom-tabs .bottom-panel-close .tab-close::after {
+  transform: rotate(-45deg);
 }
 
 .bottom-content {

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { TensorTable } from "../DetailPanel/TensorTable";
 import type {
+  BenchmarkResult,
   BenchmarkOutputLine,
   BenchmarkRunId,
   GpqaBenchmarkConfigInput,
@@ -111,6 +112,8 @@ interface EditorPaneProps {
   onSaveRecipe: () => void;
   onExport: () => void;
   onDiscardResults: () => void;
+  bottomPanelVisible: boolean;
+  onHideBottomPanel: () => void;
 }
 
 function basename(path: string | null): string {
@@ -118,10 +121,11 @@ function basename(path: string | null): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-function layerTitle(layerIndex: number | null): string {
-  if (layerIndex === null) return "No layer selected";
-  if (layerIndex < 0) return "Global tensors";
-  return `Layer ${layerIndex}`;
+function benchmarkResultLabel(result: BenchmarkResult): string | null {
+  if (result.testMode === "official_gpqa_diamond") return "GPQA Diamond";
+  if (result.testMode === "official_humaneval") return "HumanEval";
+  if (result.testMode === "official_terminal_bench") return "Terminal-Bench 2.1";
+  return null;
 }
 
 export function EditorPane({
@@ -178,25 +182,15 @@ export function EditorPane({
   onSaveRecipe,
   onExport,
   onDiscardResults,
+  bottomPanelVisible,
+  onHideBottomPanel,
 }: EditorPaneProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
+  const [bottomPanelMaximized, setBottomPanelMaximized] = useState(false);
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
-  const activeLayerIndex =
-    activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
-  const activeTitle =
-    activeEditor?.kind === "eval-results"
-      ? "Eval Results"
-      : activeEditor?.kind === "gpqa-details"
-        ? "GPQA Diamond"
-        : activeEditor?.kind === "gpqa-dataset"
-          ? "GPQA Diamond Dataset"
-          : activeEditor?.kind === "humaneval-details"
-            ? "HumanEval"
-            : activeEditor?.kind === "terminal-bench-details"
-              ? "Terminal-Bench 2.1"
-      : layerTitle(activeLayerIndex);
+  const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
   const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
   const showingGpqaDetails = activeEditor?.kind === "gpqa-details";
@@ -204,6 +198,8 @@ export function EditorPane({
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
+  const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
+  const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -234,7 +230,9 @@ export function EditorPane({
   return (
     <main
       ref={editorRef}
-      className="editor-pane"
+      className={`editor-pane ${bottomPanelVisible ? "" : "bottom-panel-hidden"} ${
+        bottomPanelMaximized ? "bottom-panel-maximized" : ""
+      }`}
       style={{ "--bottom-panel-height": `${bottomPanelHeight}px` } as CSSProperties}
     >
       <div className="editor-tabs-bar">
@@ -266,11 +264,21 @@ export function EditorPane({
       </div>
 
       <div className="editor-breadcrumbs">
-        <span>{basename(modelPath)}</span>
-        <span>&gt;</span>
-        <span>{activeBreadcrumb}</span>
-        <span>&gt;</span>
-        <span>{activeResult || showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark ? "benchmark" : "tensors"}</span>
+        {activeResultBenchmark ? (
+          <>
+            <span>Benchmarks</span>
+            <span>&gt;</span>
+            <span>{activeResultBenchmark}</span>
+            <span>&gt;</span>
+            <span>Eval Results</span>
+          </>
+        ) : (
+          <>
+            <span>{showingBenchmark ? "Benchmarks" : basename(modelPath)}</span>
+            <span>&gt;</span>
+            <span>{activeBreadcrumb}</span>
+          </>
+        )}
       </div>
 
       {activeResult ? (
@@ -336,45 +344,44 @@ export function EditorPane({
               onAssignQuant={onAssignQuant}
             />
           </div>
-          <div className="editor-minimap" aria-hidden="true">
-            {Array.from({ length: 24 }, (_, index) => (
-              <span
-                key={index}
-                className={
-                  index % 5 === 0 ? "blue" : index % 7 === 0 ? "amber" : ""
-                }
-              />
-            ))}
-          </div>
         </section>
       )}
 
-      <div
-        className="resize-handle bottom-panel-resizer"
-        role="separator"
-        aria-label="Resize bottom panel"
-        aria-orientation="horizontal"
-        aria-valuemin={BOTTOM_PANEL_MIN_HEIGHT}
-        aria-valuemax={bottomPanelMaxHeight()}
-        aria-valuenow={Math.round(bottomPanelHeight)}
-        tabIndex={0}
-        onPointerDown={startBottomPanelResize}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-          event.preventDefault();
-          const direction = event.key === "ArrowUp" ? 1 : -1;
-          setBottomPanelHeight((height) =>
-            clamp(height + direction * 10, BOTTOM_PANEL_MIN_HEIGHT, bottomPanelMaxHeight()),
-          );
-        }}
-      />
-      <BottomPanel
-        tensors={tensors}
-        assignments={assignments}
-        profile={profile}
-        outputLines={outputLines}
-        apiOutputLines={apiOutputLines}
-      />
+      {bottomPanelVisible ? (
+        <>
+          {bottomPanelMaximized ? null : (
+            <div
+              className="resize-handle bottom-panel-resizer"
+              role="separator"
+              aria-label="Resize bottom panel"
+              aria-orientation="horizontal"
+              aria-valuemin={BOTTOM_PANEL_MIN_HEIGHT}
+              aria-valuemax={bottomPanelMaxHeight()}
+              aria-valuenow={Math.round(bottomPanelHeight)}
+              tabIndex={0}
+              onPointerDown={startBottomPanelResize}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                event.preventDefault();
+                const direction = event.key === "ArrowUp" ? 1 : -1;
+                setBottomPanelHeight((height) =>
+                  clamp(height + direction * 10, BOTTOM_PANEL_MIN_HEIGHT, bottomPanelMaxHeight()),
+                );
+              }}
+            />
+          )}
+          <BottomPanel
+            tensors={tensors}
+            assignments={assignments}
+            profile={profile}
+            outputLines={outputLines}
+            apiOutputLines={apiOutputLines}
+            onClose={onHideBottomPanel}
+            maximized={bottomPanelMaximized}
+            onToggleMaximized={() => setBottomPanelMaximized((maximized) => !maximized)}
+          />
+        </>
+      ) : null}
     </main>
   );
 }

@@ -390,6 +390,7 @@ function App() {
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
+  const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [modelExplorerFocusVersion, setModelExplorerFocusVersion] = useState(0);
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
     () => new Set(),
@@ -486,6 +487,34 @@ function App() {
     void refreshTerminalBenchDatasetStatus();
   }, [refreshTerminalBenchDatasetStatus]);
 
+  const refreshAllBenchmarkStatuses = useCallback(async () => {
+    startOperation("Refreshing benchmark statuses");
+    try {
+      await Promise.all([
+        refreshGpqaStatus(),
+        getHumanEvalStatus()
+          .then(setHumanEvalStatus)
+          .catch((error) => {
+            setHumanEvalStatus({
+              ...DEFAULT_HUMANEVAL_STATUS,
+              detail: (error as Error).message,
+            });
+          }),
+        refreshTerminalBenchStatus(),
+        refreshTerminalBenchDatasetStatus(),
+      ]);
+      setAppError(null);
+    } finally {
+      endOperation();
+    }
+  }, [
+    endOperation,
+    refreshGpqaStatus,
+    refreshTerminalBenchDatasetStatus,
+    refreshTerminalBenchStatus,
+    startOperation,
+  ]);
+
   useEffect(() => {
     const refreshBenchmarkStatuses = () => {
       void refreshGpqaStatus();
@@ -525,18 +554,28 @@ function App() {
     [openEditors, resetRecipeForModel],
   );
 
+  const layerDisplayLabel = useCallback((layerIndex: number) => {
+    if (layerIndex < 0) return "Global tensors";
+    const parts = model?.tensors.find((tensor) => tensor.layerIndex === layerIndex)?.name.split(".").filter(Boolean) ?? [];
+    const numberIndex = parts.findIndex((part) => /^\d+$/.test(part));
+    if (numberIndex > 0) return parts.slice(0, numberIndex + 1).join(".");
+    return `Layer ${layerIndex}`;
+  }, [model?.tensors]);
+
   const handleOpenLayer = useCallback((layerIndex: number) => {
-    const tab = layerEditorTab(layerIndex);
+    const tab = layerEditorTab(layerIndex, layerDisplayLabel(layerIndex));
     setActiveEditorId(tab.id);
     setOpenEditors((current) =>
-      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
+      current.some((editor) => editor.id === tab.id)
+        ? current.map((editor) => (editor.id === tab.id ? tab : editor))
+        : [...current, tab],
     );
     setExpandedLayers((current) => {
       const next = new Set(current);
       next.add(layerIndex);
       return next;
     });
-  }, []);
+  }, [layerDisplayLabel]);
 
   const handleToggleLayer = useCallback((layerIndex: number) => {
     setExpandedLayers((current) => {
@@ -1142,18 +1181,16 @@ function App() {
     activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
   const selectedTensors =
     selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
-  const latestBenchmarkResult =
-    [...openEditors]
-      .reverse()
-      .find(
-        (editor): editor is Extract<EditorTab, { kind: "eval-results" }> =>
-          editor.kind === "eval-results",
-      )?.result ?? null;
   const visibleError = modelError ?? appError;
 
   return (
     <div className="app-root">
-      <TitleBar modelPath={modelPath} onOpenModel={handleOpenModel} />
+      <TitleBar
+        modelPath={modelPath}
+        bottomPanelVisible={bottomPanelVisible}
+        onOpenModel={handleOpenModel}
+        onToggleBottomPanel={() => setBottomPanelVisible((visible) => !visible)}
+      />
       <div className="app-body">
         {visibleError && (
           <div className="app-error-toast" role="alert">
@@ -1180,7 +1217,6 @@ function App() {
           activeLayerIndex={selectedLayerIndex}
           openEditors={openEditors}
           activeEditorId={activeEditorId}
-          latestBenchmarkResult={latestBenchmarkResult}
           expandedLayers={expandedLayers}
           running={running}
           cancelling={cancelling}
@@ -1200,6 +1236,8 @@ function App() {
           humanevalConfig={humanevalConfig}
           terminalBenchConfig={terminalBenchConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}
+          bottomPanelVisible={bottomPanelVisible}
+          onHideBottomPanel={() => setBottomPanelVisible(false)}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
@@ -1221,6 +1259,7 @@ function App() {
           onDeleteGpqaDataset={handleDeleteGpqaDataset}
           onDeleteGpqaHarness={handleDeleteGpqaHarness}
           onRefreshGpqaStatus={refreshGpqaStatus}
+          onRefreshAllBenchmarks={refreshAllBenchmarkStatuses}
           onBeginBenchmarkSetup={startOperation}
           onEndBenchmarkSetup={endOperation}
           onOpenGpqaDetails={handleOpenGpqaDetails}

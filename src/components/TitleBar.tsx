@@ -7,7 +7,9 @@ import {
 
 interface TitleBarProps {
   modelPath: string | null;
+  bottomPanelVisible: boolean;
   onOpenModel: () => void;
+  onToggleBottomPanel: () => void;
 }
 
 function modelLabel(modelPath: string | null): string {
@@ -15,7 +17,12 @@ function modelLabel(modelPath: string | null): string {
   return modelPath.split(/[\\/]/).pop() ?? modelPath;
 }
 
-export function TitleBar({ modelPath, onOpenModel }: TitleBarProps) {
+export function TitleBar({
+  modelPath,
+  bottomPanelVisible,
+  onOpenModel,
+  onToggleBottomPanel,
+}: TitleBarProps) {
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
 
   return (
@@ -73,8 +80,17 @@ export function TitleBar({ modelPath, onOpenModel }: TitleBarProps) {
         <div className="title-drag-fill" data-tauri-drag-region />
 
         <div className="title-actions" aria-label="Window controls">
-          <button type="button" aria-label="Split layout">
-            <span className="codicon split" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label="Toggle bottom panel"
+            title="Toggle bottom panel"
+            aria-pressed={!bottomPanelVisible}
+            onClick={onToggleBottomPanel}
+          >
+            <span
+              className={`codicon codicon-${bottomPanelVisible ? "layout-panel" : "layout-panel-off"}`}
+              aria-hidden="true"
+            />
           </button>
           <button
             type="button"
