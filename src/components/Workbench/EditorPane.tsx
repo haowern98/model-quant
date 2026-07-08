@@ -552,9 +552,6 @@ function GpqaBenchmarkView({
                 >
                   Run Benchmark
                 </button>
-                <button type="button" className="benchmark-icon-button" aria-label="GPQA settings">
-                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
-                </button>
               </div>
             </div>
           </div>
@@ -943,9 +940,6 @@ function HumanEvalBenchmarkView({
                 >
                   Run Benchmark
                 </button>
-                <button type="button" className="benchmark-icon-button" aria-label="HumanEval settings">
-                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
-                </button>
               </div>
             </div>
           </div>
@@ -1261,9 +1255,6 @@ function TerminalBenchView({
                   onClick={onRunBenchmark}
                 >
                   Run Benchmark
-                </button>
-                <button type="button" className="benchmark-icon-button" aria-label="Terminal-Bench settings">
-                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
                 </button>
               </div>
             </div>
