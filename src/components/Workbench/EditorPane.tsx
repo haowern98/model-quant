@@ -337,16 +337,6 @@ export function EditorPane({
               onAssignQuant={onAssignQuant}
             />
           </div>
-          <div className="editor-minimap" aria-hidden="true">
-            {Array.from({ length: 24 }, (_, index) => (
-              <span
-                key={index}
-                className={
-                  index % 5 === 0 ? "blue" : index % 7 === 0 ? "amber" : ""
-                }
-              />
-            ))}
-          </div>
         </section>
       )}
 

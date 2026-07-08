@@ -1557,7 +1557,7 @@ body.resizing-bottom-panel * {
   overflow: hidden;
   background: var(--vscode-editor);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 78px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .eval-results-editor {
@@ -2000,6 +2000,7 @@ body.resizing-bottom-panel * {
 .tensor-table-scroll {
   min-width: 100%;
   overflow-x: auto;
+  padding-right: 18px;
 }
 
 .tensor-empty-state {
@@ -2130,49 +2131,6 @@ body.resizing-bottom-panel * {
   border-radius: 50%;
   margin-right: 7px;
   vertical-align: 1px;
-}
-
-.editor-minimap {
-  position: relative;
-  background: var(--vscode-editor);
-  border-left: 1px solid var(--vscode-border-subtle);
-  padding: 56px 10px 0;
-  overflow: hidden;
-}
-
-.editor-minimap::before {
-  content: "";
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  top: 56px;
-  height: 88px;
-  border: 1px solid rgba(133, 133, 133, 0.22);
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.editor-minimap span {
-  display: block;
-  width: 54px;
-  height: 2px;
-  margin-bottom: 5px;
-  background: rgba(204, 204, 204, 0.2);
-}
-
-.editor-minimap span:nth-child(3n) {
-  width: 38px;
-}
-
-.editor-minimap span:nth-child(4n) {
-  width: 24px;
-}
-
-.editor-minimap span.blue {
-  background: rgba(156, 220, 254, 0.45);
-}
-
-.editor-minimap span.amber {
-  background: rgba(215, 186, 125, 0.5);
 }
 
 .bottom-panel {
