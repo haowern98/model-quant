@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -160,6 +160,23 @@ pub struct GpqaRunConfig {
     pub min_p: Option<f64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalBenchRunConfig {
+    pub context_window: Option<u32>,
+    pub samples: Option<u64>,
+    pub runs_per_task: Option<u64>,
+    pub max_turns: Option<u64>,
+    pub timeout_multiplier: Option<u64>,
+    pub temperature: Option<f64>,
+    pub thinking: Option<GpqaThinkingMode>,
+    pub top_k: Option<i32>,
+    pub repeat_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub top_p: Option<f64>,
+    pub min_p: Option<f64>,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum GpqaThinkingMode {
@@ -179,6 +196,21 @@ struct EffectiveGpqaRunConfig {
     sample_limit: u64,
     temperature: f64,
     thinking: GpqaThinkingMode,
+    top_k: Option<i32>,
+    repeat_penalty: Option<f64>,
+    presence_penalty: Option<f64>,
+    top_p: Option<f64>,
+    min_p: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EffectiveTerminalBenchRunConfig {
+    context_window: u32,
+    samples: Option<u64>,
+    runs_per_task: u64,
+    max_turns: u64,
+    timeout_multiplier: u64,
+    temperature: f64,
     top_k: Option<i32>,
     repeat_penalty: Option<f64>,
     presence_penalty: Option<f64>,
@@ -248,6 +280,87 @@ fn effective_gpqa_run_config(
         sample_limit,
         temperature,
         thinking,
+        top_k: config.top_k,
+        repeat_penalty: config.repeat_penalty,
+        presence_penalty: config.presence_penalty,
+        top_p: config.top_p,
+        min_p: config.min_p,
+    })
+}
+
+fn effective_terminal_bench_run_config(
+    config: Option<TerminalBenchRunConfig>,
+) -> Result<EffectiveTerminalBenchRunConfig, String> {
+    let config = config.unwrap_or(TerminalBenchRunConfig {
+        context_window: None,
+        samples: Some(1),
+        runs_per_task: Some(1),
+        max_turns: Some(1),
+        timeout_multiplier: Some(3),
+        temperature: None,
+        thinking: None,
+        top_k: None,
+        repeat_penalty: None,
+        presence_penalty: None,
+        top_p: None,
+        min_p: None,
+    });
+    if matches!(config.context_window, Some(0)) {
+        return Err("Terminal-Bench context window must be greater than 0.".to_string());
+    }
+    let context_window = config.context_window.unwrap_or(GPQA_DEFAULT_CONTEXT_WINDOW);
+    if matches!(config.samples, Some(0)) {
+        return Err("Terminal-Bench samples must be greater than 0.".to_string());
+    }
+    let runs_per_task = config.runs_per_task.unwrap_or(1);
+    if runs_per_task == 0 || runs_per_task > 1000 {
+        return Err("Terminal-Bench runs per task must be between 1 and 1000.".to_string());
+    }
+    let max_turns = config.max_turns.unwrap_or(1);
+    if max_turns == 0 || max_turns > 1000 {
+        return Err("Terminal-Bench max turns must be between 1 and 1000.".to_string());
+    }
+    let timeout_multiplier = config.timeout_multiplier.unwrap_or(3);
+    if timeout_multiplier == 0 || timeout_multiplier > 1000 {
+        return Err("Terminal-Bench timeout multiplier must be between 1 and 1000.".to_string());
+    }
+    let temperature = config.temperature.unwrap_or(GPQA_DEFAULT_TEMPERATURE);
+    if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+        return Err("Terminal-Bench temperature must be between 0 and 2.".to_string());
+    }
+    if let Some(top_k) = config.top_k {
+        if !(0..=1000).contains(&top_k) {
+            return Err("Terminal-Bench top K sampling must be between 0 and 1000.".to_string());
+        }
+    }
+    if let Some(repeat_penalty) = config.repeat_penalty {
+        if !repeat_penalty.is_finite() || !(0.0..=3.0).contains(&repeat_penalty) {
+            return Err("Terminal-Bench repeat penalty must be between 0 and 3.".to_string());
+        }
+    }
+    if let Some(presence_penalty) = config.presence_penalty {
+        if !presence_penalty.is_finite() || !(-2.0..=2.0).contains(&presence_penalty) {
+            return Err("Terminal-Bench presence penalty must be between -2 and 2.".to_string());
+        }
+    }
+    if let Some(top_p) = config.top_p {
+        if !top_p.is_finite() || !(0.0..=1.0).contains(&top_p) {
+            return Err("Terminal-Bench top P sampling must be between 0 and 1.".to_string());
+        }
+    }
+    if let Some(min_p) = config.min_p {
+        if !min_p.is_finite() || !(0.0..=1.0).contains(&min_p) {
+            return Err("Terminal-Bench min P sampling must be between 0 and 1.".to_string());
+        }
+    }
+
+    Ok(EffectiveTerminalBenchRunConfig {
+        context_window,
+        samples: config.samples,
+        runs_per_task,
+        max_turns,
+        timeout_multiplier,
+        temperature,
         top_k: config.top_k,
         repeat_penalty: config.repeat_penalty,
         presence_penalty: config.presence_penalty,
@@ -665,6 +778,7 @@ pub async fn run_terminal_bench_benchmark(
     base_url: String,
     api_key: String,
     model_id: String,
+    config: Option<TerminalBenchRunConfig>,
     app: tauri::AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -672,6 +786,7 @@ pub async fn run_terminal_bench_benchmark(
     if base_url.trim().is_empty() || api_key.trim().is_empty() || model_id.trim().is_empty() {
         return Err("ModelInspector API did not return a usable benchmark endpoint.".to_string());
     }
+    let effective_config = effective_terminal_bench_run_config(config)?;
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
     let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
     let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
@@ -682,10 +797,11 @@ pub async fn run_terminal_bench_benchmark(
     let child = runner.child.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        run_terminal_bench_smoke_blocking(
+        run_terminal_bench_benchmark_blocking(
             base_url,
             api_key,
             model_id,
+            effective_config,
             app_data_dir,
             tensor_summary,
             model_summary,
@@ -2002,6 +2118,129 @@ fn cleanup_new_sandbox_containers(before: &BTreeSet<String>, app: &tauri::AppHan
     }
 }
 
+fn docker_container_images() -> Result<BTreeMap<String, String>, String> {
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command
+        .args(["ps", "-a", "--format", "{{.ID}}\t{{.Image}}"])
+        .output()
+        .map_err(|e| format!("Failed to list Docker containers: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to list Docker containers: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(id, image)| (id.trim().to_string(), image.trim().to_string()))
+        .filter(|(id, image)| !id.is_empty() && !image.is_empty())
+        .collect())
+}
+
+fn cleanup_new_terminal_bench_containers(
+    before: &BTreeMap<String, String>,
+    task_images: &BTreeSet<String>,
+    app: &tauri::AppHandle,
+) {
+    let Ok(after) = docker_container_images() else {
+        crate::progress::emit_benchmark_output(
+            app,
+            "Harbor: could not inspect Terminal-Bench containers for cleanup",
+        );
+        return;
+    };
+    let created = after
+        .iter()
+        .filter(|(id, image)| !before.contains_key(*id) && task_images.contains(*image))
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    if created.is_empty() {
+        return;
+    }
+
+    let mut command = Command::new("docker");
+    hide_child_console(&mut command);
+    let output = command.args(["rm", "-f"]).args(&created).output();
+    match output {
+        Ok(output) if output.status.success() => crate::progress::emit_benchmark_output(
+            app,
+            format!(
+                "Harbor: removed {} Terminal-Bench container(s)",
+                created.len()
+            ),
+        ),
+        Ok(output) => crate::progress::emit_benchmark_output(
+            app,
+            format!(
+                "Harbor: failed to remove Terminal-Bench containers: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ),
+        Err(error) => crate::progress::emit_benchmark_output(
+            app,
+            format!("Harbor: failed to remove Terminal-Bench containers: {error}"),
+        ),
+    }
+}
+
+#[cfg(windows)]
+fn terminal_bench_harbor_process_ids() -> BTreeSet<u32> {
+    let mut command = Command::new("powershell");
+    hide_child_console(&mut command);
+    let Ok(output) = command
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'harbor.exe' } | ForEach-Object { $_.ProcessId }",
+        ])
+        .output()
+    else {
+        return BTreeSet::new();
+    };
+    if !output.status.success() {
+        return BTreeSet::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn terminal_bench_harbor_process_ids() -> BTreeSet<u32> {
+    BTreeSet::new()
+}
+
+fn cleanup_new_terminal_bench_host_processes(before: &BTreeSet<u32>, app: &tauri::AppHandle) {
+    let after = terminal_bench_harbor_process_ids();
+    let created = after.difference(before).copied().collect::<Vec<_>>();
+    if created.is_empty() {
+        return;
+    }
+
+    let mut removed = 0usize;
+    for pid in created {
+        let mut command = Command::new("taskkill");
+        hide_child_console(&mut command);
+        if matches!(
+            command
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status(),
+            Ok(status) if status.success()
+        ) {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        crate::progress::emit_benchmark_output(
+            app,
+            format!("Harbor: terminated {removed} Terminal-Bench host process tree(s)"),
+        );
+    }
+}
+
 fn terminate_child_tree(child: &mut Child) {
     #[cfg(windows)]
     {
@@ -2484,10 +2723,11 @@ fn terminal_bench_dataset_row_from_task_dir(
     })
 }
 
-fn run_terminal_bench_smoke_blocking(
+fn run_terminal_bench_benchmark_blocking(
     base_url: String,
     api_key: String,
     model_id: String,
+    effective_config: EffectiveTerminalBenchRunConfig,
     app_data_dir: PathBuf,
     tensor_summary: ModelInspectorApiTensorSummary,
     model_summary: ModelInspectorApiModelSummary,
@@ -2507,30 +2747,32 @@ fn run_terminal_bench_smoke_blocking(
         return Err("Terminal-Bench dataset is not downloaded or verified yet.".to_string());
     }
 
-    let task_dir = terminal_bench_first_task_dir(&app_data_dir)?;
-    let task_name = task_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("terminal-bench-task")
-        .to_string();
+    let (task_dir, task_name) = terminal_bench_task_path(&app_data_dir);
     let run_dir = gpqa_run_dir(&app_data_dir).join(format!("terminal-bench-{}", unix_millis()));
     std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
+    let terminal_bench_agent = write_terminal_bench_terminus_shim(&run_dir)?;
 
     let mut command = Command::new("uvx");
     hide_child_console(&mut command);
     command
-        .args(terminal_bench_harbor_smoke_args(
-            &task_dir, &run_dir, &base_url, &api_key, &model_id,
+        .args(terminal_bench_harbor_benchmark_args(
+            &task_dir,
+            &run_dir,
+            &base_url,
+            &model_id,
+            &effective_config,
+            terminal_bench_agent,
         ))
         .env("OPENAI_API_KEY", api_key)
         .env("OPENAI_BASE_URL", base_url)
+        .env("PYTHONPATH", &run_dir)
         .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     crate::progress::emit_benchmark_output(
         &app,
-        format!("Harbor: starting Terminal-Bench 2.1 smoke task {task_name}"),
+        format!("Harbor: starting Terminal-Bench 2.1 benchmark {task_name}"),
     );
     crate::progress::emit_benchmark_output(
         &app,
@@ -2550,6 +2792,9 @@ fn run_terminal_bench_smoke_blocking(
     }
 
     let start = Instant::now();
+    let terminal_bench_task_images = terminal_bench_task_images(&task_dir)?;
+    let terminal_bench_harbor_processes_before = terminal_bench_harbor_process_ids();
+    let terminal_bench_containers_before = docker_container_images()?;
     let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to start Terminal-Bench Harbor run: {e}"))?;
@@ -2585,6 +2830,12 @@ fn run_terminal_bench_smoke_blocking(
         let _ = guard.take();
     }
 
+    cleanup_new_terminal_bench_host_processes(&terminal_bench_harbor_processes_before, &app);
+    cleanup_new_terminal_bench_containers(
+        &terminal_bench_containers_before,
+        &terminal_bench_task_images,
+        &app,
+    );
     let stdout = stdout_handle.join().unwrap_or_default();
     let stderr = stderr_handle.join().unwrap_or_default();
     let output = format!("{stdout}\n{stderr}");
@@ -2592,13 +2843,13 @@ fn run_terminal_bench_smoke_blocking(
         if output.to_lowercase().contains("cancel") {
             crate::progress::emit_benchmark_output(
                 &app,
-                "Harbor: Terminal-Bench 2.1 smoke run cancelled",
+                "Harbor: Terminal-Bench 2.1 benchmark cancelled",
             );
             return Err("Terminal-Bench benchmark cancelled".to_string());
         }
         crate::progress::emit_benchmark_output(
             &app,
-            format!("Harbor: Terminal-Bench 2.1 smoke run failed with status {status}"),
+            format!("Harbor: Terminal-Bench 2.1 benchmark failed with status {status}"),
         );
         return Err(format!(
             "Terminal-Bench Harbor run failed with status {status}: {}",
@@ -2617,7 +2868,7 @@ fn run_terminal_bench_smoke_blocking(
         &app,
         format!("Harbor: Terminal-Bench 2.1 score {metric}={score:.3}"),
     );
-    crate::progress::emit_benchmark_output(&app, "Harbor: Terminal-Bench 2.1 smoke run finished");
+    crate::progress::emit_benchmark_output(&app, "Harbor: Terminal-Bench 2.1 benchmark finished");
 
     Ok(terminal_bench_result_from_harbor_score(
         &model_id,
@@ -2633,29 +2884,65 @@ fn run_terminal_bench_smoke_blocking(
     ))
 }
 
-fn terminal_bench_first_task_dir(app_data_dir: &Path) -> Result<PathBuf, String> {
-    let task_root = terminal_bench_dataset_cache_root(app_data_dir).join("terminal-bench-2-1");
-    let mut task_dirs = std::fs::read_dir(&task_root)
-        .map_err(|e| format!("Failed to read Terminal-Bench dataset directory: {e}"))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir() && path.join("instruction.md").exists())
-        .collect::<Vec<_>>();
-    task_dirs.sort();
-    task_dirs
-        .into_iter()
-        .next()
-        .ok_or_else(|| "Terminal-Bench dataset contains no runnable task folders.".to_string())
+fn terminal_bench_task_path(app_data_dir: &Path) -> (PathBuf, String) {
+    (
+        terminal_bench_dataset_cache_root(app_data_dir).join("terminal-bench-2-1"),
+        "terminal-bench-2-1".to_string(),
+    )
 }
 
-fn terminal_bench_harbor_smoke_args(
+fn terminal_bench_task_images(task_root: &Path) -> Result<BTreeSet<String>, String> {
+    let mut images = BTreeSet::new();
+    for entry in std::fs::read_dir(task_root)
+        .map_err(|e| format!("Failed to read Terminal-Bench dataset directory: {e}"))?
+    {
+        let task_toml = entry.map_err(|e| e.to_string())?.path().join("task.toml");
+        if !task_toml.is_file() {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&task_toml)
+            .map_err(|e| format!("Failed to read Terminal-Bench task metadata: {e}"))?;
+        for line in contents.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            if key.trim() == "docker_image" {
+                images.insert(value.trim().trim_matches('"').to_string());
+                break;
+            }
+        }
+    }
+    Ok(images)
+}
+
+const TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH: &str =
+    "modelinspector_terminus2:ModelInspectorTerminus2";
+
+fn write_terminal_bench_terminus_shim(run_dir: &Path) -> Result<&'static str, String> {
+    let script = r#"from harbor.agents.terminus_2.terminus_2 import Terminus2
+from harbor.agents.terminus_2.tmux_session import TmuxSession
+
+# Windows rejects Harbor's default 65k docker exec paste command.
+TmuxSession._PASTE_BASE64_CHUNK_LEN = 8000
+
+
+class ModelInspectorTerminus2(Terminus2):
+    pass
+"#;
+    std::fs::write(run_dir.join("modelinspector_terminus2.py"), script)
+        .map_err(|e| format!("Failed to write Terminal-Bench Terminus shim: {e}"))?;
+    Ok(TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH)
+}
+
+fn terminal_bench_harbor_benchmark_args(
     task_dir: &Path,
     jobs_dir: &Path,
     base_url: &str,
-    _api_key: &str,
     model_id: &str,
+    config: &EffectiveTerminalBenchRunConfig,
+    agent_import_path: &str,
 ) -> Vec<String> {
-    vec![
+    let mut args = vec![
         "--from".to_string(),
         "harbor".to_string(),
         "harbor".to_string(),
@@ -2665,26 +2952,70 @@ fn terminal_bench_harbor_smoke_args(
         "--jobs-dir".to_string(),
         jobs_dir.to_string_lossy().to_string(),
         "--job-name".to_string(),
-        "modelinspector-terminal-bench-smoke".to_string(),
+        "modelinspector-terminal-bench".to_string(),
         "--agent".to_string(),
-        "terminus-2".to_string(),
+        agent_import_path.to_string(),
         "--model".to_string(),
         terminal_bench_litellm_model_name(model_id),
         "--ak".to_string(),
         format!("api_base={base_url}"),
         "--ak".to_string(),
-        "temperature=0".to_string(),
-        "--n-tasks".to_string(),
-        "1".to_string(),
+        format!(
+            "model_info={}",
+            json!({
+                "max_input_tokens": config.context_window,
+                "max_output_tokens": 4096,
+                "input_cost_per_token": 0,
+                "output_cost_per_token": 0
+            })
+        ),
+        "--ak".to_string(),
+        format!("max_turns={}", config.max_turns),
+        "--ak".to_string(),
+        "suppress_max_turns_warning=true".to_string(),
+        "--ak".to_string(),
+        format!("temperature={}", config.temperature),
         "--n-concurrent".to_string(),
         "1".to_string(),
         "--n-attempts".to_string(),
-        "1".to_string(),
+        config.runs_per_task.to_string(),
+        "--agent-timeout-multiplier".to_string(),
+        config.timeout_multiplier.to_string(),
         "--max-retries".to_string(),
         "0".to_string(),
         "--yes".to_string(),
         "--delete".to_string(),
-    ]
+    ];
+    let mut extra_body = serde_json::Map::new();
+    let mut llm_call_kwargs = serde_json::Map::new();
+    if let Some(top_k) = config.top_k {
+        extra_body.insert("top_k".to_string(), json!(top_k));
+    }
+    if let Some(repeat_penalty) = config.repeat_penalty {
+        extra_body.insert("repeat_penalty".to_string(), json!(repeat_penalty));
+    }
+    if let Some(presence_penalty) = config.presence_penalty {
+        llm_call_kwargs.insert("presence_penalty".to_string(), json!(presence_penalty));
+    }
+    if let Some(top_p) = config.top_p {
+        llm_call_kwargs.insert("top_p".to_string(), json!(top_p));
+    }
+    if let Some(min_p) = config.min_p {
+        extra_body.insert("min_p".to_string(), json!(min_p));
+    }
+    if !extra_body.is_empty() {
+        llm_call_kwargs.insert("extra_body".to_string(), json!(extra_body));
+    }
+    if !llm_call_kwargs.is_empty() {
+        args.extend([
+            "--ak".to_string(),
+            format!("llm_call_kwargs={}", json!(llm_call_kwargs)),
+        ]);
+    }
+    if let Some(samples) = config.samples {
+        args.extend(["--n-tasks".to_string(), samples.to_string()]);
+    }
+    args
 }
 
 fn terminal_bench_litellm_model_name(model_id: &str) -> String {
@@ -2760,7 +3091,7 @@ fn terminal_bench_result_from_harbor_score(
         elapsed_ms,
         load_ms: runtime_summary.load_ms,
         test_mode: "official_terminal_bench".to_string(),
-        status_message: format!("Terminal-Bench 2.1 Harbor smoke run completed for {model_id}."),
+        status_message: format!("Terminal-Bench 2.1 Harbor benchmark completed for {model_id}."),
         native_runtime: Some(format!(
             "Harbor Terminal-Bench output directory: {}",
             run_dir.display()
@@ -3404,29 +3735,68 @@ mod tests {
     }
 
     #[test]
-    fn builds_terminal_bench_harbor_smoke_args() {
+    fn builds_terminal_bench_harbor_benchmark_args() {
         let task = PathBuf::from(r"C:\tasks\adaptive-rejection-sampler");
-        let jobs = PathBuf::from(r"C:\runs\terminal-bench-smoke");
-        let args = terminal_bench_harbor_smoke_args(
+        let jobs = PathBuf::from(r"C:\runs\terminal-bench");
+        let config = EffectiveTerminalBenchRunConfig {
+            context_window: 30_000,
+            samples: Some(3),
+            runs_per_task: 2,
+            max_turns: 4,
+            timeout_multiplier: 3,
+            temperature: 0.25,
+            top_k: Some(40),
+            repeat_penalty: Some(1.1),
+            presence_penalty: Some(0.2),
+            top_p: Some(0.95),
+            min_p: Some(0.05),
+        };
+        let args = terminal_bench_harbor_benchmark_args(
             &task,
             &jobs,
             "http://127.0.0.1:1234/v1",
-            "local-key",
             "demo.gguf",
+            &config,
+            TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH,
         );
 
         assert!(args.contains(&"--path".to_string()));
         assert!(args.contains(&task.to_string_lossy().to_string()));
         assert!(args.contains(&"--agent".to_string()));
-        assert!(args.contains(&"terminus-2".to_string()));
+        assert!(args.contains(&"modelinspector_terminus2:ModelInspectorTerminus2".to_string()));
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"openai/demo.gguf".to_string()));
         assert!(args.contains(&"--ak".to_string()));
         assert!(args.contains(&"api_base=http://127.0.0.1:1234/v1".to_string()));
+        assert!(args.contains(&"model_info={\"input_cost_per_token\":0,\"max_input_tokens\":30000,\"max_output_tokens\":4096,\"output_cost_per_token\":0}".to_string()));
+        assert!(args.contains(&"max_turns=4".to_string()));
+        assert!(args.contains(&"temperature=0.25".to_string()));
+        assert!(args.contains(&"llm_call_kwargs={\"extra_body\":{\"min_p\":0.05,\"repeat_penalty\":1.1,\"top_k\":40},\"presence_penalty\":0.2,\"top_p\":0.95}".to_string()));
         assert!(!args.iter().any(|arg| arg.contains("local-key")));
+        assert!(args.contains(&"--n-attempts".to_string()));
+        assert!(args.contains(&"2".to_string()));
+        assert!(args.contains(&"--agent-timeout-multiplier".to_string()));
         assert!(args.contains(&"--n-tasks".to_string()));
-        assert!(args.contains(&"1".to_string()));
+        assert!(args.contains(&"3".to_string()));
         assert!(args.contains(&"--delete".to_string()));
+    }
+
+    #[test]
+    fn writes_terminal_bench_terminus_windows_paste_shim() {
+        let root = std::env::temp_dir().join(format!("terminal-bench-shim-test-{}", unix_millis()));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let import_path = write_terminal_bench_terminus_shim(&root).unwrap();
+        let script = std::fs::read_to_string(root.join("modelinspector_terminus2.py")).unwrap();
+
+        assert_eq!(
+            import_path,
+            "modelinspector_terminus2:ModelInspectorTerminus2"
+        );
+        assert!(script.contains("TmuxSession._PASTE_BASE64_CHUNK_LEN = 8000"));
+        assert!(script.contains("class ModelInspectorTerminus2(Terminus2):"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

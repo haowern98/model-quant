@@ -68,7 +68,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
   .hardware-panel,
@@ -84,7 +84,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
   .hardware-panel,
@@ -99,7 +99,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
   .hardware-panel,
@@ -115,7 +115,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
   .hardware-panel,
@@ -130,7 +130,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
   .hardware-panel,
@@ -145,7 +145,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .eval-results-editor,
   .bottom-output,
   .hardware-panel,
@@ -173,7 +173,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
-  .testing-panel,
+  .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
   .tensor-editor-content,
@@ -735,8 +735,15 @@ body.resizing-bottom-panel * {
   border-right: 1px solid var(--vscode-border-soft);
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   position: relative;
+}
+
+.testing-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .explorer-title {
@@ -755,6 +762,13 @@ body.resizing-bottom-panel * {
   border-top: 1px solid var(--vscode-border-soft);
   padding: 0;
   flex: 0 0 auto;
+}
+
+.testing-benchmarks-section {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .testing-detail-row {
@@ -789,7 +803,7 @@ body.resizing-bottom-panel * {
 }
 
 .benchmark-card-list {
-  padding: 4px 8px 6px;
+  padding: 4px 0 6px 8px;
 }
 
 .benchmark-card {
@@ -885,6 +899,7 @@ body.resizing-bottom-panel * {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .explorer-section-header {
@@ -957,9 +972,9 @@ body.resizing-bottom-panel * {
   height: 22px;
   display: grid;
   font-size: 13px;
-  grid-template-columns: 17px 15px minmax(0, 1fr) auto;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   border: 0;
   background: transparent;
   color: #cccccc;
@@ -980,7 +995,7 @@ body.resizing-bottom-panel * {
 
 .model-row {
   padding-left: 21px;
-  grid-template-columns: 17px 15px minmax(0, 1fr) 24px;
+  grid-template-columns: 17px minmax(0, 1fr) 24px;
   color: var(--vscode-text);
   font-weight: 600;
 }
@@ -1089,7 +1104,7 @@ body.resizing-bottom-panel * {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding-left: 56px;
+  padding-left: 42px;
   border: 0;
   background: transparent;
   color: var(--vscode-text);
@@ -1463,6 +1478,7 @@ body.resizing-bottom-panel * {
   padding: 0 18px;
   text-align: left;
   font: inherit;
+  font-size: 13px;
 }
 
 .run-action-menu button:hover:not(:disabled) {
@@ -1911,13 +1927,14 @@ body.resizing-bottom-panel * {
 }
 
 .benchmark-action-button {
-  height: 30px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 9px;
   border: 1px solid var(--vscode-border);
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--vscode-panel);
   color: var(--vscode-text);
   font: inherit;
+  font-size: 13px;
   cursor: pointer;
 }
 

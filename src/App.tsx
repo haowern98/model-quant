@@ -48,6 +48,8 @@ import type {
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
+  TerminalBenchBenchmarkConfig,
+  TerminalBenchBenchmarkConfigInput,
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
 } from "./types";
@@ -117,6 +119,21 @@ const DEFAULT_HUMANEVAL_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
   ...DEFAULT_GPQA_CONFIG_INPUT,
   contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
   sampleLimit: String(HUMANEVAL_SAMPLE_COUNT),
+};
+
+const DEFAULT_TERMINAL_BENCH_CONFIG_INPUT: TerminalBenchBenchmarkConfigInput = {
+  contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
+  samples: "1",
+  runsPerTask: "1",
+  maxTurns: "1",
+  timeoutMultiplier: "3",
+  temperature: "0",
+  thinking: "off",
+  topK: "40",
+  repeatPenalty: "1.1",
+  presencePenalty: "0",
+  topP: "0.95",
+  minP: "0.05",
 };
 
 function parseOptionalIntegerField(
@@ -233,6 +250,101 @@ function resolveGpqaConfigInput(
   };
 }
 
+function resolveTerminalBenchConfigInput(
+  input: TerminalBenchBenchmarkConfigInput,
+): TerminalBenchBenchmarkConfig | string {
+  const contextWindow = parseOptionalIntegerField(
+    input.contextWindow,
+    GPQA_DEFAULT_CONTEXT_WINDOW,
+    1,
+    Number.MAX_SAFE_INTEGER,
+    "Terminal-Bench context window",
+  );
+  if (typeof contextWindow === "string") return contextWindow;
+
+  const samples = parseOptionalIntegerOverride(
+    input.samples,
+    1,
+    Number.MAX_SAFE_INTEGER,
+    "Terminal-Bench samples",
+  );
+  if (typeof samples === "string") return samples;
+
+  const runsPerTask = parseOptionalIntegerField(
+    input.runsPerTask,
+    1,
+    1,
+    1000,
+    "Terminal-Bench runs per task",
+  );
+  if (typeof runsPerTask === "string") return runsPerTask;
+
+  const maxTurns = parseOptionalIntegerField(
+    input.maxTurns,
+    1,
+    1,
+    1000,
+    "Terminal-Bench max turns",
+  );
+  if (typeof maxTurns === "string") return maxTurns;
+
+  const timeoutMultiplier = parseOptionalIntegerField(
+    input.timeoutMultiplier,
+    3,
+    1,
+    1000,
+    "Terminal-Bench timeout multiplier",
+  );
+  if (typeof timeoutMultiplier === "string") return timeoutMultiplier;
+
+  const temperatureText = input.temperature.trim();
+  const temperature =
+    temperatureText === "" ? GPQA_DEFAULT_TEMPERATURE : Number(temperatureText);
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+    return "Terminal-Bench temperature must be between 0 and 2.";
+  }
+
+  const topK = parseOptionalIntegerOverride(input.topK, 0, 1000, "Terminal-Bench top K sampling");
+  if (typeof topK === "string") return topK;
+
+  const repeatPenalty = parseOptionalNumberOverride(
+    input.repeatPenalty,
+    0,
+    3,
+    "Terminal-Bench repeat penalty",
+  );
+  if (typeof repeatPenalty === "string") return repeatPenalty;
+
+  const presencePenalty = parseOptionalNumberOverride(
+    input.presencePenalty,
+    -2,
+    2,
+    "Terminal-Bench presence penalty",
+  );
+  if (typeof presencePenalty === "string") return presencePenalty;
+
+  const topP = parseOptionalNumberOverride(input.topP, 0, 1, "Terminal-Bench top P sampling");
+  if (typeof topP === "string") return topP;
+
+  const minP = parseOptionalNumberOverride(input.minP, 0, 1, "Terminal-Bench min P sampling");
+  if (typeof minP === "string") return minP;
+
+  return {
+    contextWindow,
+    samples,
+    runsPerTask,
+    maxTurns,
+    timeoutMultiplier,
+    temperature,
+    thinking: input.thinking,
+    topK,
+    repeatPenalty,
+    presencePenalty,
+    topP,
+    minP,
+  };
+}
+
 function hasTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -308,6 +420,8 @@ function App() {
   const [humanevalConfig, setHumanEvalConfig] = useState<GpqaBenchmarkConfigInput>(
     DEFAULT_HUMANEVAL_CONFIG_INPUT,
   );
+  const [terminalBenchConfig, setTerminalBenchConfig] =
+    useState<TerminalBenchBenchmarkConfigInput>(DEFAULT_TERMINAL_BENCH_CONFIG_INPUT);
 
   const refreshGpqaStatus = useCallback(async () => {
     try {
@@ -685,10 +799,12 @@ function App() {
       }
 
       if (runQueue.includes("terminal_bench")) {
+        const config = resolveTerminalBenchConfigInput(terminalBenchConfig);
+        if (typeof config === "string") throw new Error(config);
         const apiStatus = await startModelInspectorApi({
           benchmarkLabel: "ModelInspector API",
-          contextWindow: 20_000,
-          defaultEnableThinking: false,
+          contextWindow: config.contextWindow,
+          defaultEnableThinking: config.thinking === "on",
         });
         if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
@@ -698,6 +814,7 @@ function App() {
             apiStatus.baseUrl,
             apiStatus.apiKey,
             apiStatus.modelId,
+            config,
           );
           openEvalResults(latestResult);
         } finally {
@@ -727,6 +844,7 @@ function App() {
     gpqaShotMode,
     gpqaConfig,
     humanevalConfig,
+    terminalBenchConfig,
     startOperation,
     endOperation,
     openEvalResults,
@@ -813,10 +931,12 @@ function App() {
 
     startOperation();
     try {
+      const config = resolveTerminalBenchConfigInput(terminalBenchConfig);
+      if (typeof config === "string") throw new Error(config);
       const apiStatus = await startModelInspectorApi({
         benchmarkLabel: "ModelInspector API",
-        contextWindow: 20_000,
-        defaultEnableThinking: false,
+        contextWindow: config.contextWindow,
+        defaultEnableThinking: config.thinking === "on",
       });
       if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
@@ -826,6 +946,7 @@ function App() {
           apiStatus.baseUrl,
           apiStatus.apiKey,
           apiStatus.modelId,
+          config,
         );
         openEvalResults(result);
       } finally {
@@ -844,6 +965,7 @@ function App() {
     terminalBenchStatus.ready,
     terminalBenchStatus.statusLabel,
     terminalBenchDatasetStatus.datasetReady,
+    terminalBenchConfig,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1076,6 +1198,7 @@ function App() {
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
           humanevalConfig={humanevalConfig}
+          terminalBenchConfig={terminalBenchConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
@@ -1092,6 +1215,7 @@ function App() {
           onGpqaShotModeChange={setGpqaShotMode}
           onGpqaConfigChange={setGpqaConfig}
           onHumanEvalConfigChange={setHumanEvalConfig}
+          onTerminalBenchConfigChange={setTerminalBenchConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}
           onDownloadGpqaDataset={handleDownloadGpqaDataset}
           onDeleteGpqaDataset={handleDeleteGpqaDataset}

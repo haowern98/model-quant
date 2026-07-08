@@ -131,14 +131,14 @@ export function TestingPanel({
         )}
       </section>
 
-      <section className="testing-section">
+      <section className="testing-section testing-benchmarks-section">
         <ExplorerSectionHeader
           label="BENCHMARKS"
           expanded={sections.benchmarks}
           onClick={() => toggleSection("benchmarks")}
         />
         {sections.benchmarks && (
-          <div className="explorer-section-body benchmark-card-list">
+          <div className="explorer-section-body benchmark-card-list testing-panel-body">
             <BenchmarkCard
               title="GPQA Diamond"
               description="Graduate-level science QA benchmark"

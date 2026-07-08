@@ -354,6 +354,36 @@ export interface GpqaBenchmarkConfig {
   minP?: number;
 }
 
+export interface TerminalBenchBenchmarkConfigInput {
+  contextWindow: string;
+  samples: string;
+  runsPerTask: string;
+  maxTurns: string;
+  timeoutMultiplier: string;
+  temperature: string;
+  thinking: GpqaThinkingMode;
+  topK: string;
+  repeatPenalty: string;
+  presencePenalty: string;
+  topP: string;
+  minP: string;
+}
+
+export interface TerminalBenchBenchmarkConfig {
+  contextWindow: number;
+  samples?: number;
+  runsPerTask: number;
+  maxTurns: number;
+  timeoutMultiplier: number;
+  temperature: number;
+  thinking: GpqaThinkingMode;
+  topK?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  topP?: number;
+  minP?: number;
+}
+
 export interface RecipeQualityEval {
   baselineNll: number | null;
   baselinePpl: number | null;

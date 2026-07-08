@@ -32,14 +32,11 @@ export function RunControls({
   hasModel,
   running,
   cancelling,
-  evalPreset,
   testMode,
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
   terminalBenchStatus,
-  onEvalPresetChange,
-  onTestModeChange,
   onToggleRunTarget,
   onNoTestsSelected,
   onTest,
@@ -94,24 +91,6 @@ export function RunControls({
 
   return (
     <div className="editor-run-controls">
-      <select
-        aria-label="Eval preset"
-        value={evalPreset}
-        disabled={!hasModel || running}
-        onChange={(event) => onEvalPresetChange(event.target.value as RecipeEvalPreset)}
-      >
-        <option value="default">Default</option>
-        <option value="quick">Quick</option>
-      </select>
-      <select
-        aria-label="Test mode"
-        value={testMode}
-        disabled={!hasModel || running}
-        onChange={(event) => onTestModeChange(event.target.value as RecipeTestMode)}
-      >
-        <option value="single">Single</option>
-        <option value="compare_baseline">Compare</option>
-      </select>
       <div
         ref={menuRef}
         className={`run-split-action ${menuOpen ? "open" : ""} ${running ? "running" : ""}`}

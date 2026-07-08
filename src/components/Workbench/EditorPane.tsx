@@ -24,6 +24,7 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchBenchmarkConfigInput,
   TerminalBenchDatasetStatus,
   TerminalBenchDatasetRow,
   TerminalBenchStatus,
@@ -79,6 +80,7 @@ interface EditorPaneProps {
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
+  terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
@@ -97,6 +99,7 @@ interface EditorPaneProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onTerminalBenchConfigChange: (config: TerminalBenchBenchmarkConfigInput) => void;
   onInstallTerminalBenchHarness: () => void;
   onDownloadTerminalBenchDataset: () => void;
   onDeleteTerminalBenchDataset: () => void;
@@ -144,6 +147,7 @@ export function EditorPane({
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
+  terminalBenchConfig,
   onSelectEditor,
   onCloseEditor,
   onReorderEditor,
@@ -162,6 +166,7 @@ export function EditorPane({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onTerminalBenchConfigChange,
   onInstallTerminalBenchHarness,
   onDownloadTerminalBenchDataset,
   onDeleteTerminalBenchDataset,
@@ -308,11 +313,13 @@ export function EditorPane({
         <TerminalBenchView
           status={terminalBenchStatus}
           datasetStatus={terminalBenchDatasetStatus}
+          config={terminalBenchConfig}
           running={running}
           onInstallHarness={onInstallTerminalBenchHarness}
           onDownloadDataset={onDownloadTerminalBenchDataset}
           onDeleteDataset={onDeleteTerminalBenchDataset}
           onRefreshStatus={onRefreshTerminalBenchStatus}
+          onConfigChange={onTerminalBenchConfigChange}
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
       ) : (
@@ -544,9 +551,6 @@ function GpqaBenchmarkView({
                   onClick={onRunBenchmark}
                 >
                   Run Benchmark
-                </button>
-                <button type="button" className="benchmark-icon-button" aria-label="GPQA settings">
-                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -936,9 +940,6 @@ function HumanEvalBenchmarkView({
                 >
                   Run Benchmark
                 </button>
-                <button type="button" className="benchmark-icon-button" aria-label="HumanEval settings">
-                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
-                </button>
               </div>
             </div>
           </div>
@@ -1119,55 +1120,46 @@ function HumanEvalBenchmarkView({
 function TerminalBenchView({
   status,
   datasetStatus,
+  config,
   running,
   onInstallHarness,
   onDownloadDataset,
   onDeleteDataset,
   onRefreshStatus,
+  onConfigChange,
   onRunBenchmark,
 }: {
   status: TerminalBenchStatus;
   datasetStatus: TerminalBenchDatasetStatus;
+  config: TerminalBenchBenchmarkConfigInput;
   running: boolean;
   onInstallHarness: () => void;
   onDownloadDataset: () => void;
   onDeleteDataset: () => void;
   onRefreshStatus: () => void;
+  onConfigChange: (config: TerminalBenchBenchmarkConfigInput) => void;
   onRunBenchmark: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<TerminalBenchTab>("details");
-  const [config, setConfig] = useState({
-    thinking: "off" as GpqaThinkingMode,
-    temperature: "0",
-    topK: "40",
-    repeatPenalty: "1.1",
-    presencePenalty: "0",
-    topP: "0.95",
-    minP: "0.05",
-    contextWindow: "20000",
-    samples: "",
-    runsPerTask: "1",
-    maxTurns: "1",
-  });
   const [datasetRows, setDatasetRows] = useState<TerminalBenchDatasetRow[]>([]);
   const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
   const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const updateIntegerField =
-    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns") =>
+    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns" | "timeoutMultiplier") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
-      if (/^\d*$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+      if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
     };
   const updateDecimalField =
     (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
-      if (/^\d*(?:\.\d*)?$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+      if (/^\d*(?:\.\d*)?$/.test(value)) onConfigChange({ ...config, [field]: value });
     };
   const updatePresencePenalty = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.currentTarget.value;
     if (/^-?\d*(?:\.\d*)?$/.test(value)) {
-      setConfig((current) => ({ ...current, presencePenalty: value }));
+      onConfigChange({ ...config, presencePenalty: value });
     }
   };
   const handleDatasetAction = () => {
@@ -1264,9 +1256,6 @@ function TerminalBenchView({
                 >
                   Run Benchmark
                 </button>
-                <button type="button" className="benchmark-icon-button" aria-label="Terminal-Bench settings">
-                  <span className="codicon codicon-settings-gear" aria-hidden="true" />
-                </button>
               </div>
             </div>
           </div>
@@ -1342,7 +1331,7 @@ function TerminalBenchView({
                     label="Thinking"
                     selectLabel="Terminal-Bench thinking"
                     value={config.thinking}
-                    onChange={(thinking) => setConfig((current) => ({ ...current, thinking }))}
+                    onChange={(thinking) => onConfigChange({ ...config, thinking })}
                     options={[
                       { value: "off", label: "Off" },
                       { value: "on", label: "On" },
@@ -1427,6 +1416,14 @@ function TerminalBenchView({
                     placeholder="1"
                     inputMode="numeric"
                     onChange={updateIntegerField("maxTurns")}
+                  />
+                  <BenchmarkInputRow
+                    label="Timeout multiplier"
+                    inputLabel="Terminal-Bench timeout multiplier"
+                    value={config.timeoutMultiplier}
+                    placeholder="3"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("timeoutMultiplier")}
                   />
                 </BenchmarkInfoSection>
               </div>

@@ -61,7 +61,6 @@ export function ExplorerTreeRow({
           onToggle();
         }}
       />
-      <span className="tree-folder-icon" aria-hidden="true" />
       <span className="tree-label">{label}</span>
       <span className="tree-count">{right}</span>
     </button>

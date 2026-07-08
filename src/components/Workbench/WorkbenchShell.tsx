@@ -13,6 +13,7 @@ import type {
   RecipeEvalPreset,
   RecipeProfile,
   RecipeTestMode,
+  TerminalBenchBenchmarkConfigInput,
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
   TensorInfo,
@@ -58,6 +59,7 @@ interface WorkbenchShellProps {
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
+  terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
@@ -74,6 +76,7 @@ interface WorkbenchShellProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onTerminalBenchConfigChange: (config: TerminalBenchBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
   onDeleteGpqaDataset: () => void;
@@ -126,6 +129,7 @@ export function WorkbenchShell({
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
+  terminalBenchConfig,
   modelExplorerFocusVersion,
   onOpenLayer,
   onOpenModel,
@@ -142,6 +146,7 @@ export function WorkbenchShell({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onTerminalBenchConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
   onDeleteGpqaDataset,
@@ -369,6 +374,7 @@ export function WorkbenchShell({
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
         humanevalConfig={humanevalConfig}
+        terminalBenchConfig={terminalBenchConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
         onDeleteGpqaDataset={onDeleteGpqaDataset}
@@ -387,6 +393,7 @@ export function WorkbenchShell({
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
         onHumanEvalConfigChange={onHumanEvalConfigChange}
+        onTerminalBenchConfigChange={onTerminalBenchConfigChange}
         onInstallTerminalBenchHarness={onInstallTerminalBenchHarness}
         onDownloadTerminalBenchDataset={onDownloadTerminalBenchDataset}
         onDeleteTerminalBenchDataset={onDeleteTerminalBenchDataset}
