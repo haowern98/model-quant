@@ -59,6 +59,7 @@ interface WorkbenchShellProps {
   humanevalConfig: GpqaBenchmarkConfigInput;
   terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
+  bottomPanelVisible: boolean;
   onOpenLayer: (layerIndex: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
@@ -129,6 +130,7 @@ export function WorkbenchShell({
   humanevalConfig,
   terminalBenchConfig,
   modelExplorerFocusVersion,
+  bottomPanelVisible,
   onOpenLayer,
   onOpenModel,
   onToggleLayer,
@@ -395,6 +397,7 @@ export function WorkbenchShell({
         onSaveRecipe={onSaveRecipe}
         onExport={onExport}
         onDiscardResults={onDiscardResults}
+        bottomPanelVisible={bottomPanelVisible}
       />
       <StatusBar
         running={running}

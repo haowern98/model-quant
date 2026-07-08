@@ -1205,6 +1205,10 @@ body.resizing-bottom-panel * {
   background: var(--vscode-editor);
 }
 
+.editor-pane.bottom-panel-hidden {
+  grid-template-rows: 35px 29px minmax(0, 1fr);
+}
+
 .editor-tabs-bar {
   display: flex;
   min-width: 0;

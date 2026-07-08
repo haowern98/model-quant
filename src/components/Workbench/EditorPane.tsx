@@ -112,6 +112,7 @@ interface EditorPaneProps {
   onSaveRecipe: () => void;
   onExport: () => void;
   onDiscardResults: () => void;
+  bottomPanelVisible: boolean;
 }
 
 function basename(path: string | null): string {
@@ -180,6 +181,7 @@ export function EditorPane({
   onSaveRecipe,
   onExport,
   onDiscardResults,
+  bottomPanelVisible,
 }: EditorPaneProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
@@ -225,7 +227,7 @@ export function EditorPane({
   return (
     <main
       ref={editorRef}
-      className="editor-pane"
+      className={`editor-pane ${bottomPanelVisible ? "" : "bottom-panel-hidden"}`}
       style={{ "--bottom-panel-height": `${bottomPanelHeight}px` } as CSSProperties}
     >
       <div className="editor-tabs-bar">
@@ -340,32 +342,36 @@ export function EditorPane({
         </section>
       )}
 
-      <div
-        className="resize-handle bottom-panel-resizer"
-        role="separator"
-        aria-label="Resize bottom panel"
-        aria-orientation="horizontal"
-        aria-valuemin={BOTTOM_PANEL_MIN_HEIGHT}
-        aria-valuemax={bottomPanelMaxHeight()}
-        aria-valuenow={Math.round(bottomPanelHeight)}
-        tabIndex={0}
-        onPointerDown={startBottomPanelResize}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-          event.preventDefault();
-          const direction = event.key === "ArrowUp" ? 1 : -1;
-          setBottomPanelHeight((height) =>
-            clamp(height + direction * 10, BOTTOM_PANEL_MIN_HEIGHT, bottomPanelMaxHeight()),
-          );
-        }}
-      />
-      <BottomPanel
-        tensors={tensors}
-        assignments={assignments}
-        profile={profile}
-        outputLines={outputLines}
-        apiOutputLines={apiOutputLines}
-      />
+      {bottomPanelVisible ? (
+        <>
+          <div
+            className="resize-handle bottom-panel-resizer"
+            role="separator"
+            aria-label="Resize bottom panel"
+            aria-orientation="horizontal"
+            aria-valuemin={BOTTOM_PANEL_MIN_HEIGHT}
+            aria-valuemax={bottomPanelMaxHeight()}
+            aria-valuenow={Math.round(bottomPanelHeight)}
+            tabIndex={0}
+            onPointerDown={startBottomPanelResize}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+              event.preventDefault();
+              const direction = event.key === "ArrowUp" ? 1 : -1;
+              setBottomPanelHeight((height) =>
+                clamp(height + direction * 10, BOTTOM_PANEL_MIN_HEIGHT, bottomPanelMaxHeight()),
+              );
+            }}
+          />
+          <BottomPanel
+            tensors={tensors}
+            assignments={assignments}
+            profile={profile}
+            outputLines={outputLines}
+            apiOutputLines={apiOutputLines}
+          />
+        </>
+      ) : null}
     </main>
   );
 }

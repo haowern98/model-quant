@@ -390,6 +390,7 @@ function App() {
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
+  const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [modelExplorerFocusVersion, setModelExplorerFocusVersion] = useState(0);
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
     () => new Set(),
@@ -1184,7 +1185,12 @@ function App() {
 
   return (
     <div className="app-root">
-      <TitleBar modelPath={modelPath} onOpenModel={handleOpenModel} />
+      <TitleBar
+        modelPath={modelPath}
+        bottomPanelVisible={bottomPanelVisible}
+        onOpenModel={handleOpenModel}
+        onToggleBottomPanel={() => setBottomPanelVisible((visible) => !visible)}
+      />
       <div className="app-body">
         {visibleError && (
           <div className="app-error-toast" role="alert">
@@ -1230,6 +1236,7 @@ function App() {
           humanevalConfig={humanevalConfig}
           terminalBenchConfig={terminalBenchConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}
+          bottomPanelVisible={bottomPanelVisible}
           onOpenLayer={handleOpenLayer}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
