@@ -21,7 +21,7 @@ interface TestingPanelProps {
   onOpenTerminalBenchDetails: () => void;
 }
 
-type TestingSectionId = "benchmarks" | "environment" | "latestRuns";
+type TestingSectionId = "benchmarks" | "latestRuns";
 
 export function TestingPanel({
   running,
@@ -38,7 +38,6 @@ export function TestingPanel({
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
     benchmarks: true,
-    environment: true,
     latestRuns: true,
   });
 
@@ -105,21 +104,6 @@ export function TestingPanel({
               onClick={onOpenTerminalBenchDetails}
             />
             <BenchmarkCard title="Claw-Eval" description="Agentic tool-use evaluation" status="Needs harness" />
-          </div>
-        )}
-      </section>
-
-      <section className="testing-section">
-        <ExplorerSectionHeader
-          label="ENVIRONMENT"
-          expanded={sections.environment}
-          onClick={() => toggleSection("environment")}
-        />
-        {sections.environment && (
-          <div className="explorer-section-body">
-            <TestingDetailRow label="Python" value={gpqaStatus.python ?? "Unavailable"} />
-            <TestingDetailRow label="EvalScope" value={gpqaStatus.evalscope ?? "Unavailable"} />
-            <TestingDetailRow label="Dataset cache" value="Open" />
           </div>
         )}
       </section>
