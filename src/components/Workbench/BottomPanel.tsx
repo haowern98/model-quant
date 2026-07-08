@@ -59,12 +59,6 @@ export function BottomPanel({
           <span className="codicon codicon-pulse" aria-hidden="true" />
           HARDWARE
         </button>
-        <button type="button" role="tab" aria-label="EVAL RESULTS">
-          EVAL RESULTS
-        </button>
-        <button type="button" role="tab" aria-label="SAMPLE AUDIT">
-          SAMPLE AUDIT
-        </button>
         <button
           type="button"
           role="tab"
