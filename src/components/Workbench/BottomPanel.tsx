@@ -16,6 +16,8 @@ interface BottomPanelProps {
   outputLines: BenchmarkOutputLine[];
   apiOutputLines: BenchmarkOutputLine[];
   onClose: () => void;
+  maximized: boolean;
+  onToggleMaximized: () => void;
 }
 
 export function BottomPanel({
@@ -25,6 +27,8 @@ export function BottomPanel({
   outputLines,
   apiOutputLines,
   onClose,
+  maximized,
+  onToggleMaximized,
 }: BottomPanelProps) {
   const [activeTab, setActiveTab] =
     useState<"size" | "hardware" | "output" | "apiOutput">("size");
@@ -84,10 +88,14 @@ export function BottomPanel({
         <button
           type="button"
           className="bottom-panel-action bottom-panel-fullscreen"
-          aria-label="Maximize bottom panel"
-          title="Maximize bottom panel"
+          aria-label={maximized ? "Restore bottom panel" : "Maximize bottom panel"}
+          title={maximized ? "Restore bottom panel" : "Maximize bottom panel"}
+          onClick={onToggleMaximized}
         >
-          <span className="codicon codicon-screen-full" aria-hidden="true" />
+          <span
+            className={`codicon codicon-${maximized ? "screen-normal" : "screen-full"}`}
+            aria-hidden="true"
+          />
         </button>
         <button
           type="button"

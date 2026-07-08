@@ -1209,6 +1209,10 @@ body.resizing-bottom-panel * {
   grid-template-rows: 35px 29px minmax(0, 1fr);
 }
 
+.editor-pane.bottom-panel-maximized {
+  grid-template-rows: 35px 29px 0 1fr;
+}
+
 .editor-tabs-bar {
   display: flex;
   min-width: 0;

@@ -187,6 +187,7 @@ export function EditorPane({
 }: EditorPaneProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
+  const [bottomPanelMaximized, setBottomPanelMaximized] = useState(false);
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
@@ -229,7 +230,9 @@ export function EditorPane({
   return (
     <main
       ref={editorRef}
-      className={`editor-pane ${bottomPanelVisible ? "" : "bottom-panel-hidden"}`}
+      className={`editor-pane ${bottomPanelVisible ? "" : "bottom-panel-hidden"} ${
+        bottomPanelMaximized ? "bottom-panel-maximized" : ""
+      }`}
       style={{ "--bottom-panel-height": `${bottomPanelHeight}px` } as CSSProperties}
     >
       <div className="editor-tabs-bar">
@@ -346,25 +349,27 @@ export function EditorPane({
 
       {bottomPanelVisible ? (
         <>
-          <div
-            className="resize-handle bottom-panel-resizer"
-            role="separator"
-            aria-label="Resize bottom panel"
-            aria-orientation="horizontal"
-            aria-valuemin={BOTTOM_PANEL_MIN_HEIGHT}
-            aria-valuemax={bottomPanelMaxHeight()}
-            aria-valuenow={Math.round(bottomPanelHeight)}
-            tabIndex={0}
-            onPointerDown={startBottomPanelResize}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-              event.preventDefault();
-              const direction = event.key === "ArrowUp" ? 1 : -1;
-              setBottomPanelHeight((height) =>
-                clamp(height + direction * 10, BOTTOM_PANEL_MIN_HEIGHT, bottomPanelMaxHeight()),
-              );
-            }}
-          />
+          {bottomPanelMaximized ? null : (
+            <div
+              className="resize-handle bottom-panel-resizer"
+              role="separator"
+              aria-label="Resize bottom panel"
+              aria-orientation="horizontal"
+              aria-valuemin={BOTTOM_PANEL_MIN_HEIGHT}
+              aria-valuemax={bottomPanelMaxHeight()}
+              aria-valuenow={Math.round(bottomPanelHeight)}
+              tabIndex={0}
+              onPointerDown={startBottomPanelResize}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                event.preventDefault();
+                const direction = event.key === "ArrowUp" ? 1 : -1;
+                setBottomPanelHeight((height) =>
+                  clamp(height + direction * 10, BOTTOM_PANEL_MIN_HEIGHT, bottomPanelMaxHeight()),
+                );
+              }}
+            />
+          )}
           <BottomPanel
             tensors={tensors}
             assignments={assignments}
@@ -372,6 +377,8 @@ export function EditorPane({
             outputLines={outputLines}
             apiOutputLines={apiOutputLines}
             onClose={onHideBottomPanel}
+            maximized={bottomPanelMaximized}
+            onToggleMaximized={() => setBottomPanelMaximized((maximized) => !maximized)}
           />
         </>
       ) : null}
