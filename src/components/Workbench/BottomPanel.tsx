@@ -62,7 +62,6 @@ export function BottomPanel({
           aria-selected={activeTab === "hardware"}
           onClick={() => setActiveTab("hardware")}
         >
-          <span className="codicon codicon-pulse" aria-hidden="true" />
           HARDWARE
         </button>
         <button
