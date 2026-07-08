@@ -37,8 +37,11 @@ function basename(path: string | null): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-function sectionLabel(layerIndex: number): string {
+function sectionLabel(layerIndex: number, layerTensors: TensorInfo[]): string {
   if (layerIndex < 0) return "Global tensors";
+  const parts = layerTensors[0]?.name.split(".").filter(Boolean) ?? [];
+  const numberIndex = parts.findIndex((part) => /^\d+$/.test(part));
+  if (numberIndex > 0) return parts.slice(0, numberIndex + 1).join(".");
   return `Layer ${layerIndex}`;
 }
 
@@ -163,14 +166,15 @@ export function ExplorerPanel({
               groups.map(([layerIndex, layerTensors]) => {
                 const expanded = expandedLayers.has(layerIndex);
                 const active = activeLayerIndex === layerIndex;
+                const label = sectionLabel(layerIndex, layerTensors);
                 return (
                   <div key={layerIndex}>
                     <ExplorerTreeRow
-                      label={sectionLabel(layerIndex)}
+                      label={label}
                       right={layerTensors.length}
                       expanded={expanded}
                       active={active}
-                      aria-label={`${sectionLabel(layerIndex)} ${layerTensors.length}`}
+                      aria-label={`${label} ${layerTensors.length}`}
                       onClick={() => {
                         if (expanded) onToggleLayer(layerIndex);
                         else onOpenLayer(layerIndex);

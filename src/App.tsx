@@ -525,18 +525,28 @@ function App() {
     [openEditors, resetRecipeForModel],
   );
 
+  const layerDisplayLabel = useCallback((layerIndex: number) => {
+    if (layerIndex < 0) return "Global tensors";
+    const parts = model?.tensors.find((tensor) => tensor.layerIndex === layerIndex)?.name.split(".").filter(Boolean) ?? [];
+    const numberIndex = parts.findIndex((part) => /^\d+$/.test(part));
+    if (numberIndex > 0) return parts.slice(0, numberIndex + 1).join(".");
+    return `Layer ${layerIndex}`;
+  }, [model?.tensors]);
+
   const handleOpenLayer = useCallback((layerIndex: number) => {
-    const tab = layerEditorTab(layerIndex);
+    const tab = layerEditorTab(layerIndex, layerDisplayLabel(layerIndex));
     setActiveEditorId(tab.id);
     setOpenEditors((current) =>
-      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
+      current.some((editor) => editor.id === tab.id)
+        ? current.map((editor) => (editor.id === tab.id ? tab : editor))
+        : [...current, tab],
     );
     setExpandedLayers((current) => {
       const next = new Set(current);
       next.add(layerIndex);
       return next;
     });
-  }, []);
+  }, [layerDisplayLabel]);
 
   const handleToggleLayer = useCallback((layerIndex: number) => {
     setExpandedLayers((current) => {

@@ -118,12 +118,6 @@ function basename(path: string | null): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-function layerTitle(layerIndex: number | null): string {
-  if (layerIndex === null) return "No layer selected";
-  if (layerIndex < 0) return "Global tensors";
-  return `Layer ${layerIndex}`;
-}
-
 export function EditorPane({
   modelPath,
   hasModel,
@@ -183,20 +177,7 @@ export function EditorPane({
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
-  const activeLayerIndex =
-    activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
-  const activeTitle =
-    activeEditor?.kind === "eval-results"
-      ? "Eval Results"
-      : activeEditor?.kind === "gpqa-details"
-        ? "GPQA Diamond"
-        : activeEditor?.kind === "gpqa-dataset"
-          ? "GPQA Diamond Dataset"
-          : activeEditor?.kind === "humaneval-details"
-            ? "HumanEval"
-            : activeEditor?.kind === "terminal-bench-details"
-              ? "Terminal-Bench 2.1"
-      : layerTitle(activeLayerIndex);
+  const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
   const activeBreadcrumb = activeEditor ? editorTabLabel(activeEditor) : "workspace";
   const activeResult = activeEditor?.kind === "eval-results" ? activeEditor.result : null;
   const showingGpqaDetails = activeEditor?.kind === "gpqa-details";
