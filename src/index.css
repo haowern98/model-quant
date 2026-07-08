@@ -1104,7 +1104,7 @@ body.resizing-bottom-panel * {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding-left: 56px;
+  padding-left: 42px;
   border: 0;
   background: transparent;
   color: var(--vscode-text);
