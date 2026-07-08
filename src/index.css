@@ -972,9 +972,9 @@ body.resizing-bottom-panel * {
   height: 22px;
   display: grid;
   font-size: 13px;
-  grid-template-columns: 17px 15px minmax(0, 1fr) auto;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   border: 0;
   background: transparent;
   color: #cccccc;
@@ -995,7 +995,7 @@ body.resizing-bottom-panel * {
 
 .model-row {
   padding-left: 21px;
-  grid-template-columns: 17px 15px minmax(0, 1fr) 24px;
+  grid-template-columns: 17px minmax(0, 1fr) 24px;
   color: var(--vscode-text);
   font-weight: 600;
 }
