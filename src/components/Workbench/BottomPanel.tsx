@@ -31,7 +31,7 @@ export function BottomPanel({
   onToggleMaximized,
 }: BottomPanelProps) {
   const [activeTab, setActiveTab] =
-    useState<"size" | "hardware" | "output" | "apiOutput">("size");
+    useState<"size" | "hardware" | "output" | "apiOutput">("hardware");
   const totalTargetBytes = tensors.reduce((sum, tensor) => {
     const quant = assignments[tensor.name] ?? toTargetQuant(tensor.currentQuant);
     const bits = QUANT_TYPES.find((item) => item.value === quant)?.bitsPerWeight ?? 4.5;
@@ -44,16 +44,6 @@ export function BottomPanel({
   return (
     <section className="bottom-panel" aria-label="Bottom panel">
       <div className="bottom-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          className={activeTab === "size" ? "active" : ""}
-          aria-label="SIZE PROFILE"
-          aria-selected={activeTab === "size"}
-          onClick={() => setActiveTab("size")}
-        >
-          SIZE PROFILE
-        </button>
         <button
           type="button"
           role="tab"
