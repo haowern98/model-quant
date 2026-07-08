@@ -63,7 +63,7 @@ export function TestingPanel({
           action={
             <button
               type="button"
-              className="tree-action-button"
+              className="tree-action-button benchmark-refresh-button"
               aria-label="Refresh All"
               title="Refresh All"
               disabled={running}

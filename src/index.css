@@ -319,7 +319,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 4px;
+  margin-right: 6px;
 }
 
 .menu button:hover,
@@ -1053,6 +1053,11 @@ body.resizing-bottom-panel * {
   padding: 0;
   color: #cccccc;
   border-radius: 3px;
+}
+
+.benchmark-refresh-button .codicon {
+  font-size: 14px;
+  transform: translateY(1px);
 }
 
 .tree-action-spacer {
