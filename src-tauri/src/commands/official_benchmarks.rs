@@ -204,6 +204,7 @@ struct EffectiveGpqaRunConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct EffectiveTerminalBenchRunConfig {
+    context_window: u32,
     samples: Option<u64>,
     runs_per_task: u64,
     max_turns: u64,
@@ -304,6 +305,7 @@ fn effective_terminal_bench_run_config(
     if matches!(config.context_window, Some(0)) {
         return Err("Terminal-Bench context window must be greater than 0.".to_string());
     }
+    let context_window = config.context_window.unwrap_or(GPQA_DEFAULT_CONTEXT_WINDOW);
     if matches!(config.samples, Some(0)) {
         return Err("Terminal-Bench samples must be greater than 0.".to_string());
     }
@@ -346,6 +348,7 @@ fn effective_terminal_bench_run_config(
     }
 
     Ok(EffectiveTerminalBenchRunConfig {
+        context_window,
         samples: config.samples,
         runs_per_task,
         max_turns,
@@ -2926,6 +2929,16 @@ fn terminal_bench_harbor_benchmark_args(
         "--ak".to_string(),
         format!("api_base={base_url}"),
         "--ak".to_string(),
+        format!(
+            "model_info={}",
+            json!({
+                "max_input_tokens": config.context_window,
+                "max_output_tokens": 4096,
+                "input_cost_per_token": 0,
+                "output_cost_per_token": 0
+            })
+        ),
+        "--ak".to_string(),
         format!("max_turns={}", config.max_turns),
         "--ak".to_string(),
         "suppress_max_turns_warning=true".to_string(),
@@ -3693,6 +3706,7 @@ mod tests {
         let task = PathBuf::from(r"C:\tasks\adaptive-rejection-sampler");
         let jobs = PathBuf::from(r"C:\runs\terminal-bench");
         let config = EffectiveTerminalBenchRunConfig {
+            context_window: 30_000,
             samples: Some(3),
             runs_per_task: 2,
             max_turns: 4,
@@ -3719,6 +3733,7 @@ mod tests {
         assert!(args.contains(&"openai/demo.gguf".to_string()));
         assert!(args.contains(&"--ak".to_string()));
         assert!(args.contains(&"api_base=http://127.0.0.1:1234/v1".to_string()));
+        assert!(args.contains(&"model_info={\"input_cost_per_token\":0,\"max_input_tokens\":30000,\"max_output_tokens\":4096,\"output_cost_per_token\":0}".to_string()));
         assert!(args.contains(&"max_turns=4".to_string()));
         assert!(args.contains(&"temperature=0.25".to_string()));
         assert!(args.contains(&"llm_call_kwargs={\"extra_body\":{\"min_p\":0.05,\"repeat_penalty\":1.1,\"top_k\":40},\"presence_penalty\":0.2,\"top_p\":0.95}".to_string()));
