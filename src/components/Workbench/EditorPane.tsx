@@ -409,6 +409,9 @@ const TENSOR_VALUES_ROW_HEIGHT = 28;
 const TENSOR_VALUES_COL_WIDTH = 96;
 const TENSOR_VALUES_PLACEHOLDER_ROWS = 3;
 const TENSOR_VALUES_PLACEHOLDER_COLS = 3;
+const TENSOR_VALUES_MAX_ROW_CHUNKS = 5;
+const TENSOR_VALUES_MAX_COL_CHUNKS = 5;
+const TENSOR_VALUES_EVICT_DELAY_MS = 150;
 
 type TensorValueChunk = {
   rowOffset: number;
@@ -424,9 +427,17 @@ function chunkCols(chunks: TensorValueChunk[], rowOffset: number, colOffset: num
   return chunks.find((chunk) => chunk.rowOffset === rowOffset && chunk.colOffset === colOffset)?.preview.cols ?? 0;
 }
 
+function offsetsAround(offsets: number[], activeIndex: number, maxCount: number): number[] {
+  if (offsets.length <= maxCount) return offsets;
+  const before = Math.floor(maxCount / 2);
+  const start = Math.max(0, Math.min(activeIndex - before, offsets.length - maxCount));
+  return offsets.slice(start, start + maxCount);
+}
+
 function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tensor-values" }> }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadingChunks = useRef(new Set<string>());
+  const evictionTimer = useRef<number | null>(null);
   const lastScrollTop = useRef(0);
   const lastScrollLeft = useRef(0);
   const [chunks, setChunks] = useState<TensorValueChunk[]>([]);
@@ -505,6 +516,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
 
   useEffect(() => {
     loadingChunks.current.clear();
+    if (evictionTimer.current !== null) window.clearTimeout(evictionTimer.current);
     lastScrollTop.current = 0;
     lastScrollLeft.current = 0;
     setChunks([]);
@@ -512,6 +524,65 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
     loadChunk(0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.tensorName]);
+
+  useEffect(() => {
+    if (chunks.length === 0) return;
+    if (evictionTimer.current !== null) window.clearTimeout(evictionTimer.current);
+    evictionTimer.current = window.setTimeout(() => {
+      if (
+        loadingChunks.current.size > 0 ||
+        loadingBefore ||
+        loadingAfter ||
+        loadingLeft ||
+        loadingRight ||
+        !scrollRef.current
+      ) {
+        return;
+      }
+
+      const scroll = scrollRef.current;
+      setChunks((current) => {
+        const currentRowOffsets = sortedOffsets(current.map((chunk) => chunk.rowOffset));
+        const currentColOffsets = sortedOffsets(current.map((chunk) => chunk.colOffset));
+        if (
+          currentRowOffsets.length <= TENSOR_VALUES_MAX_ROW_CHUNKS &&
+          currentColOffsets.length <= TENSOR_VALUES_MAX_COL_CHUNKS
+        ) {
+          return current;
+        }
+
+        const rowChunkHeight = TENSOR_VALUES_ROW_HEIGHT * TENSOR_VALUES_CHUNK_ROWS;
+        const colChunkWidth = TENSOR_VALUES_COL_WIDTH * TENSOR_VALUES_CHUNK_COLS;
+        const activeRowIndex = Math.min(currentRowOffsets.length - 1, Math.max(0, Math.floor(scroll.scrollTop / rowChunkHeight)));
+        const activeColIndex = Math.min(currentColOffsets.length - 1, Math.max(0, Math.floor(scroll.scrollLeft / colChunkWidth)));
+        const keptRows = offsetsAround(currentRowOffsets, activeRowIndex, TENSOR_VALUES_MAX_ROW_CHUNKS);
+        const keptCols = offsetsAround(currentColOffsets, activeColIndex, TENSOR_VALUES_MAX_COL_CHUNKS);
+        const keptRowSet = new Set(keptRows);
+        const keptColSet = new Set(keptCols);
+        const next = current.filter((chunk) => keptRowSet.has(chunk.rowOffset) && keptColSet.has(chunk.colOffset));
+        if (next.length === current.length) return current;
+
+        const removedRowsBefore = keptRows[0] - currentRowOffsets[0];
+        const removedColsBefore = keptCols[0] - currentColOffsets[0];
+        requestAnimationFrame(() => {
+          if (!scrollRef.current) return;
+          if (removedRowsBefore > 0) {
+            scrollRef.current.scrollTop = Math.max(0, scrollRef.current.scrollTop - removedRowsBefore * TENSOR_VALUES_ROW_HEIGHT);
+          }
+          if (removedColsBefore > 0) {
+            scrollRef.current.scrollLeft = Math.max(0, scrollRef.current.scrollLeft - removedColsBefore * TENSOR_VALUES_COL_WIDTH);
+          }
+          lastScrollTop.current = scrollRef.current.scrollTop;
+          lastScrollLeft.current = scrollRef.current.scrollLeft;
+        });
+        return next;
+      });
+    }, TENSOR_VALUES_EVICT_DELAY_MS);
+
+    return () => {
+      if (evictionTimer.current !== null) window.clearTimeout(evictionTimer.current);
+    };
+  }, [chunks, loadingAfter, loadingBefore, loadingLeft, loadingRight]);
 
   const rowOffsets = sortedOffsets(chunks.map((chunk) => chunk.rowOffset));
   const colOffsets = sortedOffsets(chunks.map((chunk) => chunk.colOffset));
