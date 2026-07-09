@@ -1707,6 +1707,17 @@ body.resizing-bottom-panel * {
   min-width: 97px;
 }
 
+.tensor-values-grid thead th:first-child,
+.tensor-values-grid tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.tensor-values-grid thead th:first-child {
+  z-index: 3;
+}
+
 .tensor-values-grid th {
   color: var(--vscode-muted);
   font-weight: 600;
