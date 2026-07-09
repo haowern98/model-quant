@@ -201,6 +201,9 @@ export function EditorPane({
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
   const showingTensorValues = activeEditor?.kind === "tensor-values";
+  const tensorValuesEditor = showingTensorValues
+    ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
+    : null;
   const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
   const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
@@ -274,6 +277,14 @@ export function EditorPane({
             <span>{activeResultBenchmark}</span>
             <span>&gt;</span>
             <span>Eval Results</span>
+          </>
+        ) : tensorValuesEditor ? (
+          <>
+            <span>{basename(modelPath)}</span>
+            <span>&gt;</span>
+            <span>{tensorValuesEditor.layerLabel}</span>
+            <span>&gt;</span>
+            <span>{tensorValuesEditor.tensorName}</span>
           </>
         ) : (
           <>

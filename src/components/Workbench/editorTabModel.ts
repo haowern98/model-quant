@@ -114,7 +114,7 @@ export function editorTabLabel(tab: EditorTab): string {
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";
   if (tab.kind === "humaneval-details") return "HumanEval";
   if (tab.kind === "terminal-bench-details") return "Terminal-Bench 2.1";
-  if (tab.kind === "tensor-values") return tab.tensorName.split(".").pop() ?? tab.tensorName;
+  if (tab.kind === "tensor-values") return tab.tensorName;
   if (tab.label) return tab.label;
   if (tab.layerIndex < 0) return "Global tensors";
   return `Layer ${tab.layerIndex}`;
