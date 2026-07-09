@@ -44,11 +44,9 @@ export function StatusBar(props: StatusBarProps) {
       ) : null}
       {tensorEditor ? (
         <div className="status-bar-tensor-values">
-          <div className="status-bar-item">Tensor {tensorEditor.tensorName}</div>
           <div className="status-bar-item">Shape [{tensorEditor.shape.join(", ")}]</div>
           <div className="status-bar-item">Quant {tensorEditor.quant}</div>
           <div className="status-bar-item">Values {valueCount?.toLocaleString()}</div>
-          <div className="status-bar-item">Window rows 0-31 cols 0-15</div>
         </div>
       ) : null}
     </footer>
