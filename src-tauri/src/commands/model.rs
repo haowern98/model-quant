@@ -3,11 +3,29 @@ use std::sync::Mutex;
 use tauri::State;
 
 use crate::commands::quant::RecipeStore;
+use crate::ffi::runtime_bindings;
 use crate::gguf::reader::parse_gguf;
 use crate::gguf::types::ModelInfo;
 use crate::quant::recipe::{QuantType, RecipeState};
 
-pub struct ModelState(pub Mutex<Option<ModelInfo>>);
+const TENSOR_VALUES_MAX_WINDOW: u64 = 4096;
+
+pub struct LoadedModel {
+    path: PathBuf,
+    pub(crate) info: ModelInfo,
+}
+
+pub struct ModelState(pub Mutex<Option<LoadedModel>>);
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TensorValuesPreview {
+    values: Vec<f32>,
+    rows: u64,
+    cols: u64,
+    total_rows: u64,
+    total_cols: u64,
+}
 
 #[tauri::command]
 pub async fn open_model(
@@ -20,7 +38,10 @@ pub async fn open_model(
 
     {
         let mut guard = model_state.0.lock().map_err(|e| e.to_string())?;
-        *guard = Some(model.clone());
+        *guard = Some(LoadedModel {
+            path: model_path,
+            info: model.clone(),
+        });
     }
 
     {
@@ -42,9 +63,54 @@ pub async fn get_tensors(
 ) -> Result<Vec<crate::gguf::types::TensorInfo>, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     match &*guard {
-        Some(model) => Ok(model.tensors.clone()),
+        Some(model) => Ok(model.info.tensors.clone()),
         None => Err("No model loaded".into()),
     }
+}
+
+#[tauri::command]
+pub async fn get_tensor_values(
+    state: State<'_, ModelState>,
+    tensor_name: String,
+    row_offset: u64,
+    col_offset: u64,
+    row_count: u64,
+    col_count: u64,
+) -> Result<TensorValuesPreview, String> {
+    let row_count = row_count.min(128);
+    let col_count = col_count.min(128);
+    let value_count = row_count
+        .checked_mul(col_count)
+        .ok_or_else(|| "tensor preview window is too large".to_string())?;
+    if value_count > TENSOR_VALUES_MAX_WINDOW {
+        return Err(format!(
+            "Tensor preview window is limited to {TENSOR_VALUES_MAX_WINDOW} values"
+        ));
+    }
+
+    let path = {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        match &*guard {
+            Some(model) => model.path.clone(),
+            None => return Err("No model loaded".into()),
+        }
+    };
+    let preview = runtime_bindings::preview_tensor_values(
+        path.to_string_lossy().as_ref(),
+        &tensor_name,
+        row_offset,
+        col_offset,
+        row_count,
+        col_count,
+    )?;
+
+    Ok(TensorValuesPreview {
+        values: preview.values,
+        rows: preview.rows,
+        cols: preview.cols,
+        total_rows: preview.total_rows,
+        total_cols: preview.total_cols,
+    })
 }
 
 fn parse_default_quant(value: &str) -> QuantType {

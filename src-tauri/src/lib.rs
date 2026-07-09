@@ -28,6 +28,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::model::open_model,
             commands::model::get_tensors,
+            commands::model::get_tensor_values,
             commands::quant::assign_quant,
             commands::quant::assign_all,
             commands::quant::assign_by_pattern,

@@ -138,6 +138,14 @@ export interface ModelInfo {
   totalSizeBytes: number;
 }
 
+export interface TensorValuesPreview {
+  values: number[];
+  rows: number;
+  cols: number;
+  totalRows: number;
+  totalCols: number;
+}
+
 // ---- Recipe ----
 
 export interface QuantAssignment {

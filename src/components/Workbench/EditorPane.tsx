@@ -30,6 +30,7 @@ import type {
   TerminalBenchDatasetRow,
   TerminalBenchStatus,
   TensorInfo,
+  TensorValuesPreview,
 } from "../../types";
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
@@ -45,6 +46,7 @@ import {
   getTerminalBenchDatasetRows,
   getHumanEvalDatasetStatus,
   getHumanEvalStatus,
+  getTensorValues,
   installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
 
@@ -332,7 +334,7 @@ export function EditorPane({
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
       ) : showingTensorValues ? (
-        <TensorValuesMockView />
+        <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -389,53 +391,112 @@ export function EditorPane({
   );
 }
 
-function TensorValuesMockView() {
-  const rows = Array.from({ length: 32 }, (_, row) => row);
-  const cols = Array.from({ length: 16 }, (_, col) => col);
-  const mockValue = (row: number, col: number) => ((row - col) / 1024).toFixed(6);
+function parsePreviewInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tensor-values" }> }) {
+  const [rowOffset, setRowOffset] = useState("0");
+  const [colOffset, setColOffset] = useState("0");
+  const [rowCount, setRowCount] = useState("32");
+  const [colCount, setColCount] = useState("16");
+  const [preview, setPreview] = useState<TensorValuesPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPreview = (override?: {
+    rowOffset: string;
+    colOffset: string;
+    rowCount: string;
+    colCount: string;
+  }) => {
+    const window = override ?? { rowOffset, colOffset, rowCount, colCount };
+    setLoading(true);
+    setError(null);
+    getTensorValues({
+      tensorName: editor.tensorName,
+      rowOffset: parsePreviewInteger(window.rowOffset, 0),
+      colOffset: parsePreviewInteger(window.colOffset, 0),
+      rowCount: parsePreviewInteger(window.rowCount, 32),
+      colCount: parsePreviewInteger(window.colCount, 16),
+    })
+      .then((result) => setPreview(result))
+      .catch((err: unknown) => {
+        setPreview(null);
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    const initialWindow = { rowOffset: "0", colOffset: "0", rowCount: "32", colCount: "16" };
+    setRowOffset("0");
+    setColOffset("0");
+    setRowCount("32");
+    setColCount("16");
+    setPreview(null);
+    setError(null);
+    loadPreview(initialWindow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor.tensorName]);
+
+  const visibleRows = Array.from({ length: preview?.rows ?? 0 }, (_, row) => row);
+  const visibleCols = Array.from({ length: preview?.cols ?? 0 }, (_, col) => col);
+  const baseRow = parsePreviewInteger(rowOffset, 0);
+  const baseCol = parsePreviewInteger(colOffset, 0);
+  const updateInteger =
+    (setter: (value: string) => void) => (event: ChangeEvent<HTMLInputElement>) => {
+      if (/^\d*$/.test(event.currentTarget.value)) setter(event.currentTarget.value);
+    };
 
   return (
     <section className="tensor-values-surface">
       <div className="tensor-values-toolbar">
         <label>
           Row
-          <input type="number" defaultValue={0} min={0} />
+          <input type="number" value={rowOffset} min={0} onChange={updateInteger(setRowOffset)} />
         </label>
         <label>
           Col
-          <input type="number" defaultValue={0} min={0} />
+          <input type="number" value={colOffset} min={0} onChange={updateInteger(setColOffset)} />
         </label>
         <label>
           Rows
-          <input type="number" defaultValue={32} min={1} max={128} />
+          <input type="number" value={rowCount} min={1} max={128} onChange={updateInteger(setRowCount)} />
         </label>
         <label>
           Cols
-          <input type="number" defaultValue={16} min={1} max={128} />
+          <input type="number" value={colCount} min={1} max={128} onChange={updateInteger(setColCount)} />
         </label>
-        <button type="button">Load</button>
+        <button type="button" disabled={loading} onClick={() => loadPreview()}>
+          {loading ? "Loading" : "Load"}
+        </button>
+        {error ? <span className="tensor-values-error">{error}</span> : null}
       </div>
       <div className="tensor-values-grid-scroll">
-        <table className="tensor-values-grid">
-          <thead>
-            <tr>
-              <th></th>
-              {cols.map((col) => (
-                <th key={col}>col {col}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row}>
-                <th>row {row}</th>
-                {cols.map((col) => (
-                  <td key={col}>{mockValue(row, col)}</td>
+        {preview ? (
+          <table className="tensor-values-grid">
+            <thead>
+              <tr>
+                <th></th>
+                {visibleCols.map((col) => (
+                  <th key={col}>col {baseCol + col}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <tr key={row}>
+                  <th>row {baseRow + row}</th>
+                  {visibleCols.map((col) => (
+                    <td key={col}>{preview.values[row * preview.cols + col]?.toFixed(6) ?? ""}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
       </div>
     </section>
   );

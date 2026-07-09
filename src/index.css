@@ -1673,6 +1673,10 @@ body.resizing-bottom-panel * {
   padding: 0 12px;
 }
 
+.tensor-values-error {
+  color: #f48771;
+}
+
 .tensor-values-grid-scroll {
   min-height: 0;
   overflow: auto;

@@ -197,6 +197,19 @@ MS_RUNTIME_API const char * ms_runtime_last_error(void);
 MS_RUNTIME_API void ms_runtime_reset_recipe_test_cancel(void);
 MS_RUNTIME_API void ms_runtime_cancel_recipe_test(void);
 MS_RUNTIME_API int32_t ms_runtime_inspect_gguf(const char * path, ms_gguf_summary * out_summary);
+MS_RUNTIME_API int32_t ms_runtime_preview_tensor_values(
+    const char * path,
+    const char * tensor_name,
+    uint64_t row_offset,
+    uint64_t col_offset,
+    uint64_t row_count,
+    uint64_t col_count,
+    float * out_values,
+    uint64_t value_capacity,
+    uint64_t * out_rows,
+    uint64_t * out_cols,
+    uint64_t * out_total_rows,
+    uint64_t * out_total_cols);
 MS_RUNTIME_API int32_t ms_runtime_analyze_recipe(
     const char * path,
     const ms_recipe_tensor_target * targets,

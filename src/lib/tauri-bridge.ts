@@ -21,6 +21,7 @@ import type {
   TerminalBenchDatasetRow,
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
+  TensorValuesPreview,
 } from "../types";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -57,6 +58,16 @@ export async function openModel(path: string): Promise<ModelInfo> {
 
 export async function getTensors(): Promise<TensorInfo[]> {
   return invoke<TensorInfo[]>("get_tensors");
+}
+
+export async function getTensorValues(options: {
+  tensorName: string;
+  rowOffset: number;
+  colOffset: number;
+  rowCount: number;
+  colCount: number;
+}): Promise<TensorValuesPreview> {
+  return invoke<TensorValuesPreview>("get_tensor_values", options);
 }
 
 export async function assignQuant(

@@ -2367,6 +2367,144 @@ int32_t ms_runtime_inspect_gguf(const char * path, ms_gguf_summary * out_summary
     }
 }
 
+int32_t ms_runtime_preview_tensor_values(
+    const char * path,
+    const char * tensor_name,
+    uint64_t row_offset,
+    uint64_t col_offset,
+    uint64_t row_count,
+    uint64_t col_count,
+    float * out_values,
+    uint64_t value_capacity,
+    uint64_t * out_rows,
+    uint64_t * out_cols,
+    uint64_t * out_total_rows,
+    uint64_t * out_total_cols) {
+    clear_error();
+
+    if (path == nullptr || path[0] == '\0') {
+        return fail("GGUF path is empty");
+    }
+    if (tensor_name == nullptr || tensor_name[0] == '\0') {
+        return fail("tensor name is empty");
+    }
+    if (out_values == nullptr && value_capacity > 0) {
+        return fail("tensor preview output pointer is null");
+    }
+    if (out_rows == nullptr || out_cols == nullptr || out_total_rows == nullptr || out_total_cols == nullptr) {
+        return fail("tensor preview metadata output pointer is null");
+    }
+
+    try {
+        gguf_init_params params = {};
+        params.no_alloc = true;
+        params.ctx = nullptr;
+
+        std::unique_ptr<gguf_context, decltype(&gguf_free)> ctx(
+            gguf_init_from_file(path, params),
+            gguf_free);
+        if (ctx == nullptr) {
+            return fail(std::string("failed to open GGUF: ") + path);
+        }
+
+        const int64_t tensor_id = gguf_find_tensor(ctx.get(), tensor_name);
+        if (tensor_id < 0) {
+            return fail(std::string("GGUF is missing tensor: ") + tensor_name);
+        }
+
+        const int64_t cols = gguf_get_tensor_ne(ctx.get(), tensor_id, 0);
+        const int64_t row_planes =
+            gguf_get_tensor_ne(ctx.get(), tensor_id, 1)
+            * gguf_get_tensor_ne(ctx.get(), tensor_id, 2)
+            * gguf_get_tensor_ne(ctx.get(), tensor_id, 3);
+        if (cols <= 0 || row_planes <= 0) {
+            return fail(std::string("tensor has invalid shape: ") + tensor_name);
+        }
+
+        *out_total_cols = static_cast<uint64_t>(cols);
+        *out_total_rows = static_cast<uint64_t>(row_planes);
+        *out_rows = 0;
+        *out_cols = 0;
+
+        if (row_offset >= static_cast<uint64_t>(row_planes) || col_offset >= static_cast<uint64_t>(cols)) {
+            return 0;
+        }
+
+        const uint64_t available_rows = static_cast<uint64_t>(row_planes) - row_offset;
+        const uint64_t available_cols = static_cast<uint64_t>(cols) - col_offset;
+        const uint64_t rows_to_read = std::min(row_count, available_rows);
+        const uint64_t cols_to_read = std::min(col_count, available_cols);
+        if (rows_to_read == 0 || cols_to_read == 0) {
+            return 0;
+        }
+        if (rows_to_read > std::numeric_limits<uint64_t>::max() / cols_to_read) {
+            return fail("tensor preview window is too large");
+        }
+        if (rows_to_read * cols_to_read > value_capacity) {
+            return fail("tensor preview output buffer is too small");
+        }
+
+        const ggml_type current_type = gguf_get_tensor_type(ctx.get(), tensor_id);
+        if (current_type != GGML_TYPE_F32) {
+            const struct ggml_type_traits * traits = ggml_get_type_traits(current_type);
+            if (traits == nullptr || traits->to_float == nullptr) {
+                return fail(
+                    std::string("unsupported tensor quant for preview: ")
+                    + tensor_name + " " + display_quant_type(current_type));
+            }
+        }
+
+        const size_t row_size = ggml_row_size(current_type, cols);
+        const size_t tensor_size = gguf_get_tensor_size(ctx.get(), tensor_id);
+        if (tensor_size != row_size * static_cast<size_t>(row_planes)) {
+            return fail(std::string("tensor size does not match row layout for: ") + tensor_name);
+        }
+
+        std::ifstream file(path, std::ios::binary);
+        if (!file.is_open()) {
+            return fail(std::string("failed to open GGUF data: ") + path);
+        }
+
+        UserCopyTensorReader reader;
+        reader.file = std::move(file);
+        reader.source_metadata = ctx.get();
+        reader.data_offset = gguf_get_data_offset(ctx.get());
+        reader.source_row_buffer.resize(row_size);
+        reader.f32_row_buffer.resize(static_cast<size_t>(cols));
+
+        const size_t tensor_offset = reader.data_offset + gguf_get_tensor_offset(ctx.get(), tensor_id);
+        for (uint64_t row = 0; row < rows_to_read; ++row) {
+            const uint64_t source_row = row_offset + row;
+            read_exact_at(
+                &reader,
+                tensor_offset + static_cast<size_t>(source_row) * row_size,
+                reader.source_row_buffer.data(),
+                row_size,
+                tensor_name);
+            decode_source_row_to_f32(
+                reader.source_row_buffer.data(),
+                current_type,
+                cols,
+                reader.f32_row_buffer.data(),
+                tensor_name);
+            const size_t target_offset = static_cast<size_t>(row * cols_to_read);
+            const size_t source_col_offset = static_cast<size_t>(col_offset);
+            std::memcpy(
+                out_values + target_offset,
+                reader.f32_row_buffer.data() + source_col_offset,
+                static_cast<size_t>(cols_to_read) * sizeof(float));
+        }
+
+        *out_rows = rows_to_read;
+        *out_cols = cols_to_read;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native runtime error");
+    }
+}
+
 int32_t ms_runtime_analyze_recipe(
     const char * path,
     const ms_recipe_tensor_target * targets,
