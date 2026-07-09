@@ -413,7 +413,6 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
   const [rowCount, setRowCount] = useState("32");
   const [colCount, setColCount] = useState("16");
   const [preview, setPreview] = useState<TensorValuesPreview | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadPreview = (override?: {
@@ -423,7 +422,6 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
     colCount: string;
   }) => {
     const window = override ?? { rowOffset, colOffset, rowCount, colCount };
-    setLoading(true);
     setError(null);
     getTensorValues({
       tensorName: editor.tensorName,
@@ -437,7 +435,6 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
         setPreview(null);
         setError(err instanceof Error ? err.message : String(err));
       })
-      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -456,35 +453,13 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
   const visibleCols = Array.from({ length: preview?.cols ?? 0 }, (_, col) => col);
   const baseRow = parsePreviewInteger(rowOffset, 0);
   const baseCol = parsePreviewInteger(colOffset, 0);
-  const updateInteger =
-    (setter: (value: string) => void) => (event: ChangeEvent<HTMLInputElement>) => {
-      if (/^\d*$/.test(event.currentTarget.value)) setter(event.currentTarget.value);
-    };
 
   return (
     <section className="tensor-values-surface">
-      <div className="tensor-values-toolbar">
-        <label>
-          Row
-          <input type="number" value={rowOffset} min={0} onChange={updateInteger(setRowOffset)} />
-        </label>
-        <label>
-          Col
-          <input type="number" value={colOffset} min={0} onChange={updateInteger(setColOffset)} />
-        </label>
-        <label>
-          Rows
-          <input type="number" value={rowCount} min={1} max={128} onChange={updateInteger(setRowCount)} />
-        </label>
-        <label>
-          Cols
-          <input type="number" value={colCount} min={1} max={128} onChange={updateInteger(setColCount)} />
-        </label>
-        <button type="button" disabled={loading} onClick={() => loadPreview()}>
-          {loading ? "Loading" : "Load"}
-        </button>
-        {error ? <span className="tensor-values-error">{error}</span> : null}
+      <div className="tensor-editor-title">
+        <h1>{editor.tensorName}</h1>
       </div>
+      {error ? <span className="tensor-values-error">{error}</span> : null}
       <div className="tensor-values-grid-scroll">
         {preview ? (
           <table className="tensor-values-grid">
