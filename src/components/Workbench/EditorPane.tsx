@@ -406,91 +406,167 @@ const TENSOR_VALUES_CHUNK_ROWS = 32;
 const TENSOR_VALUES_CHUNK_COLS = 16;
 const TENSOR_VALUES_EDGE_PX = 32;
 const TENSOR_VALUES_ROW_HEIGHT = 28;
+const TENSOR_VALUES_COL_WIDTH = 96;
 const TENSOR_VALUES_PLACEHOLDER_ROWS = 3;
+const TENSOR_VALUES_PLACEHOLDER_COLS = 3;
 
 type TensorValueChunk = {
   rowOffset: number;
+  colOffset: number;
   preview: TensorValuesPreview;
 };
 
+function sortedOffsets(offsets: number[]): number[] {
+  return Array.from(new Set(offsets)).sort((a, b) => a - b);
+}
+
+function chunkCols(chunks: TensorValueChunk[], rowOffset: number, colOffset: number): number {
+  return chunks.find((chunk) => chunk.rowOffset === rowOffset && chunk.colOffset === colOffset)?.preview.cols ?? 0;
+}
+
 function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tensor-values" }> }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const loadingOffsets = useRef(new Set<number>());
+  const loadingChunks = useRef(new Set<string>());
+  const lastScrollTop = useRef(0);
+  const lastScrollLeft = useRef(0);
   const [chunks, setChunks] = useState<TensorValueChunk[]>([]);
   const [loadingBefore, setLoadingBefore] = useState(false);
   const [loadingAfter, setLoadingAfter] = useState(false);
+  const [loadingLeft, setLoadingLeft] = useState(false);
+  const [loadingRight, setLoadingRight] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadChunk = (nextRowOffset: number, position: "before" | "after" | "initial") => {
-    if (loadingOffsets.current.has(nextRowOffset)) return;
-    loadingOffsets.current.add(nextRowOffset);
-    if (position === "before") setLoadingBefore(true);
-    if (position === "after") setLoadingAfter(true);
+  const loadChunk = (nextRowOffset: number, nextColOffset: number) => {
+    const key = `${nextRowOffset}:${nextColOffset}`;
+    if (loadingChunks.current.has(key)) return Promise.resolve();
+    loadingChunks.current.add(key);
     setError(null);
-    getTensorValues({
+    return getTensorValues({
       tensorName: editor.tensorName,
       rowOffset: nextRowOffset,
-      colOffset: 0,
+      colOffset: nextColOffset,
       rowCount: TENSOR_VALUES_CHUNK_ROWS,
       colCount: TENSOR_VALUES_CHUNK_COLS,
     })
       .then((result) => {
         if (result.rows === 0 || result.cols === 0) return;
         setChunks((current) => {
-          if (current.some((chunk) => chunk.rowOffset === nextRowOffset)) return current;
-          return [...current, { rowOffset: nextRowOffset, preview: result }].sort(
-            (a, b) => a.rowOffset - b.rowOffset,
+          if (current.some((chunk) => chunk.rowOffset === nextRowOffset && chunk.colOffset === nextColOffset)) {
+            return current;
+          }
+          return [...current, { rowOffset: nextRowOffset, colOffset: nextColOffset, preview: result }].sort(
+            (a, b) => a.rowOffset - b.rowOffset || a.colOffset - b.colOffset,
           );
         });
-        if (position === "before") {
-          requestAnimationFrame(() => {
-            if (scrollRef.current) {
-              scrollRef.current.scrollTop += result.rows * TENSOR_VALUES_ROW_HEIGHT;
-            }
-          });
-        }
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
-        loadingOffsets.current.delete(nextRowOffset);
-        if (position === "before") setLoadingBefore(false);
-        if (position === "after") setLoadingAfter(false);
+        loadingChunks.current.delete(key);
       });
   };
 
+  const loadRowChunk = (nextRowOffset: number, position: "before" | "after") => {
+    const colOffsets = sortedOffsets(chunks.map((chunk) => chunk.colOffset));
+    const colsToLoad = colOffsets.length > 0 ? colOffsets : [0];
+    if (position === "before") setLoadingBefore(true);
+    if (position === "after") setLoadingAfter(true);
+    Promise.all(colsToLoad.map((colOffset) => loadChunk(nextRowOffset, colOffset))).finally(() => {
+      if (position === "before") {
+        const addedRows = chunks[0] ? chunks[0].rowOffset - nextRowOffset : TENSOR_VALUES_CHUNK_ROWS;
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop += addedRows * TENSOR_VALUES_ROW_HEIGHT;
+        });
+        setLoadingBefore(false);
+      } else {
+        setLoadingAfter(false);
+      }
+    });
+  };
+
+  const loadColChunk = (nextColOffset: number, position: "left" | "right") => {
+    const rowOffsets = sortedOffsets(chunks.map((chunk) => chunk.rowOffset));
+    const rowsToLoad = rowOffsets.length > 0 ? rowOffsets : [0];
+    if (position === "left") setLoadingLeft(true);
+    if (position === "right") setLoadingRight(true);
+    Promise.all(rowsToLoad.map((rowOffset) => loadChunk(rowOffset, nextColOffset))).finally(() => {
+      if (position === "left") {
+        const addedCols = chunks[0] ? chunks[0].colOffset - nextColOffset : TENSOR_VALUES_CHUNK_COLS;
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollLeft += addedCols * TENSOR_VALUES_COL_WIDTH;
+        });
+        setLoadingLeft(false);
+      } else {
+        setLoadingRight(false);
+      }
+    });
+  };
+
   useEffect(() => {
-    loadingOffsets.current.clear();
+    loadingChunks.current.clear();
+    lastScrollTop.current = 0;
+    lastScrollLeft.current = 0;
     setChunks([]);
     setError(null);
-    loadChunk(0, "initial");
+    loadChunk(0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor.tensorName]);
 
-  const firstChunk = chunks[0] ?? null;
-  const lastChunk = chunks[chunks.length - 1] ?? null;
-  const visibleCols = Array.from({ length: firstChunk?.preview.cols ?? TENSOR_VALUES_CHUNK_COLS }, (_, col) => col);
+  const rowOffsets = sortedOffsets(chunks.map((chunk) => chunk.rowOffset));
+  const colOffsets = sortedOffsets(chunks.map((chunk) => chunk.colOffset));
+  const firstChunk = chunks.find((chunk) => chunk.rowOffset === rowOffsets[0] && chunk.colOffset === colOffsets[0]) ?? null;
+  const lastRowChunk =
+    chunks.find((chunk) => chunk.rowOffset === rowOffsets[rowOffsets.length - 1] && chunk.colOffset === colOffsets[0]) ??
+    null;
+  const lastColChunk =
+    chunks.find((chunk) => chunk.rowOffset === rowOffsets[0] && chunk.colOffset === colOffsets[colOffsets.length - 1]) ??
+    null;
   const totalRows = firstChunk?.preview.totalRows ?? 0;
-  const firstRowOffset = firstChunk?.rowOffset ?? 0;
-  const loadedRowEnd = lastChunk ? lastChunk.rowOffset + lastChunk.preview.rows : 0;
+  const totalCols = firstChunk?.preview.totalCols ?? 0;
+  const firstRowOffset = rowOffsets[0] ?? 0;
+  const firstColOffset = colOffsets[0] ?? 0;
+  const loadedRowEnd = lastRowChunk ? lastRowChunk.rowOffset + lastRowChunk.preview.rows : 0;
+  const loadedColEnd = lastColChunk ? lastColChunk.colOffset + lastColChunk.preview.cols : 0;
 
   const handlePreviewScroll = () => {
     const scroll = scrollRef.current;
-    if (!scroll || !firstChunk || !lastChunk) return;
-    if (scroll.scrollTop <= TENSOR_VALUES_EDGE_PX && firstRowOffset > 0) {
-      loadChunk(Math.max(0, firstRowOffset - TENSOR_VALUES_CHUNK_ROWS), "before");
-      return;
+    if (!scroll || !firstChunk || !lastRowChunk || !lastColChunk) return;
+    const verticalMoved = scroll.scrollTop !== lastScrollTop.current;
+    const horizontalMoved = scroll.scrollLeft !== lastScrollLeft.current;
+    lastScrollTop.current = scroll.scrollTop;
+    lastScrollLeft.current = scroll.scrollLeft;
+
+    if (verticalMoved) {
+      if (scroll.scrollTop <= TENSOR_VALUES_EDGE_PX && firstRowOffset > 0) {
+        loadRowChunk(Math.max(0, firstRowOffset - TENSOR_VALUES_CHUNK_ROWS), "before");
+        return;
+      }
+      if (
+        scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - TENSOR_VALUES_EDGE_PX &&
+        loadedRowEnd < totalRows
+      ) {
+        loadRowChunk(loadedRowEnd, "after");
+        return;
+      }
     }
-    if (
-      scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - TENSOR_VALUES_EDGE_PX &&
-      loadedRowEnd < totalRows
-    ) {
-      loadChunk(loadedRowEnd, "after");
+
+    if (horizontalMoved) {
+      if (scroll.scrollLeft <= TENSOR_VALUES_EDGE_PX && firstColOffset > 0) {
+        loadColChunk(Math.max(0, firstColOffset - TENSOR_VALUES_CHUNK_COLS), "left");
+        return;
+      }
+      if (
+        scroll.scrollLeft + scroll.clientWidth >= scroll.scrollWidth - TENSOR_VALUES_EDGE_PX &&
+        loadedColEnd < totalCols
+      ) {
+        loadColChunk(loadedColEnd, "right");
+      }
     }
   };
 
   const placeholderRows = Array.from({ length: TENSOR_VALUES_PLACEHOLDER_ROWS }, (_, row) => row);
+  const placeholderCols = Array.from({ length: TENSOR_VALUES_PLACEHOLDER_COLS }, (_, col) => col);
 
   return (
     <section className="tensor-values-surface">
@@ -504,9 +580,14 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
             <thead>
               <tr>
                 <th></th>
-                {visibleCols.map((col) => (
-                  <th key={col}>col {col}</th>
-                ))}
+                {loadingLeft && placeholderCols.map((col) => <th key={`left-${col}`}></th>)}
+                {colOffsets.flatMap((colOffset) => {
+                  const chunk = chunks.find((item) => item.rowOffset === rowOffsets[0] && item.colOffset === colOffset);
+                  return Array.from({ length: chunk?.preview.cols ?? 0 }, (_, col) => (
+                    <th key={`${colOffset}-${col}`}>col {colOffset + col}</th>
+                  ));
+                })}
+                {loadingRight && placeholderCols.map((col) => <th key={`right-${col}`}></th>)}
               </tr>
             </thead>
             <tbody>
@@ -514,32 +595,78 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
                 placeholderRows.map((row) => (
                   <tr className="tensor-values-placeholder-row" key={`before-${row}`}>
                     <th></th>
-                    {visibleCols.map((col) => (
-                      <td key={col}>
-                        <span />
-                      </td>
-                    ))}
+                    {loadingLeft &&
+                      placeholderCols.map((col) => (
+                        <td key={`left-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                    {colOffsets.flatMap((colOffset) =>
+                      Array.from({ length: chunkCols(chunks, rowOffsets[0], colOffset) }, (_, col) => (
+                        <td key={`${colOffset}-${col}`}>
+                          <span />
+                        </td>
+                      )),
+                    )}
+                    {loadingRight &&
+                      placeholderCols.map((col) => (
+                        <td key={`right-${col}`}>
+                          <span />
+                        </td>
+                      ))}
                   </tr>
                 ))}
-              {chunks.map((chunk) =>
-                Array.from({ length: chunk.preview.rows }, (_, row) => (
-                  <tr key={`${chunk.rowOffset}-${row}`}>
-                    <th>row {chunk.rowOffset + row}</th>
-                    {visibleCols.map((col) => (
-                      <td key={col}>{chunk.preview.values[row * chunk.preview.cols + col]?.toFixed(6) ?? ""}</td>
-                    ))}
+              {rowOffsets.flatMap((rowOffset) => {
+                const rowChunk = chunks.find((chunk) => chunk.rowOffset === rowOffset && chunk.colOffset === colOffsets[0]);
+                return Array.from({ length: rowChunk?.preview.rows ?? 0 }, (_, row) => (
+                  <tr key={`${rowOffset}-${row}`}>
+                    <th>row {rowOffset + row}</th>
+                    {loadingLeft &&
+                      placeholderCols.map((col) => (
+                        <td className="tensor-values-placeholder-row" key={`left-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                    {colOffsets.flatMap((colOffset) => {
+                      const chunk = chunks.find((item) => item.rowOffset === rowOffset && item.colOffset === colOffset);
+                      return Array.from({ length: chunk?.preview.cols ?? 0 }, (_, col) => (
+                        <td key={`${colOffset}-${col}`}>
+                          {chunk?.preview.values[row * chunk.preview.cols + col]?.toFixed(6) ?? ""}
+                        </td>
+                      ));
+                    })}
+                    {loadingRight &&
+                      placeholderCols.map((col) => (
+                        <td className="tensor-values-placeholder-row" key={`right-${col}`}>
+                          <span />
+                        </td>
+                      ))}
                   </tr>
-                )),
-              )}
+                ));
+              })}
               {loadingAfter &&
                 placeholderRows.map((row) => (
                   <tr className="tensor-values-placeholder-row" key={`after-${row}`}>
                     <th></th>
-                    {visibleCols.map((col) => (
-                      <td key={col}>
-                        <span />
-                      </td>
-                    ))}
+                    {loadingLeft &&
+                      placeholderCols.map((col) => (
+                        <td key={`left-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                    {colOffsets.flatMap((colOffset) =>
+                      Array.from({ length: chunkCols(chunks, rowOffsets[0], colOffset) }, (_, col) => (
+                        <td key={`${colOffset}-${col}`}>
+                          <span />
+                        </td>
+                      )),
+                    )}
+                    {loadingRight &&
+                      placeholderCols.map((col) => (
+                        <td key={`right-${col}`}>
+                          <span />
+                        </td>
+                      ))}
                   </tr>
                 ))}
             </tbody>
@@ -550,7 +677,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
               {placeholderRows.map((row) => (
                 <tr className="tensor-values-placeholder-row" key={row}>
                   <th></th>
-                  {visibleCols.map((col) => (
+                  {Array.from({ length: TENSOR_VALUES_CHUNK_COLS }, (_, col) => (
                     <td key={col}>
                       <span />
                     </td>
