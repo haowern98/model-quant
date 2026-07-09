@@ -231,7 +231,7 @@ export function EditorPane({
     <main
       ref={editorRef}
       className={`editor-pane ${bottomPanelVisible ? "" : "bottom-panel-hidden"} ${
-        bottomPanelMaximized ? "bottom-panel-maximized" : ""
+        bottomPanelVisible && bottomPanelMaximized ? "bottom-panel-maximized" : ""
       }`}
       style={{ "--bottom-panel-height": `${bottomPanelHeight}px` } as CSSProperties}
     >
