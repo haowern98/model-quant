@@ -1607,6 +1607,7 @@ body.resizing-bottom-panel * {
 .tensor-editor-content {
   min-width: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .tensor-editor-title {
@@ -1699,6 +1700,11 @@ body.resizing-bottom-panel * {
   padding: 0 10px;
   text-align: right;
   white-space: nowrap;
+}
+
+.tensor-values-grid thead th:first-child,
+.tensor-values-grid tbody th {
+  min-width: 97px;
 }
 
 .tensor-values-grid th {
@@ -2107,6 +2113,7 @@ body.resizing-bottom-panel * {
 .tensor-table-scroll {
   min-width: 100%;
   overflow-x: auto;
+  scrollbar-gutter: stable;
   padding-right: 18px;
 }
 
