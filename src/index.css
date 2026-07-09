@@ -1713,6 +1713,13 @@ body.resizing-bottom-panel * {
   background: #1f1f1f;
 }
 
+.tensor-values-placeholder-row span {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: #3a3a3a;
+}
+
 .benchmark-editor-surface {
   min-height: 0;
   overflow: hidden;
