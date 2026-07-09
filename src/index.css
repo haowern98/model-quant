@@ -73,6 +73,7 @@ button {
   .eval-results-editor,
   .hardware-panel,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -89,6 +90,7 @@ button {
   .eval-results-editor,
   .hardware-panel,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -104,6 +106,7 @@ button {
   .eval-results-editor,
   .hardware-panel,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -120,6 +123,7 @@ button {
   .eval-results-editor,
   .hardware-panel,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -135,6 +139,7 @@ button {
   .eval-results-editor,
   .hardware-panel,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -150,6 +155,7 @@ button {
   .bottom-output,
   .hardware-panel,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -177,6 +183,7 @@ button {
   .bottom-output,
   .eval-results-editor,
   .tensor-editor-content,
+  .tensor-values-grid-scroll,
   .tensor-table-scroll,
   .overflow-auto,
   .overflow-y-auto,
@@ -639,6 +646,13 @@ body.resizing-bottom-panel .bottom-panel-resizer::after {
   align-items: center;
   gap: 5px;
   padding: 0 10px;
+}
+
+.status-bar-tensor-values {
+  margin-left: auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 .status-bar-run-status .codicon {
@@ -1615,6 +1629,78 @@ body.resizing-bottom-panel * {
   margin: 2px 0 0;
   font-size: 12px;
   color: var(--vscode-muted);
+}
+
+.tensor-values-surface {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--vscode-editor);
+}
+
+.tensor-values-toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--vscode-border-subtle);
+  color: var(--vscode-muted);
+  font-size: 12px;
+}
+
+.tensor-values-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tensor-values-toolbar input {
+  width: 72px;
+  height: 26px;
+  border: 1px solid var(--vscode-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-foreground);
+  padding: 0 8px;
+}
+
+.tensor-values-toolbar button {
+  height: 26px;
+  border: 1px solid var(--vscode-border);
+  background: var(--vscode-button-secondary);
+  color: var(--vscode-foreground);
+  padding: 0 12px;
+}
+
+.tensor-values-grid-scroll {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 0;
+}
+
+.tensor-values-grid {
+  border-collapse: collapse;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+}
+
+.tensor-values-grid th,
+.tensor-values-grid td {
+  min-width: 96px;
+  height: 28px;
+  border: 1px solid var(--vscode-border-subtle);
+  padding: 0 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tensor-values-grid th {
+  color: var(--vscode-muted);
+  font-weight: 600;
+  background: #1f1f1f;
 }
 
 .benchmark-editor-surface {

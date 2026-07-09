@@ -62,6 +62,7 @@ interface WorkbenchShellProps {
   bottomPanelVisible: boolean;
   onHideBottomPanel: () => void;
   onOpenLayer: (layerIndex: number) => void;
+  onOpenTensorValues: (tensor: TensorInfo, layerLabel: string) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
   onSelectEditor: (editorId: string) => void;
@@ -134,6 +135,7 @@ export function WorkbenchShell({
   bottomPanelVisible,
   onHideBottomPanel,
   onOpenLayer,
+  onOpenTensorValues,
   onOpenModel,
   onToggleLayer,
   onSelectEditor,
@@ -303,6 +305,7 @@ export function WorkbenchShell({
           expandedLayers={expandedLayers}
           running={running}
           onOpenLayer={onOpenLayer}
+          onOpenTensorValues={onOpenTensorValues}
           onOpenModel={onOpenModel}
           onToggleLayer={onToggleLayer}
           onAssignByPattern={onAssignByPattern}
@@ -408,6 +411,7 @@ export function WorkbenchShell({
         statusMessage={statusMessage}
         progress={progress}
         selectedRunIds={selectedRunIds}
+        activeEditor={activeEditor}
       />
     </div>
   );

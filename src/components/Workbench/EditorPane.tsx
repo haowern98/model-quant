@@ -198,6 +198,7 @@ export function EditorPane({
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
+  const showingTensorValues = activeEditor?.kind === "tensor-values";
   const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
   const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
@@ -330,6 +331,8 @@ export function EditorPane({
           onConfigChange={onTerminalBenchConfigChange}
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
+      ) : showingTensorValues ? (
+        <TensorValuesMockView />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -383,6 +386,58 @@ export function EditorPane({
         </>
       ) : null}
     </main>
+  );
+}
+
+function TensorValuesMockView() {
+  const rows = Array.from({ length: 32 }, (_, row) => row);
+  const cols = Array.from({ length: 16 }, (_, col) => col);
+  const mockValue = (row: number, col: number) => ((row - col) / 1024).toFixed(6);
+
+  return (
+    <section className="tensor-values-surface">
+      <div className="tensor-values-toolbar">
+        <label>
+          Row
+          <input type="number" defaultValue={0} min={0} />
+        </label>
+        <label>
+          Col
+          <input type="number" defaultValue={0} min={0} />
+        </label>
+        <label>
+          Rows
+          <input type="number" defaultValue={32} min={1} max={128} />
+        </label>
+        <label>
+          Cols
+          <input type="number" defaultValue={16} min={1} max={128} />
+        </label>
+        <button type="button">Load</button>
+      </div>
+      <div className="tensor-values-grid-scroll">
+        <table className="tensor-values-grid">
+          <thead>
+            <tr>
+              <th></th>
+              {cols.map((col) => (
+                <th key={col}>col {col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row}>
+                <th>row {row}</th>
+                {cols.map((col) => (
+                  <td key={col}>{mockValue(row, col)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

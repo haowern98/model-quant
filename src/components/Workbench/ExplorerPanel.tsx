@@ -24,6 +24,7 @@ interface ExplorerPanelProps {
   expandedLayers: Set<number>;
   running: boolean;
   onOpenLayer: (layerIndex: number) => void;
+  onOpenTensorValues: (tensor: TensorInfo, layerLabel: string) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
   onAssignByPattern: (pattern: AssignPattern, quantType: QuantType) => void;
@@ -52,6 +53,7 @@ export function ExplorerPanel({
   expandedLayers,
   running,
   onOpenLayer,
+  onOpenTensorValues,
   onOpenModel,
   onToggleLayer,
   onAssignByPattern,
@@ -188,7 +190,7 @@ export function ExplorerPanel({
                           key={tensor.name}
                           className="tensor-child-row"
                           title={tensor.name}
-                          onClick={() => onOpenLayer(layerIndex)}
+                          onClick={() => onOpenTensorValues(tensor, label)}
                         >
                           {formatTensorName(tensor.name)}
                         </button>
