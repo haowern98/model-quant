@@ -1713,6 +1713,12 @@ body.resizing-bottom-panel * {
   background: #1f1f1f;
 }
 
+.tensor-values-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .tensor-values-placeholder-row span {
   display: block;
   height: 10px;
