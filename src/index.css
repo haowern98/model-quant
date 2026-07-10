@@ -2368,7 +2368,10 @@ body.resizing-bottom-panel * {
 
 .bottom-tabs .bottom-panel-fullscreen .codicon {
   margin-right: 0;
-  font-size: 14px;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  line-height: 16px;
   color: #cccccc;
 }
 
