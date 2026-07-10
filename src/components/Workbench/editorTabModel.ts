@@ -13,6 +13,15 @@ export type EditorTab =
       label?: string;
     }
   | {
+      id: `tensor:${string}`;
+      kind: "tensor-values";
+      tensorName: string;
+      layerLabel: string;
+      shape: number[];
+      quant: string;
+      decimalPlaces: number;
+    }
+  | {
       id: `eval-results:${string}`;
       kind: "eval-results";
       result: BenchmarkResult;
@@ -40,6 +49,28 @@ export function layerEditorTab(layerIndex: number, label?: string): EditorTab {
     kind: "layer",
     layerIndex,
     label,
+  };
+}
+
+export function tensorValuesEditorTab({
+  tensorName,
+  layerLabel,
+  shape,
+  quant,
+}: {
+  tensorName: string;
+  layerLabel: string;
+  shape: number[];
+  quant: string;
+}): EditorTab {
+  return {
+    id: `tensor:${tensorName}`,
+    kind: "tensor-values",
+    tensorName,
+    layerLabel,
+    shape,
+    quant,
+    decimalPlaces: 6,
   };
 }
 
@@ -85,6 +116,7 @@ export function editorTabLabel(tab: EditorTab): string {
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";
   if (tab.kind === "humaneval-details") return "HumanEval";
   if (tab.kind === "terminal-bench-details") return "Terminal-Bench 2.1";
+  if (tab.kind === "tensor-values") return tab.tensorName;
   if (tab.label) return tab.label;
   if (tab.layerIndex < 0) return "Global tensors";
   return `Layer ${tab.layerIndex}`;

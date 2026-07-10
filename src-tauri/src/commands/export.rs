@@ -41,6 +41,7 @@ pub async fn load_recipe(
             .as_ref()
             .ok_or("Open a GGUF model before loading a recipe")?;
         let current_tensors = model
+            .info
             .tensors
             .iter()
             .map(|t| t.name.as_str())

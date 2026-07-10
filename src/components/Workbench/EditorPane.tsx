@@ -30,6 +30,7 @@ import type {
   TerminalBenchDatasetRow,
   TerminalBenchStatus,
   TensorInfo,
+  TensorValuesPreview,
 } from "../../types";
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
@@ -45,6 +46,7 @@ import {
   getTerminalBenchDatasetRows,
   getHumanEvalDatasetStatus,
   getHumanEvalStatus,
+  getTensorValues,
   installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
 
@@ -198,6 +200,10 @@ export function EditorPane({
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
+  const showingTensorValues = activeEditor?.kind === "tensor-values";
+  const tensorValuesEditor = showingTensorValues
+    ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
+    : null;
   const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
   const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
@@ -272,6 +278,14 @@ export function EditorPane({
             <span>&gt;</span>
             <span>Eval Results</span>
           </>
+        ) : tensorValuesEditor ? (
+          <>
+            <span>{basename(modelPath)}</span>
+            <span>&gt;</span>
+            <span>{tensorValuesEditor.layerLabel}</span>
+            <span>&gt;</span>
+            <span>{tensorValuesEditor.tensorName}</span>
+          </>
         ) : (
           <>
             <span>{showingBenchmark ? "Benchmarks" : basename(modelPath)}</span>
@@ -330,6 +344,8 @@ export function EditorPane({
           onConfigChange={onTerminalBenchConfigChange}
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
+      ) : showingTensorValues ? (
+        <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -383,6 +399,378 @@ export function EditorPane({
         </>
       ) : null}
     </main>
+  );
+}
+
+const TENSOR_VALUES_CHUNK_ROWS = 32;
+const TENSOR_VALUES_CHUNK_COLS = 16;
+const TENSOR_VALUES_EDGE_PX = 32;
+const TENSOR_VALUES_ROW_HEIGHT = 28;
+const TENSOR_VALUES_COL_WIDTH = 96;
+const TENSOR_VALUES_PLACEHOLDER_ROWS = 3;
+const TENSOR_VALUES_PLACEHOLDER_COLS = 3;
+const TENSOR_VALUES_MAX_ROW_CHUNKS = 5;
+const TENSOR_VALUES_MAX_COL_CHUNKS = 5;
+const TENSOR_VALUES_EVICT_DELAY_MS = 150;
+
+type TensorValueChunk = {
+  rowOffset: number;
+  colOffset: number;
+  preview: TensorValuesPreview;
+};
+
+function sortedOffsets(offsets: number[]): number[] {
+  return Array.from(new Set(offsets)).sort((a, b) => a - b);
+}
+
+function chunkCols(chunks: TensorValueChunk[], rowOffset: number, colOffset: number): number {
+  return chunks.find((chunk) => chunk.rowOffset === rowOffset && chunk.colOffset === colOffset)?.preview.cols ?? 0;
+}
+
+function offsetsAround(offsets: number[], activeIndex: number, maxCount: number): number[] {
+  if (offsets.length <= maxCount) return offsets;
+  const before = Math.floor(maxCount / 2);
+  const start = Math.max(0, Math.min(activeIndex - before, offsets.length - maxCount));
+  return offsets.slice(start, start + maxCount);
+}
+
+function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tensor-values" }> }) {
+  const isVectorTensor = editor.shape.length === 1;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const loadingChunks = useRef(new Set<string>());
+  const evictionTimer = useRef<number | null>(null);
+  const lastScrollTop = useRef(0);
+  const lastScrollLeft = useRef(0);
+  const [chunks, setChunks] = useState<TensorValueChunk[]>([]);
+  const [loadingBefore, setLoadingBefore] = useState(false);
+  const [loadingAfter, setLoadingAfter] = useState(false);
+  const [loadingLeft, setLoadingLeft] = useState(false);
+  const [loadingRight, setLoadingRight] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadChunk = (nextRowOffset: number, nextColOffset: number) => {
+    const key = `${nextRowOffset}:${nextColOffset}`;
+    if (loadingChunks.current.has(key)) return Promise.resolve();
+    loadingChunks.current.add(key);
+    setError(null);
+    return getTensorValues({
+      tensorName: editor.tensorName,
+      rowOffset: isVectorTensor ? 0 : nextRowOffset,
+      colOffset: isVectorTensor ? nextRowOffset : nextColOffset,
+      rowCount: isVectorTensor ? 1 : TENSOR_VALUES_CHUNK_ROWS,
+      colCount: isVectorTensor ? TENSOR_VALUES_CHUNK_ROWS : TENSOR_VALUES_CHUNK_COLS,
+    })
+      .then((result) => {
+        const preview = isVectorTensor
+          ? {
+              ...result,
+              rows: result.cols,
+              cols: result.cols > 0 ? 1 : 0,
+              totalRows: result.totalCols,
+              totalCols: result.totalCols > 0 ? 1 : 0,
+            }
+          : result;
+        if (preview.rows === 0 || preview.cols === 0) return;
+        setChunks((current) => {
+          if (current.some((chunk) => chunk.rowOffset === nextRowOffset && chunk.colOffset === nextColOffset)) {
+            return current;
+          }
+          return [...current, { rowOffset: nextRowOffset, colOffset: nextColOffset, preview }].sort(
+            (a, b) => a.rowOffset - b.rowOffset || a.colOffset - b.colOffset,
+          );
+        });
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        loadingChunks.current.delete(key);
+      });
+  };
+
+  const loadRowChunk = (nextRowOffset: number, position: "before" | "after") => {
+    const colOffsets = sortedOffsets(chunks.map((chunk) => chunk.colOffset));
+    const colsToLoad = colOffsets.length > 0 ? colOffsets : [0];
+    if (position === "before") setLoadingBefore(true);
+    if (position === "after") setLoadingAfter(true);
+    Promise.all(colsToLoad.map((colOffset) => loadChunk(nextRowOffset, colOffset))).finally(() => {
+      if (position === "before") {
+        const addedRows = chunks[0] ? chunks[0].rowOffset - nextRowOffset : TENSOR_VALUES_CHUNK_ROWS;
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop += addedRows * TENSOR_VALUES_ROW_HEIGHT;
+        });
+        setLoadingBefore(false);
+      } else {
+        setLoadingAfter(false);
+      }
+    });
+  };
+
+  const loadColChunk = (nextColOffset: number, position: "left" | "right") => {
+    const rowOffsets = sortedOffsets(chunks.map((chunk) => chunk.rowOffset));
+    const rowsToLoad = rowOffsets.length > 0 ? rowOffsets : [0];
+    if (position === "left") setLoadingLeft(true);
+    if (position === "right") setLoadingRight(true);
+    Promise.all(rowsToLoad.map((rowOffset) => loadChunk(rowOffset, nextColOffset))).finally(() => {
+      if (position === "left") {
+        const addedCols = chunks[0] ? chunks[0].colOffset - nextColOffset : TENSOR_VALUES_CHUNK_COLS;
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollLeft += addedCols * TENSOR_VALUES_COL_WIDTH;
+        });
+        setLoadingLeft(false);
+      } else {
+        setLoadingRight(false);
+      }
+    });
+  };
+
+  useEffect(() => {
+    loadingChunks.current.clear();
+    if (evictionTimer.current !== null) window.clearTimeout(evictionTimer.current);
+    lastScrollTop.current = 0;
+    lastScrollLeft.current = 0;
+    setChunks([]);
+    setError(null);
+    loadChunk(0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor.tensorName]);
+
+  useEffect(() => {
+    if (chunks.length === 0) return;
+    if (evictionTimer.current !== null) window.clearTimeout(evictionTimer.current);
+    evictionTimer.current = window.setTimeout(() => {
+      if (
+        loadingChunks.current.size > 0 ||
+        loadingBefore ||
+        loadingAfter ||
+        loadingLeft ||
+        loadingRight ||
+        !scrollRef.current
+      ) {
+        return;
+      }
+
+      const scroll = scrollRef.current;
+      setChunks((current) => {
+        const currentRowOffsets = sortedOffsets(current.map((chunk) => chunk.rowOffset));
+        const currentColOffsets = sortedOffsets(current.map((chunk) => chunk.colOffset));
+        if (
+          currentRowOffsets.length <= TENSOR_VALUES_MAX_ROW_CHUNKS &&
+          currentColOffsets.length <= TENSOR_VALUES_MAX_COL_CHUNKS
+        ) {
+          return current;
+        }
+
+        const rowChunkHeight = TENSOR_VALUES_ROW_HEIGHT * TENSOR_VALUES_CHUNK_ROWS;
+        const colChunkWidth = TENSOR_VALUES_COL_WIDTH * TENSOR_VALUES_CHUNK_COLS;
+        const activeRowIndex = Math.min(currentRowOffsets.length - 1, Math.max(0, Math.floor(scroll.scrollTop / rowChunkHeight)));
+        const activeColIndex = Math.min(currentColOffsets.length - 1, Math.max(0, Math.floor(scroll.scrollLeft / colChunkWidth)));
+        const keptRows = offsetsAround(currentRowOffsets, activeRowIndex, TENSOR_VALUES_MAX_ROW_CHUNKS);
+        const keptCols = offsetsAround(currentColOffsets, activeColIndex, TENSOR_VALUES_MAX_COL_CHUNKS);
+        const keptRowSet = new Set(keptRows);
+        const keptColSet = new Set(keptCols);
+        const next = current.filter((chunk) => keptRowSet.has(chunk.rowOffset) && keptColSet.has(chunk.colOffset));
+        if (next.length === current.length) return current;
+
+        const removedRowsBefore = keptRows[0] - currentRowOffsets[0];
+        const removedColsBefore = keptCols[0] - currentColOffsets[0];
+        requestAnimationFrame(() => {
+          if (!scrollRef.current) return;
+          if (removedRowsBefore > 0) {
+            scrollRef.current.scrollTop = Math.max(0, scrollRef.current.scrollTop - removedRowsBefore * TENSOR_VALUES_ROW_HEIGHT);
+          }
+          if (removedColsBefore > 0) {
+            scrollRef.current.scrollLeft = Math.max(0, scrollRef.current.scrollLeft - removedColsBefore * TENSOR_VALUES_COL_WIDTH);
+          }
+          lastScrollTop.current = scrollRef.current.scrollTop;
+          lastScrollLeft.current = scrollRef.current.scrollLeft;
+        });
+        return next;
+      });
+    }, TENSOR_VALUES_EVICT_DELAY_MS);
+
+    return () => {
+      if (evictionTimer.current !== null) window.clearTimeout(evictionTimer.current);
+    };
+  }, [chunks, loadingAfter, loadingBefore, loadingLeft, loadingRight]);
+
+  const rowOffsets = sortedOffsets(chunks.map((chunk) => chunk.rowOffset));
+  const colOffsets = sortedOffsets(chunks.map((chunk) => chunk.colOffset));
+  const firstChunk = chunks.find((chunk) => chunk.rowOffset === rowOffsets[0] && chunk.colOffset === colOffsets[0]) ?? null;
+  const lastRowChunk =
+    chunks.find((chunk) => chunk.rowOffset === rowOffsets[rowOffsets.length - 1] && chunk.colOffset === colOffsets[0]) ??
+    null;
+  const lastColChunk =
+    chunks.find((chunk) => chunk.rowOffset === rowOffsets[0] && chunk.colOffset === colOffsets[colOffsets.length - 1]) ??
+    null;
+  const totalRows = firstChunk?.preview.totalRows ?? 0;
+  const totalCols = firstChunk?.preview.totalCols ?? 0;
+  const firstRowOffset = rowOffsets[0] ?? 0;
+  const firstColOffset = colOffsets[0] ?? 0;
+  const loadedRowEnd = lastRowChunk ? lastRowChunk.rowOffset + lastRowChunk.preview.rows : 0;
+  const loadedColEnd = lastColChunk ? lastColChunk.colOffset + lastColChunk.preview.cols : 0;
+
+  const handlePreviewScroll = () => {
+    const scroll = scrollRef.current;
+    if (!scroll || !firstChunk || !lastRowChunk || !lastColChunk) return;
+    const verticalMoved = scroll.scrollTop !== lastScrollTop.current;
+    const horizontalMoved = scroll.scrollLeft !== lastScrollLeft.current;
+    lastScrollTop.current = scroll.scrollTop;
+    lastScrollLeft.current = scroll.scrollLeft;
+
+    if (verticalMoved) {
+      if (scroll.scrollTop <= TENSOR_VALUES_EDGE_PX && firstRowOffset > 0) {
+        loadRowChunk(Math.max(0, firstRowOffset - TENSOR_VALUES_CHUNK_ROWS), "before");
+        return;
+      }
+      if (
+        scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - TENSOR_VALUES_EDGE_PX &&
+        loadedRowEnd < totalRows
+      ) {
+        loadRowChunk(loadedRowEnd, "after");
+        return;
+      }
+    }
+
+    if (horizontalMoved) {
+      if (scroll.scrollLeft <= TENSOR_VALUES_EDGE_PX && firstColOffset > 0) {
+        loadColChunk(Math.max(0, firstColOffset - TENSOR_VALUES_CHUNK_COLS), "left");
+        return;
+      }
+      if (
+        scroll.scrollLeft + scroll.clientWidth >= scroll.scrollWidth - TENSOR_VALUES_EDGE_PX &&
+        loadedColEnd < totalCols
+      ) {
+        loadColChunk(loadedColEnd, "right");
+      }
+    }
+  };
+
+  const placeholderRows = Array.from({ length: TENSOR_VALUES_PLACEHOLDER_ROWS }, (_, row) => row);
+  const placeholderCols = Array.from({ length: TENSOR_VALUES_PLACEHOLDER_COLS }, (_, col) => col);
+  const initialPlaceholderCols = isVectorTensor ? 1 : TENSOR_VALUES_CHUNK_COLS;
+
+  return (
+    <section className="tensor-values-surface">
+      <div className="tensor-editor-title">
+        <h1>{editor.tensorName}</h1>
+      </div>
+      {error ? <span className="tensor-values-error">{error}</span> : null}
+      <div className="tensor-values-grid-scroll" ref={scrollRef} onScroll={handlePreviewScroll}>
+        {chunks.length > 0 ? (
+          <table className="tensor-values-grid">
+            <thead>
+              <tr>
+                <th></th>
+                {loadingLeft && placeholderCols.map((col) => <th key={`left-${col}`}></th>)}
+                {colOffsets.flatMap((colOffset) => {
+                  const chunk = chunks.find((item) => item.rowOffset === rowOffsets[0] && item.colOffset === colOffset);
+                  return Array.from({ length: chunk?.preview.cols ?? 0 }, (_, col) => (
+                    <th key={`${colOffset}-${col}`}>col {colOffset + col}</th>
+                  ));
+                })}
+                {loadingRight && placeholderCols.map((col) => <th key={`right-${col}`}></th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {loadingBefore &&
+                placeholderRows.map((row) => (
+                  <tr className="tensor-values-placeholder-row" key={`before-${row}`}>
+                    <th></th>
+                    {loadingLeft &&
+                      placeholderCols.map((col) => (
+                        <td key={`left-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                    {colOffsets.flatMap((colOffset) =>
+                      Array.from({ length: chunkCols(chunks, rowOffsets[0], colOffset) }, (_, col) => (
+                        <td key={`${colOffset}-${col}`}>
+                          <span />
+                        </td>
+                      )),
+                    )}
+                    {loadingRight &&
+                      placeholderCols.map((col) => (
+                        <td key={`right-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                  </tr>
+                ))}
+              {rowOffsets.flatMap((rowOffset) => {
+                const rowChunk = chunks.find((chunk) => chunk.rowOffset === rowOffset && chunk.colOffset === colOffsets[0]);
+                return Array.from({ length: rowChunk?.preview.rows ?? 0 }, (_, row) => (
+                  <tr key={`${rowOffset}-${row}`}>
+                    <th>row {rowOffset + row}</th>
+                    {loadingLeft &&
+                      placeholderCols.map((col) => (
+                        <td className="tensor-values-placeholder-row" key={`left-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                    {colOffsets.flatMap((colOffset) => {
+                      const chunk = chunks.find((item) => item.rowOffset === rowOffset && item.colOffset === colOffset);
+                      return Array.from({ length: chunk?.preview.cols ?? 0 }, (_, col) => (
+                        <td key={`${colOffset}-${col}`}>
+                          {chunk?.preview.values[row * chunk.preview.cols + col]?.toFixed(editor.decimalPlaces) ?? ""}
+                        </td>
+                      ));
+                    })}
+                    {loadingRight &&
+                      placeholderCols.map((col) => (
+                        <td className="tensor-values-placeholder-row" key={`right-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                  </tr>
+                ));
+              })}
+              {loadingAfter &&
+                placeholderRows.map((row) => (
+                  <tr className="tensor-values-placeholder-row" key={`after-${row}`}>
+                    <th></th>
+                    {loadingLeft &&
+                      placeholderCols.map((col) => (
+                        <td key={`left-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                    {colOffsets.flatMap((colOffset) =>
+                      Array.from({ length: chunkCols(chunks, rowOffsets[0], colOffset) }, (_, col) => (
+                        <td key={`${colOffset}-${col}`}>
+                          <span />
+                        </td>
+                      )),
+                    )}
+                    {loadingRight &&
+                      placeholderCols.map((col) => (
+                        <td key={`right-${col}`}>
+                          <span />
+                        </td>
+                      ))}
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="tensor-values-grid">
+            <tbody>
+              {placeholderRows.map((row) => (
+                <tr className="tensor-values-placeholder-row" key={row}>
+                  <th></th>
+                  {Array.from({ length: initialPlaceholderCols }, (_, col) => (
+                    <td key={col}>
+                      <span />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   humanevalDetailsEditorTab,
   layerEditorTab,
   terminalBenchDetailsEditorTab,
+  tensorValuesEditorTab,
   type EditorTab,
 } from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
@@ -52,6 +53,7 @@ import type {
   TerminalBenchBenchmarkConfigInput,
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
+  TensorInfo,
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 
@@ -400,9 +402,7 @@ function App() {
     useState<RecipeTestMode>("single");
   const [recipeEvalPreset, setRecipeEvalPreset] =
     useState<RecipeEvalPreset>("default");
-  const [selectedRunIds, setSelectedRunIds] = useState<BenchmarkRunId[]>([
-    "ppl_check",
-  ]);
+  const [selectedRunIds, setSelectedRunIds] = useState<BenchmarkRunId[]>([]);
   const [gpqaStatus, setGpqaStatus] =
     useState<GpqaDiamondStatus>(DEFAULT_GPQA_STATUS);
   const [humanevalStatus, setHumanEvalStatus] = useState<HumanEvalStatus>(
@@ -540,12 +540,14 @@ function App() {
         currentQuant: t.currentQuant,
       }));
       resetRecipeForModel(path, tensors);
-      setOpenEditors((current) => current.filter((editor) => editor.kind !== "layer"));
+      setOpenEditors((current) =>
+        current.filter((editor) => editor.kind !== "layer" && editor.kind !== "tensor-values"),
+      );
       setActiveEditorId((active) => {
         if (!active) return null;
         const activeEditor = openEditors.find((editor) => editor.id === active);
-        if (activeEditor?.kind !== "layer") return active;
-        return openEditors.find((editor) => editor.kind !== "layer")?.id ?? null;
+        if (activeEditor?.kind !== "layer" && activeEditor?.kind !== "tensor-values") return active;
+        return openEditors.find((editor) => editor.kind !== "layer" && editor.kind !== "tensor-values")?.id ?? null;
       });
       setModelExplorerFocusVersion((version) => version + 1);
       setExpandedLayers(new Set());
@@ -1175,6 +1177,31 @@ function App() {
     }
   }, [setRecipeState]);
 
+  const handleOpenTensorValues = useCallback((tensor: TensorInfo, layerLabel: string) => {
+    const tab = tensorValuesEditorTab({
+      tensorName: tensor.name,
+      layerLabel,
+      shape: tensor.shape,
+      quant: tensor.currentQuant,
+    });
+    setOpenEditors((editors) => {
+      if (editors.some((editor) => editor.id === tab.id)) return editors;
+      return [...editors, tab];
+    });
+    setActiveEditorId(tab.id);
+  }, []);
+
+  const handleTensorDecimalPlacesChange = useCallback((editorId: string, decimalPlaces: number) => {
+    const nextDecimalPlaces = Math.min(9, Math.max(1, Math.round(decimalPlaces)));
+    setOpenEditors((current) =>
+      current.map((editor) =>
+        editor.id === editorId && editor.kind === "tensor-values"
+          ? { ...editor, decimalPlaces: nextDecimalPlaces }
+          : editor,
+      ),
+    );
+  }, []);
+
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const selectedLayerIndex =
@@ -1239,6 +1266,8 @@ function App() {
           bottomPanelVisible={bottomPanelVisible}
           onHideBottomPanel={() => setBottomPanelVisible(false)}
           onOpenLayer={handleOpenLayer}
+          onOpenTensorValues={handleOpenTensorValues}
+          onTensorDecimalPlacesChange={handleTensorDecimalPlacesChange}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
           onSelectEditor={setActiveEditorId}

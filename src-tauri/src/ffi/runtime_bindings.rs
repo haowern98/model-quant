@@ -17,6 +17,15 @@ pub struct MsGgufSummary {
     pub data_offset: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct TensorValuesPreview {
+    pub values: Vec<f32>,
+    pub rows: u64,
+    pub cols: u64,
+    pub total_rows: u64,
+    pub total_cols: u64,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MsBaselineBenchmark {
@@ -267,6 +276,20 @@ extern "C" {
     fn ms_runtime_reset_recipe_test_cancel();
     fn ms_runtime_cancel_recipe_test();
     fn ms_runtime_inspect_gguf(path: *const c_char, out_summary: *mut MsGgufSummary) -> c_int;
+    fn ms_runtime_preview_tensor_values(
+        path: *const c_char,
+        tensor_name: *const c_char,
+        row_offset: u64,
+        col_offset: u64,
+        row_count: u64,
+        col_count: u64,
+        out_values: *mut f32,
+        value_capacity: u64,
+        out_rows: *mut u64,
+        out_cols: *mut u64,
+        out_total_rows: *mut u64,
+        out_total_cols: *mut u64,
+    ) -> c_int;
     fn ms_runtime_analyze_recipe(
         path: *const c_char,
         targets: *const MsRecipeTensorTarget,
@@ -485,6 +508,57 @@ pub fn inspect_gguf(path: &str) -> Result<MsGgufSummary, String> {
     let result = unsafe { ms_runtime_inspect_gguf(c_path.as_ptr(), &mut summary) };
     if result == 0 {
         Ok(summary)
+    } else {
+        Err(unsafe { c_string(ms_runtime_last_error()) })
+    }
+}
+
+pub fn preview_tensor_values(
+    path: &str,
+    tensor_name: &str,
+    row_offset: u64,
+    col_offset: u64,
+    row_count: u64,
+    col_count: u64,
+) -> Result<TensorValuesPreview, String> {
+    let c_path =
+        CString::new(path).map_err(|_| "GGUF path contains an interior NUL byte".to_string())?;
+    let c_tensor = CString::new(tensor_name)
+        .map_err(|_| "tensor name contains an interior NUL byte".to_string())?;
+    let value_capacity = row_count
+        .checked_mul(col_count)
+        .ok_or_else(|| "tensor preview window is too large".to_string())?;
+    let mut values = vec![0.0f32; value_capacity as usize];
+    let mut rows = 0u64;
+    let mut cols = 0u64;
+    let mut total_rows = 0u64;
+    let mut total_cols = 0u64;
+
+    let result = unsafe {
+        ms_runtime_preview_tensor_values(
+            c_path.as_ptr(),
+            c_tensor.as_ptr(),
+            row_offset,
+            col_offset,
+            row_count,
+            col_count,
+            values.as_mut_ptr(),
+            value_capacity,
+            &mut rows,
+            &mut cols,
+            &mut total_rows,
+            &mut total_cols,
+        )
+    };
+    if result == 0 {
+        values.truncate(rows.saturating_mul(cols) as usize);
+        Ok(TensorValuesPreview {
+            values,
+            rows,
+            cols,
+            total_rows,
+            total_cols,
+        })
     } else {
         Err(unsafe { c_string(ms_runtime_last_error()) })
     }
