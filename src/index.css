@@ -2379,25 +2379,8 @@ body.resizing-bottom-panel * {
   place-items: center;
   border-radius: 3px;
   color: #cccccc;
-  position: relative;
-}
-
-.bottom-tabs .bottom-panel-close .tab-close::before,
-.bottom-tabs .bottom-panel-close .tab-close::after {
-  content: "";
-  position: absolute;
-  width: 11px;
-  height: 1.75px;
-  background: currentColor;
-  border-radius: 1px;
-}
-
-.bottom-tabs .bottom-panel-close .tab-close::before {
-  transform: rotate(45deg);
-}
-
-.bottom-tabs .bottom-panel-close .tab-close::after {
-  transform: rotate(-45deg);
+  font-size: 16px;
+  line-height: 16px;
 }
 
 .bottom-content {

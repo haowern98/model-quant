@@ -93,7 +93,7 @@ export function BottomPanel({
           title="Hide bottom panel"
           onClick={onClose}
         >
-          <span className="tab-close" aria-hidden="true" />
+          <span className="tab-close codicon codicon-close" aria-hidden="true" />
         </button>
       </div>
       {activeTab === "hardware" ? (
