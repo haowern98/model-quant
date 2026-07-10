@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   QUANT_TYPES,
   type AssignPattern,
@@ -67,6 +67,9 @@ export function ExplorerPanel({
     lora: false,
   });
   const [actionsOpen, setActionsOpen] = useState(false);
+  const sectionBodyRef = useRef<HTMLDivElement>(null);
+  const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
+  const [stickyLayerIndices, setStickyLayerIndices] = useState<Set<number>>(() => new Set());
 
   const groups = useMemo(() => {
     const next = new Map<number, TensorInfo[]>();
@@ -81,6 +84,46 @@ export function ExplorerPanel({
   const toggleSection = (section: ExplorerSectionId) => {
     setSections((current) => ({ ...current, [section]: !current[section] }));
   };
+
+  useEffect(() => {
+    const scrollBody = sectionBodyRef.current;
+    if (!scrollBody) return;
+
+    let frame = 0;
+    const updateStickyLayers = () => {
+      frame = 0;
+      const scrollTop = scrollBody.getBoundingClientRect().top;
+      const next = new Set<number>();
+
+      for (const [layerIndex, group] of layerGroupRefs.current) {
+        if (!expandedLayers.has(layerIndex)) continue;
+        const header = group.firstElementChild;
+        if (!header) continue;
+        const headerRect = header.getBoundingClientRect();
+        if (headerRect.top <= scrollTop && group.getBoundingClientRect().bottom > scrollTop + headerRect.height) {
+          next.add(layerIndex);
+        }
+      }
+
+      setStickyLayerIndices((current) => {
+        if (current.size === next.size && [...current].every((layerIndex) => next.has(layerIndex))) return current;
+        return next;
+      });
+    };
+    const scheduleUpdate = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(updateStickyLayers);
+    };
+
+    scheduleUpdate();
+    scrollBody.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      scrollBody.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, [expandedLayers, groups]);
 
   const handleBulkAssign = (pattern: AssignPattern, value: string) => {
     if (!value) return;
@@ -116,7 +159,7 @@ export function ExplorerPanel({
         />
 
         {sections.gguf && (
-          <div className="explorer-section-body">
+          <div className="explorer-section-body" ref={sectionBodyRef}>
             {actionsOpen && modelPath && (
               <div className="model-actions-popover">
                 <div className="model-actions-header">Recipe Actions</div>
@@ -170,7 +213,16 @@ export function ExplorerPanel({
                 const active = activeLayerIndex === layerIndex;
                 const label = sectionLabel(layerIndex, layerTensors);
                 return (
-                  <div key={layerIndex}>
+                  <div
+                    key={layerIndex}
+                    className={`explorer-layer-group ${expanded ? "expanded" : ""} ${
+                      stickyLayerIndices.has(layerIndex) ? "sticky-shadow" : ""
+                    }`}
+                    ref={(node) => {
+                      if (node) layerGroupRefs.current.set(layerIndex, node);
+                      else layerGroupRefs.current.delete(layerIndex);
+                    }}
+                  >
                     <ExplorerTreeRow
                       label={label}
                       right={layerTensors.length}

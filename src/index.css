@@ -1059,6 +1059,25 @@ body.resizing-bottom-panel * {
   color: #ffffff;
 }
 
+.explorer-layer-group.expanded > .layer-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--vscode-sidebar);
+}
+
+.explorer-layer-group.expanded.sticky-shadow > .layer-row {
+  box-shadow: 0 3px 3px -3px rgb(0 0 0 / 0.8);
+}
+
+.explorer-layer-group.expanded > .layer-row:hover {
+  background: var(--vscode-row-hover);
+}
+
+.explorer-layer-group.expanded > .layer-row.active {
+  background: var(--vscode-row-selected);
+}
+
 .model-row {
   padding-left: 21px;
   grid-template-columns: 17px minmax(0, 1fr) 24px;
