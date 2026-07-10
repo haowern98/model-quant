@@ -1378,29 +1378,12 @@ body.resizing-bottom-panel * {
   place-items: center;
   border-radius: 3px;
   color: #cccccc;
-  position: relative;
+  font-size: 16px;
+  line-height: 16px;
 }
 
 .layer-tab .tab-close:hover {
   background: rgba(255, 255, 255, 0.12);
-}
-
-.layer-tab .tab-close::before,
-.layer-tab .tab-close::after {
-  content: "";
-  position: absolute;
-  width: 11px;
-  height: 1.75px;
-  background: currentColor;
-  border-radius: 1px;
-}
-
-.layer-tab .tab-close::before {
-  transform: rotate(45deg);
-}
-
-.layer-tab .tab-close::after {
-  transform: rotate(-45deg);
 }
 
 .editor-run-controls {

@@ -225,7 +225,7 @@ export function EditorTabs({
           >
             <span className="tab-name">{editorTabLabel(editor)}</span>
             <span
-              className="tab-close"
+              className="tab-close codicon codicon-close"
               aria-hidden="true"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
