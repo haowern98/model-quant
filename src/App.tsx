@@ -1191,6 +1191,17 @@ function App() {
     setActiveEditorId(tab.id);
   }, []);
 
+  const handleTensorDecimalPlacesChange = useCallback((editorId: string, decimalPlaces: number) => {
+    const nextDecimalPlaces = Math.min(9, Math.max(1, Math.round(decimalPlaces)));
+    setOpenEditors((current) =>
+      current.map((editor) =>
+        editor.id === editorId && editor.kind === "tensor-values"
+          ? { ...editor, decimalPlaces: nextDecimalPlaces }
+          : editor,
+      ),
+    );
+  }, []);
+
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const selectedLayerIndex =
@@ -1256,6 +1267,7 @@ function App() {
           onHideBottomPanel={() => setBottomPanelVisible(false)}
           onOpenLayer={handleOpenLayer}
           onOpenTensorValues={handleOpenTensorValues}
+          onTensorDecimalPlacesChange={handleTensorDecimalPlacesChange}
           onOpenModel={handleOpenModel}
           onToggleLayer={handleToggleLayer}
           onSelectEditor={setActiveEditorId}

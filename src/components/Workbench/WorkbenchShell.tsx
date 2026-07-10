@@ -63,6 +63,7 @@ interface WorkbenchShellProps {
   onHideBottomPanel: () => void;
   onOpenLayer: (layerIndex: number) => void;
   onOpenTensorValues: (tensor: TensorInfo, layerLabel: string) => void;
+  onTensorDecimalPlacesChange: (editorId: string, decimalPlaces: number) => void;
   onOpenModel: () => void;
   onToggleLayer: (layerIndex: number) => void;
   onSelectEditor: (editorId: string) => void;
@@ -136,6 +137,7 @@ export function WorkbenchShell({
   onHideBottomPanel,
   onOpenLayer,
   onOpenTensorValues,
+  onTensorDecimalPlacesChange,
   onOpenModel,
   onToggleLayer,
   onSelectEditor,
@@ -412,6 +414,7 @@ export function WorkbenchShell({
         progress={progress}
         selectedRunIds={selectedRunIds}
         activeEditor={activeEditor}
+        onTensorDecimalPlacesChange={onTensorDecimalPlacesChange}
       />
     </div>
   );

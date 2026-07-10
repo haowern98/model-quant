@@ -713,7 +713,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
                       const chunk = chunks.find((item) => item.rowOffset === rowOffset && item.colOffset === colOffset);
                       return Array.from({ length: chunk?.preview.cols ?? 0 }, (_, col) => (
                         <td key={`${colOffset}-${col}`}>
-                          {chunk?.preview.values[row * chunk.preview.cols + col]?.toFixed(6) ?? ""}
+                          {chunk?.preview.values[row * chunk.preview.cols + col]?.toFixed(editor.decimalPlaces) ?? ""}
                         </td>
                       ));
                     })}

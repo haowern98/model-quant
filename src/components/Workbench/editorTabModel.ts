@@ -19,6 +19,7 @@ export type EditorTab =
       layerLabel: string;
       shape: number[];
       quant: string;
+      decimalPlaces: number;
     }
   | {
       id: `eval-results:${string}`;
@@ -69,6 +70,7 @@ export function tensorValuesEditorTab({
     layerLabel,
     shape,
     quant,
+    decimalPlaces: 6,
   };
 }
 

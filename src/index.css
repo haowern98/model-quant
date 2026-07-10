@@ -655,6 +655,54 @@ body.resizing-bottom-panel .bottom-panel-resizer::after {
   align-items: center;
 }
 
+.status-bar-precision-control {
+  position: relative;
+  height: 100%;
+}
+
+.status-bar-precision-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.status-bar-precision-button:hover,
+.status-bar-precision-button[aria-expanded="true"] {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.status-bar-precision-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 30;
+  width: 96px;
+  padding: 4px 0;
+  border: 1px solid var(--vscode-border);
+  border-radius: 8px;
+  background: var(--vscode-sidebar);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  font: 13px "Segoe UI", Arial, sans-serif;
+}
+
+.status-bar-precision-menu button {
+  width: 100%;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #cccccc;
+  padding: 0 18px;
+  text-align: left;
+  font: inherit;
+}
+
+.status-bar-precision-menu button:hover,
+.status-bar-precision-menu button[aria-selected="true"] {
+  background: rgb(255 255 255 / 0.08);
+}
+
 .status-bar-run-status .codicon {
   width: 14px;
   height: 14px;
