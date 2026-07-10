@@ -435,6 +435,7 @@ function offsetsAround(offsets: number[], activeIndex: number, maxCount: number)
 }
 
 function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tensor-values" }> }) {
+  const isVectorTensor = editor.shape.length === 1;
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadingChunks = useRef(new Set<string>());
   const evictionTimer = useRef<number | null>(null);
@@ -454,18 +455,27 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
     setError(null);
     return getTensorValues({
       tensorName: editor.tensorName,
-      rowOffset: nextRowOffset,
-      colOffset: nextColOffset,
-      rowCount: TENSOR_VALUES_CHUNK_ROWS,
-      colCount: TENSOR_VALUES_CHUNK_COLS,
+      rowOffset: isVectorTensor ? 0 : nextRowOffset,
+      colOffset: isVectorTensor ? nextRowOffset : nextColOffset,
+      rowCount: isVectorTensor ? 1 : TENSOR_VALUES_CHUNK_ROWS,
+      colCount: isVectorTensor ? TENSOR_VALUES_CHUNK_ROWS : TENSOR_VALUES_CHUNK_COLS,
     })
       .then((result) => {
-        if (result.rows === 0 || result.cols === 0) return;
+        const preview = isVectorTensor
+          ? {
+              ...result,
+              rows: result.cols,
+              cols: result.cols > 0 ? 1 : 0,
+              totalRows: result.totalCols,
+              totalCols: result.totalCols > 0 ? 1 : 0,
+            }
+          : result;
+        if (preview.rows === 0 || preview.cols === 0) return;
         setChunks((current) => {
           if (current.some((chunk) => chunk.rowOffset === nextRowOffset && chunk.colOffset === nextColOffset)) {
             return current;
           }
-          return [...current, { rowOffset: nextRowOffset, colOffset: nextColOffset, preview: result }].sort(
+          return [...current, { rowOffset: nextRowOffset, colOffset: nextColOffset, preview }].sort(
             (a, b) => a.rowOffset - b.rowOffset || a.colOffset - b.colOffset,
           );
         });
@@ -638,6 +648,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
 
   const placeholderRows = Array.from({ length: TENSOR_VALUES_PLACEHOLDER_ROWS }, (_, row) => row);
   const placeholderCols = Array.from({ length: TENSOR_VALUES_PLACEHOLDER_COLS }, (_, col) => col);
+  const initialPlaceholderCols = isVectorTensor ? 1 : TENSOR_VALUES_CHUNK_COLS;
 
   return (
     <section className="tensor-values-surface">
@@ -748,7 +759,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
               {placeholderRows.map((row) => (
                 <tr className="tensor-values-placeholder-row" key={row}>
                   <th></th>
-                  {Array.from({ length: TENSOR_VALUES_CHUNK_COLS }, (_, col) => (
+                  {Array.from({ length: initialPlaceholderCols }, (_, col) => (
                     <td key={col}>
                       <span />
                     </td>
