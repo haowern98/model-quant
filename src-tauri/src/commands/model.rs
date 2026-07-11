@@ -17,6 +17,32 @@ pub struct LoadedModel {
 
 pub struct ModelState(pub Mutex<Option<LoadedModel>>);
 
+fn is_standalone_projector_gguf<'a>(
+    architecture: &str,
+    tensor_names: impl Iterator<Item = &'a str>,
+) -> bool {
+    let mut has_language_model = false;
+    let mut has_projector = architecture.eq_ignore_ascii_case("clip");
+
+    for name in tensor_names {
+        has_language_model |= matches!(
+            name,
+            name if name.starts_with("token_embd.")
+                || name.starts_with("tok_embeddings.")
+                || name.starts_with("model.embed_tokens.")
+                || name.starts_with("language_model.model.embed_tokens.")
+        );
+        has_projector |= name.starts_with("v.")
+            || name.starts_with("mm.")
+            || name.starts_with("clip.")
+            || name.starts_with("vision_model.")
+            || name.starts_with("vision_tower.")
+            || name.starts_with("multi_modal_projector.");
+    }
+
+    has_projector && !has_language_model
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TensorValuesPreview {
@@ -35,6 +61,12 @@ pub async fn open_model(
 ) -> Result<ModelInfo, String> {
     let model_path = PathBuf::from(&path);
     let model = parse_gguf(&model_path).map_err(|e| e.to_string())?;
+    if is_standalone_projector_gguf(
+        &model.metadata.architecture,
+        model.tensors.iter().map(|tensor| tensor.name.as_str()),
+    ) {
+        return Err("This is an MMPROJ GGUF. Add it in the MMPROJ section.".to_string());
+    }
 
     {
         let mut guard = model_state.0.lock().map_err(|e| e.to_string())?;
@@ -132,5 +164,22 @@ fn parse_default_quant(value: &str) -> QuantType {
         "Q3_K_M" => QuantType::Q3_K_M,
         "Q2_K" => QuantType::Q2_K,
         _ => QuantType::Q4_K_M,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_standalone_projector_gguf;
+
+    #[test]
+    fn rejects_standalone_projector_ggufs_but_keeps_integrated_models() {
+        assert!(is_standalone_projector_gguf(
+            "clip",
+            ["v.patch_embd.weight", "mm.0.weight"].into_iter(),
+        ));
+        assert!(!is_standalone_projector_gguf(
+            "llama",
+            ["token_embd.weight", "v.patch_embd.weight"].into_iter(),
+        ));
     }
 }
