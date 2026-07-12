@@ -56,11 +56,20 @@ export async function openModel(path: string): Promise<ModelInfo> {
   return invoke<ModelInfo>("open_model", { path });
 }
 
+export async function openProjector(path: string): Promise<ModelInfo> {
+  return invoke<ModelInfo>("open_projector", { path });
+}
+
+export async function closeProjector(): Promise<void> {
+  return invoke<void>("close_projector");
+}
+
 export async function getTensors(): Promise<TensorInfo[]> {
   return invoke<TensorInfo[]>("get_tensors");
 }
 
 export async function getTensorValues(options: {
+  source?: "model" | "mmproj";
   tensorName: string;
   rowOffset: number;
   colOffset: number;

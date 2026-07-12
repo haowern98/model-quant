@@ -22,3 +22,10 @@ export function formatTensorName(name: string): string {
     .replace(/^blk\.\d+\./, '')
     .replace(/^layers\.\d+\./, '');
 }
+
+export function projectorGroupLabel(name: string): string {
+  const parts = name.split(".").filter(Boolean);
+  const numberIndex = parts.findIndex((part) => /^\d+$/.test(part));
+  if (numberIndex >= 0) return parts.slice(0, numberIndex + 1).join(".");
+  return parts.length > 1 ? parts.slice(0, -1).join(".") : name;
+}
