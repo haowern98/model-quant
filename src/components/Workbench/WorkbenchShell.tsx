@@ -197,6 +197,7 @@ export function WorkbenchShell({
   const shellRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
   const [activeActivity, setActiveActivity] = useState<ActivityId>("gguf");
+  const [projectorExpanded, setProjectorExpanded] = useState(true);
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
   const sidePanelVisible = explorerWidth > 0;
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
@@ -205,6 +206,10 @@ export function WorkbenchShell({
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
   const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
+
+  useEffect(() => {
+    setProjectorExpanded(true);
+  }, [projectorPath]);
 
   useEffect(() => {
     if (modelExplorerFocusVersion === 0) return;
@@ -327,12 +332,14 @@ export function WorkbenchShell({
           activeProjectorGroupId={activeProjectorGroupId}
           expandedLayers={expandedLayers}
           expandedProjectorGroups={expandedProjectorGroups}
+          projectorExpanded={projectorExpanded}
           running={running}
           onOpenLayer={onOpenLayer}
           onOpenTensorValues={onOpenTensorValues}
           onOpenModel={onOpenModel}
           onOpenProjector={onOpenProjector}
           onRemoveProjector={onRemoveProjector}
+          onToggleProjector={() => setProjectorExpanded((current) => !current)}
           onOpenProjectorGroup={onOpenProjectorGroup}
           onToggleProjectorGroup={onToggleProjectorGroup}
           onOpenProjectorTensorValues={onOpenProjectorTensorValues}
