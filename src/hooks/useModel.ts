@@ -32,5 +32,9 @@ export function useModel() {
     return state.model.tensors.filter(t => t.layerIndex === layerIndex);
   }, [state.model]);
 
-  return { ...state, openModel, getTensorsForLayer };
+  const clearError = useCallback(() => {
+    setState((current) => ({ ...current, error: null }));
+  }, []);
+
+  return { ...state, openModel, getTensorsForLayer, clearError };
 }

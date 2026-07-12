@@ -373,6 +373,7 @@ function App() {
     error: modelError,
     openModel,
     getTensorsForLayer,
+    clearError: clearModelError,
   } = useModel();
   const {
     recipe,
@@ -1342,6 +1343,7 @@ function App() {
               aria-label="Dismiss error"
               onClick={() => {
                 setAppError(null);
+                clearModelError();
               }}
             >
               <span className="codicon codicon-close" aria-hidden="true" />
