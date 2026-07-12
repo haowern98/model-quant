@@ -1,5 +1,7 @@
 import type { BenchmarkResult } from "../../types";
 
+export type TensorSource = "model" | "mmproj";
+
 export const GPQA_DETAILS_TAB_ID = "benchmark:gpqa_diamond:details";
 export const GPQA_DATASET_TAB_ID = "benchmark:gpqa_diamond:dataset";
 export const HUMANEVAL_DETAILS_TAB_ID = "benchmark:humaneval:details";
@@ -7,14 +9,17 @@ export const TERMINAL_BENCH_DETAILS_TAB_ID = "benchmark:terminal_bench_2_1:detai
 
 export type EditorTab =
   | {
-      id: `layer:${number}`;
+      id: `layer:${number}` | `mmproj-layer:${string}`;
       kind: "layer";
+      source: TensorSource;
       layerIndex: number;
+      groupId?: string;
       label?: string;
     }
   | {
-      id: `tensor:${string}`;
+      id: `tensor:${string}` | `mmproj-tensor:${string}`;
       kind: "tensor-values";
+      source: TensorSource;
       tensorName: string;
       layerLabel: string;
       shape: number[];
@@ -43,11 +48,18 @@ export type EditorTab =
       kind: "terminal-bench-details";
     };
 
-export function layerEditorTab(layerIndex: number, label?: string): EditorTab {
+export function layerEditorTab(
+  layerIndex: number,
+  label?: string,
+  source: TensorSource = "model",
+  groupId?: string,
+): EditorTab {
   return {
-    id: `layer:${layerIndex}`,
+    id: source === "model" ? `layer:${layerIndex}` : `mmproj-layer:${groupId ?? layerIndex}`,
     kind: "layer",
+    source,
     layerIndex,
+    groupId,
     label,
   };
 }
@@ -57,15 +69,18 @@ export function tensorValuesEditorTab({
   layerLabel,
   shape,
   quant,
+  source = "model",
 }: {
   tensorName: string;
   layerLabel: string;
   shape: number[];
   quant: string;
+  source?: TensorSource;
 }): EditorTab {
   return {
-    id: `tensor:${tensorName}`,
+    id: source === "model" ? `tensor:${tensorName}` : `mmproj-tensor:${tensorName}`,
     kind: "tensor-values",
+    source,
     tensorName,
     layerLabel,
     shape,

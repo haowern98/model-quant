@@ -1228,6 +1228,20 @@ body.resizing-bottom-panel * {
   color: var(--vscode-text);
 }
 
+.projector-section {
+  max-height: 45%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.projector-tree-body {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
 .model-actions-popover {
   margin: 4px 8px 8px 34px;
   padding: 8px;
