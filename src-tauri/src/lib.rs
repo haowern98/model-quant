@@ -6,7 +6,7 @@ pub mod progress;
 pub mod quant;
 
 use commands::hardware::HardwareMonitor;
-use commands::model::ModelState;
+use commands::model::{ModelState, ProjectorState};
 use commands::modelinspector_api::ModelInspectorApiState;
 use commands::official_benchmarks::OfficialBenchmarkRunner;
 use commands::quant::RecipeStore;
@@ -21,12 +21,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(ModelState(Mutex::new(None)))
+        .manage(ProjectorState(Mutex::new(None)))
         .manage(RecipeStore(Mutex::new(None)))
         .manage(HardwareMonitor::new())
         .manage(ModelInspectorApiState::new())
         .manage(OfficialBenchmarkRunner::new())
         .invoke_handler(tauri::generate_handler![
             commands::model::open_model,
+            commands::model::open_projector,
+            commands::model::close_projector,
             commands::model::get_tensors,
             commands::model::get_tensor_values,
             commands::quant::assign_quant,

@@ -6,9 +6,10 @@ interface TensorTableProps {
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   onAssignQuant: (tensorName: string, quantType: QuantType) => void;
+  readOnly?: boolean;
 }
 
-export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTableProps) {
+export function TensorTable({ tensors, assignments, onAssignQuant, readOnly = false }: TensorTableProps) {
   if (tensors.length === 0) {
     return <div className="tensor-empty-state">Select a layer to view tensors</div>;
   }
@@ -22,9 +23,9 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
             <th>Tensor</th>
             <th>Shape</th>
             <th>Current Quant</th>
-            <th>Target Quant</th>
+            {readOnly ? null : <th>Target Quant</th>}
             <th className="numeric">Current</th>
-            <th className="numeric">Target</th>
+            {readOnly ? null : <th className="numeric">Target</th>}
           </tr>
         </thead>
         <tbody>
@@ -55,7 +56,7 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
                 </td>
                 <td className="shape">[{t.shape.join(', ')}]</td>
                 <td className="quant">{t.currentQuant}</td>
-                <td>
+                {readOnly ? null : <td>
                   <select
                     value={assignedQuant}
                     onChange={e => onAssignQuant(t.name, e.target.value as QuantType)}
@@ -68,9 +69,9 @@ export function TensorTable({ tensors, assignments, onAssignQuant }: TensorTable
                     ))}
                   </select>
                   {targetDisabled && <span className="lock" aria-hidden="true" />}
-                </td>
+                </td>}
                 <td className="numeric">{formatBytes(currentSize)}</td>
-                <td className="numeric">{formatBytes(targetSize)}</td>
+                {readOnly ? null : <td className="numeric">{formatBytes(targetSize)}</td>}
               </tr>
             );
           })}

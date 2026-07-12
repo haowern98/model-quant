@@ -21,7 +21,8 @@ export function useModel() {
       setState({ model, modelPath: path, loading: false, error: null });
       return model;
     } catch (e) {
-      setState(s => ({ ...s, loading: false, error: (e as Error).message }));
+      const error = e instanceof Error ? e.message : String(e);
+      setState(s => ({ ...s, loading: false, error }));
       return null;
     }
   }, []);
@@ -31,5 +32,9 @@ export function useModel() {
     return state.model.tensors.filter(t => t.layerIndex === layerIndex);
   }, [state.model]);
 
-  return { ...state, openModel, getTensorsForLayer };
+  const clearError = useCallback(() => {
+    setState((current) => ({ ...current, error: null }));
+  }, []);
+
+  return { ...state, openModel, getTensorsForLayer, clearError };
 }

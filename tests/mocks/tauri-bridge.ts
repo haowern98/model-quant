@@ -191,7 +191,20 @@ export function createMockBridge() {
   const handlers: Record<string, (args?: Record<string, unknown>) => unknown> =
     {
       open_model: () => mockModel,
+      open_projector: () => mockModel,
+      close_projector: () => {},
       get_tensors: () => mockModel.tensors,
+      get_tensor_values: (args) => {
+        const rows = Number(args?.rowCount ?? 1);
+        const cols = Number(args?.colCount ?? 1);
+        return {
+          values: Array.from({ length: rows * cols }, (_, index) => index / 1000),
+          rows,
+          cols,
+          totalRows: 4096,
+          totalCols: 4096,
+        };
+      },
       assign_quant: (args) => {
         const { tensorNames, quantType } = args!;
         const names = tensorNames as string[];

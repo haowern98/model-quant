@@ -33,6 +33,8 @@ function clamp(value: number, min: number, max: number): number {
 
 interface WorkbenchShellProps {
   modelPath: string | null;
+  projectorPath: string | null;
+  projectorTensors: TensorInfo[];
   tensors: TensorInfo[];
   selectedTensors: TensorInfo[];
   assignments: Record<string, QuantType>;
@@ -41,6 +43,7 @@ interface WorkbenchShellProps {
   openEditors: EditorTab[];
   activeEditorId: string | null;
   expandedLayers: Set<number>;
+  expandedProjectorGroups: Set<string>;
   running: boolean;
   cancelling: boolean;
   statusMessage: string | null;
@@ -65,6 +68,11 @@ interface WorkbenchShellProps {
   onOpenTensorValues: (tensor: TensorInfo, layerLabel: string) => void;
   onTensorDecimalPlacesChange: (editorId: string, decimalPlaces: number) => void;
   onOpenModel: () => void;
+  onOpenProjector: () => void;
+  onRemoveProjector: () => void;
+  onOpenProjectorGroup: (groupId: string) => void;
+  onToggleProjectorGroup: (groupId: string) => void;
+  onOpenProjectorTensorValues: (tensor: TensorInfo, groupId: string) => void;
   onToggleLayer: (layerIndex: number) => void;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
@@ -107,6 +115,8 @@ interface WorkbenchShellProps {
 
 export function WorkbenchShell({
   modelPath,
+  projectorPath,
+  projectorTensors,
   tensors,
   selectedTensors,
   assignments,
@@ -115,6 +125,7 @@ export function WorkbenchShell({
   openEditors,
   activeEditorId,
   expandedLayers,
+  expandedProjectorGroups,
   running,
   cancelling,
   statusMessage,
@@ -139,6 +150,11 @@ export function WorkbenchShell({
   onOpenTensorValues,
   onTensorDecimalPlacesChange,
   onOpenModel,
+  onOpenProjector,
+  onRemoveProjector,
+  onOpenProjectorGroup,
+  onToggleProjectorGroup,
+  onOpenProjectorTensorValues,
   onToggleLayer,
   onSelectEditor,
   onCloseEditor,
@@ -184,6 +200,8 @@ export function WorkbenchShell({
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
   const sidePanelVisible = explorerWidth > 0;
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
+  const activeProjectorGroupId =
+    activeEditor?.kind === "layer" && activeEditor.source === "mmproj" ? activeEditor.groupId ?? null : null;
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
   const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
@@ -302,13 +320,22 @@ export function WorkbenchShell({
       ) : (
         <ExplorerPanel
           modelPath={modelPath}
+          projectorPath={projectorPath}
+          projectorTensors={projectorTensors}
           tensors={tensors}
           activeLayerIndex={activeLayerIndex}
+          activeProjectorGroupId={activeProjectorGroupId}
           expandedLayers={expandedLayers}
+          expandedProjectorGroups={expandedProjectorGroups}
           running={running}
           onOpenLayer={onOpenLayer}
           onOpenTensorValues={onOpenTensorValues}
           onOpenModel={onOpenModel}
+          onOpenProjector={onOpenProjector}
+          onRemoveProjector={onRemoveProjector}
+          onOpenProjectorGroup={onOpenProjectorGroup}
+          onToggleProjectorGroup={onToggleProjectorGroup}
+          onOpenProjectorTensorValues={onOpenProjectorTensorValues}
           onToggleLayer={onToggleLayer}
           onAssignByPattern={onAssignByPattern}
           onSaveRecipe={onSaveRecipe}
@@ -352,6 +379,7 @@ export function WorkbenchShell({
       />
       <EditorPane
         modelPath={modelPath}
+        projectorPath={projectorPath}
         hasModel={tensors.length > 0}
         running={running}
         cancelling={cancelling}

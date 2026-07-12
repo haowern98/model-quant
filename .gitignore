@@ -52,3 +52,4 @@ handoffclaude.md
 *.sln
 *.sw?
 AGENTS.md
+tests/unit/mmproj-explorer.spec.ts

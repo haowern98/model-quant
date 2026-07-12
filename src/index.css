@@ -68,6 +68,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
@@ -85,6 +86,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
@@ -101,6 +103,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
@@ -118,6 +121,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
@@ -134,6 +138,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
@@ -150,6 +155,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .eval-results-editor,
   .bottom-output,
@@ -166,6 +172,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .eval-results-editor,
   .hardware-panel,
   .tensor-editor-content,
@@ -179,6 +186,7 @@ button {
 
 :where(
   .explorer-section:first-of-type .explorer-section-body,
+  .projector-tree-body,
   .testing-panel-body,
   .bottom-output,
   .eval-results-editor,
@@ -602,7 +610,8 @@ button {
 }
 
 body.resizing-explorer .explorer-resizer::after,
-body.resizing-bottom-panel .bottom-panel-resizer::after {
+body.resizing-bottom-panel .bottom-panel-resizer::after,
+body.resizing-projector .projector-resizer::after {
   background: var(--vscode-blue);
 }
 
@@ -728,6 +737,12 @@ body.resizing-explorer * {
 
 body.resizing-bottom-panel,
 body.resizing-bottom-panel * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-projector,
+body.resizing-projector * {
   cursor: row-resize !important;
   user-select: none !important;
 }
@@ -1059,6 +1074,25 @@ body.resizing-bottom-panel * {
   color: #ffffff;
 }
 
+.explorer-layer-group.expanded > .layer-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--vscode-sidebar);
+}
+
+.explorer-layer-group.expanded.sticky-shadow > .layer-row {
+  box-shadow: 0 3px 3px -3px rgb(0 0 0 / 0.8);
+}
+
+.explorer-layer-group.expanded > .layer-row:hover {
+  background: var(--vscode-row-hover);
+}
+
+.explorer-layer-group.expanded > .layer-row.active {
+  background: var(--vscode-row-selected);
+}
+
 .model-row {
   padding-left: 21px;
   grid-template-columns: 17px minmax(0, 1fr) 24px;
@@ -1207,6 +1241,39 @@ body.resizing-bottom-panel * {
 
 .future-section-empty button:hover {
   color: var(--vscode-text);
+}
+
+.projector-section {
+  max-height: 45%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.projector-section.projector-section-resized {
+  max-height: none;
+}
+
+.projector-resizer {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  cursor: row-resize;
+}
+
+.projector-resizer::after {
+  inset: 1px 0;
+}
+
+.projector-tree-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .model-actions-popover {
@@ -2368,7 +2435,10 @@ body.resizing-bottom-panel * {
 
 .bottom-tabs .bottom-panel-fullscreen .codicon {
   margin-right: 0;
-  font-size: 14px;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  line-height: 16px;
   color: #cccccc;
 }
 
@@ -2379,25 +2449,8 @@ body.resizing-bottom-panel * {
   place-items: center;
   border-radius: 3px;
   color: #cccccc;
-  position: relative;
-}
-
-.bottom-tabs .bottom-panel-close .tab-close::before,
-.bottom-tabs .bottom-panel-close .tab-close::after {
-  content: "";
-  position: absolute;
-  width: 11px;
-  height: 1.75px;
-  background: currentColor;
-  border-radius: 1px;
-}
-
-.bottom-tabs .bottom-panel-close .tab-close::before {
-  transform: rotate(45deg);
-}
-
-.bottom-tabs .bottom-panel-close .tab-close::after {
-  transform: rotate(-45deg);
+  font-size: 16px;
+  line-height: 16px;
 }
 
 .bottom-content {

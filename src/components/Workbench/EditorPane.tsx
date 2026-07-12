@@ -62,6 +62,7 @@ function clamp(value: number, min: number, max: number): number {
 
 interface EditorPaneProps {
   modelPath: string | null;
+  projectorPath: string | null;
   hasModel: boolean;
   running: boolean;
   cancelling: boolean;
@@ -132,6 +133,7 @@ function benchmarkResultLabel(result: BenchmarkResult): string | null {
 
 export function EditorPane({
   modelPath,
+  projectorPath,
   hasModel,
   running,
   cancelling,
@@ -280,7 +282,7 @@ export function EditorPane({
           </>
         ) : tensorValuesEditor ? (
           <>
-            <span>{basename(modelPath)}</span>
+            <span>{basename(tensorValuesEditor.source === "mmproj" ? projectorPath : modelPath)}</span>
             <span>&gt;</span>
             <span>{tensorValuesEditor.layerLabel}</span>
             <span>&gt;</span>
@@ -358,6 +360,7 @@ export function EditorPane({
               tensors={tensors}
               assignments={assignments}
               onAssignQuant={onAssignQuant}
+              readOnly={activeEditor?.kind === "layer" && activeEditor.source === "mmproj"}
             />
           </div>
         </section>
@@ -454,6 +457,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
     loadingChunks.current.add(key);
     setError(null);
     return getTensorValues({
+      source: editor.source,
       tensorName: editor.tensorName,
       rowOffset: isVectorTensor ? 0 : nextRowOffset,
       colOffset: isVectorTensor ? nextRowOffset : nextColOffset,
@@ -533,7 +537,7 @@ function TensorValuesView({ editor }: { editor: Extract<EditorTab, { kind: "tens
     setError(null);
     loadChunk(0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor.tensorName]);
+  }, [editor.source, editor.tensorName]);
 
   useEffect(() => {
     if (chunks.length === 0) return;

@@ -35,6 +35,8 @@ import {
   saveRecipe,
   loadRecipe,
   exportGguf,
+  openProjector,
+  closeProjector,
   startModelInspectorApi,
   stopModelInspectorApi,
 } from "./lib/tauri-bridge";
@@ -54,8 +56,10 @@ import type {
   TerminalBenchDatasetStatus,
   TerminalBenchStatus,
   TensorInfo,
+  ModelInfo,
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
+import { projectorGroupLabel } from "./lib/format";
 
 const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
   ready: false,
@@ -369,6 +373,7 @@ function App() {
     error: modelError,
     openModel,
     getTensorsForLayer,
+    clearError: clearModelError,
   } = useModel();
   const {
     recipe,
@@ -391,10 +396,15 @@ function App() {
   const { outputLines, apiOutputLines } = useBenchmarkOutputLog();
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
+  const [projectorPath, setProjectorPath] = useState<string | null>(null);
+  const [projector, setProjector] = useState<ModelInfo | null>(null);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [modelExplorerFocusVersion, setModelExplorerFocusVersion] = useState(0);
   const [expandedLayers, setExpandedLayers] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [expandedProjectorGroups, setExpandedProjectorGroups] = useState<Set<string>>(
     () => new Set(),
   );
   const [appError, setAppError] = useState<string | null>(null);
@@ -540,21 +550,45 @@ function App() {
         currentQuant: t.currentQuant,
       }));
       resetRecipeForModel(path, tensors);
-      setOpenEditors((current) =>
-        current.filter((editor) => editor.kind !== "layer" && editor.kind !== "tensor-values"),
-      );
-      setActiveEditorId((active) => {
-        if (!active) return null;
-        const activeEditor = openEditors.find((editor) => editor.id === active);
-        if (activeEditor?.kind !== "layer" && activeEditor?.kind !== "tensor-values") return active;
-        return openEditors.find((editor) => editor.kind !== "layer" && editor.kind !== "tensor-values")?.id ?? null;
+      setOpenEditors((current) => {
+        const next = current.filter(
+          (editor) => !((editor.kind === "layer" || editor.kind === "tensor-values") && editor.source === "model"),
+        );
+        setActiveEditorId((active) => {
+          const activeEditor = current.find((editor) => editor.id === active);
+          if (!activeEditor || !((activeEditor.kind === "layer" || activeEditor.kind === "tensor-values") && activeEditor.source === "model")) {
+            return active;
+          }
+          return next.at(-1)?.id ?? null;
+        });
+        return next;
       });
       setModelExplorerFocusVersion((version) => version + 1);
       setExpandedLayers(new Set());
       setAppError(null);
     },
-    [openEditors, resetRecipeForModel],
+    [resetRecipeForModel],
   );
+
+  const resetForLoadedProjector = useCallback((path: string | null, loadedProjector: ModelInfo | null) => {
+    setProjectorPath(path);
+    setProjector(loadedProjector);
+    setExpandedProjectorGroups(new Set());
+    setOpenEditors((current) => {
+      const next = current.filter(
+        (editor) => !((editor.kind === "layer" || editor.kind === "tensor-values") && editor.source === "mmproj"),
+      );
+      setActiveEditorId((active) => {
+        const activeEditor = current.find((editor) => editor.id === active);
+        if (!activeEditor || !((activeEditor.kind === "layer" || activeEditor.kind === "tensor-values") && activeEditor.source === "mmproj")) {
+          return active;
+        }
+        return next.at(-1)?.id ?? null;
+      });
+      return next;
+    });
+    setAppError(null);
+  }, []);
 
   const layerDisplayLabel = useCallback((layerIndex: number) => {
     if (layerIndex < 0) return "Global tensors";
@@ -722,6 +756,68 @@ function App() {
       if (loadedModel) resetForLoadedModel(selected, loadedModel);
     }
   }, [openModel, resetForLoadedModel]);
+
+  const handleOpenProjector = useCallback(async () => {
+    let selected: string | null = null;
+
+    if (hasTauriRuntime()) {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const result = await open({
+        filters: [{ name: "MMPROJ", extensions: ["gguf"] }],
+      });
+      if (typeof result === "string") selected = result;
+    } else {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".gguf";
+      input.style.display = "none";
+      input.onchange = () => {
+        selected = input.files?.[0]?.name ?? null;
+        input.remove();
+        if (selected) {
+          void openProjector(selected)
+            .then((loadedProjector) => resetForLoadedProjector(selected, loadedProjector))
+            .catch((error) => setAppError(String(error)));
+        }
+      };
+      document.body.appendChild(input);
+      input.click();
+      return;
+    }
+
+    if (!selected) return;
+    try {
+      const loadedProjector = await openProjector(selected);
+      resetForLoadedProjector(selected, loadedProjector);
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : String(error));
+    }
+  }, [resetForLoadedProjector]);
+
+  const handleRemoveProjector = useCallback(async () => {
+    try {
+      await closeProjector();
+      resetForLoadedProjector(null, null);
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : String(error));
+    }
+  }, [resetForLoadedProjector]);
+
+  const handleOpenProjectorGroup = useCallback((groupId: string) => {
+    const tab = layerEditorTab(-1, groupId, "mmproj", groupId);
+    setOpenEditors((current) => current.some((editor) => editor.id === tab.id) ? current : [...current, tab]);
+    setActiveEditorId(tab.id);
+    setExpandedProjectorGroups((current) => new Set(current).add(groupId));
+  }, []);
+
+  const handleToggleProjectorGroup = useCallback((groupId: string) => {
+    setExpandedProjectorGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
 
   const handleTest = useCallback(async () => {
     if (!recipe || !modelPath) {
@@ -1191,6 +1287,18 @@ function App() {
     setActiveEditorId(tab.id);
   }, []);
 
+  const handleOpenProjectorTensorValues = useCallback((tensor: TensorInfo, groupId: string) => {
+    const tab = tensorValuesEditorTab({
+      tensorName: tensor.name,
+      layerLabel: groupId,
+      shape: tensor.shape,
+      quant: tensor.currentQuant,
+      source: "mmproj",
+    });
+    setOpenEditors((current) => current.some((editor) => editor.id === tab.id) ? current : [...current, tab]);
+    setActiveEditorId(tab.id);
+  }, []);
+
   const handleTensorDecimalPlacesChange = useCallback((editorId: string, decimalPlaces: number) => {
     const nextDecimalPlaces = Math.min(9, Math.max(1, Math.round(decimalPlaces)));
     setOpenEditors((current) =>
@@ -1205,9 +1313,15 @@ function App() {
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const selectedLayerIndex =
-    activeEditor?.kind === "layer" ? activeEditor.layerIndex : null;
+    activeEditor?.kind === "layer" && activeEditor.source === "model" ? activeEditor.layerIndex : null;
+  const activeProjectorGroupId =
+    activeEditor?.kind === "layer" && activeEditor.source === "mmproj" ? activeEditor.groupId ?? null : null;
   const selectedTensors =
-    selectedLayerIndex !== null ? getTensorsForLayer(selectedLayerIndex) : [];
+    selectedLayerIndex !== null
+      ? getTensorsForLayer(selectedLayerIndex)
+      : activeProjectorGroupId
+        ? projector?.tensors.filter((tensor) => projectorGroupLabel(tensor.name) === activeProjectorGroupId) ?? []
+        : [];
   const visibleError = modelError ?? appError;
 
   return (
@@ -1229,6 +1343,7 @@ function App() {
               aria-label="Dismiss error"
               onClick={() => {
                 setAppError(null);
+                clearModelError();
               }}
             >
               <span className="codicon codicon-close" aria-hidden="true" />
@@ -1237,6 +1352,8 @@ function App() {
         )}
         <WorkbenchShell
           modelPath={modelPath}
+          projectorPath={projectorPath}
+          projectorTensors={projector?.tensors ?? []}
           tensors={model?.tensors ?? []}
           selectedTensors={selectedTensors}
           assignments={getAssignments}
@@ -1245,6 +1362,7 @@ function App() {
           openEditors={openEditors}
           activeEditorId={activeEditorId}
           expandedLayers={expandedLayers}
+          expandedProjectorGroups={expandedProjectorGroups}
           running={running}
           cancelling={cancelling}
           statusMessage={statusMessage}
@@ -1269,6 +1387,11 @@ function App() {
           onOpenTensorValues={handleOpenTensorValues}
           onTensorDecimalPlacesChange={handleTensorDecimalPlacesChange}
           onOpenModel={handleOpenModel}
+          onOpenProjector={handleOpenProjector}
+          onRemoveProjector={handleRemoveProjector}
+          onOpenProjectorGroup={handleOpenProjectorGroup}
+          onToggleProjectorGroup={handleToggleProjectorGroup}
+          onOpenProjectorTensorValues={handleOpenProjectorTensorValues}
           onToggleLayer={handleToggleLayer}
           onSelectEditor={setActiveEditorId}
           onCloseEditor={handleCloseEditor}
