@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   QUANT_TYPES,
   type AssignPattern,
@@ -16,6 +16,8 @@ const BULK_PATTERNS: { value: AssignPattern; label: string; aria: string }[] = [
   { value: "all_embeddings", label: "All Embeddings", aria: "All Embeddings target" },
   { value: "all", label: "Entire Model", aria: "Entire Model target" },
 ];
+
+const PROJECTOR_MIN_HEIGHT = 80;
 
 interface ExplorerPanelProps {
   modelPath: string | null;
@@ -91,8 +93,10 @@ export function ExplorerPanel({
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
   const [stickyLayerIndices, setStickyLayerIndices] = useState<Set<number>>(() => new Set());
   const projectorBodyRef = useRef<HTMLDivElement>(null);
+  const projectorSectionRef = useRef<HTMLElement>(null);
   const projectorGroupRefs = useRef(new Map<string, HTMLDivElement>());
   const [stickyProjectorGroups, setStickyProjectorGroups] = useState<Set<string>>(() => new Set());
+  const [projectorHeight, setProjectorHeight] = useState<number | null>(null);
 
   const groups = useMemo(() => {
     const next = new Map<number, TensorInfo[]>();
@@ -201,6 +205,37 @@ export function ExplorerPanel({
     if (!value) return;
     onAssignByPattern(pattern, value as QuantType);
     setActionsOpen(false);
+  };
+
+  const startProjectorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const section = projectorSectionRef.current;
+    if (!section) return;
+
+    const startY = event.clientY;
+    const startHeight = section.getBoundingClientRect().height;
+    const modelHeader = section.parentElement?.querySelector<HTMLElement>(
+      ".explorer-section:first-of-type .explorer-model-header",
+    );
+    const maxHeight = Math.max(
+      PROJECTOR_MIN_HEIGHT,
+      Math.floor(section.getBoundingClientRect().bottom - (modelHeader?.getBoundingClientRect().bottom ?? 0)),
+    );
+    document.body.classList.add("resizing-projector");
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      setProjectorHeight(
+        Math.round(Math.min(maxHeight, Math.max(PROJECTOR_MIN_HEIGHT, startHeight + startY - moveEvent.clientY))),
+      );
+    };
+    const stopResize = () => {
+      document.body.classList.remove("resizing-projector");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stopResize);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stopResize);
   };
 
   return (
@@ -326,7 +361,20 @@ export function ExplorerPanel({
         )}
       </section>
 
-      <section className="explorer-section projector-section">
+      <section
+        ref={projectorSectionRef}
+        className={`explorer-section projector-section ${projectorHeight !== null ? "projector-section-resized" : ""}`}
+        style={projectorPath && projectorHeight !== null ? { height: projectorHeight } : undefined}
+      >
+        {projectorPath ? (
+          <div
+            className="resize-handle projector-resizer"
+            role="separator"
+            aria-label="Resize MMPROJ"
+            aria-orientation="horizontal"
+            onPointerDown={startProjectorResize}
+          />
+        ) : null}
         {projectorPath ? (
           <ExplorerSectionHeader
             label={basename(projectorPath)}

@@ -610,7 +610,8 @@ button {
 }
 
 body.resizing-explorer .explorer-resizer::after,
-body.resizing-bottom-panel .bottom-panel-resizer::after {
+body.resizing-bottom-panel .bottom-panel-resizer::after,
+body.resizing-projector .projector-resizer::after {
   background: var(--vscode-blue);
 }
 
@@ -736,6 +737,12 @@ body.resizing-explorer * {
 
 body.resizing-bottom-panel,
 body.resizing-bottom-panel * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-projector,
+body.resizing-projector * {
   cursor: row-resize !important;
   user-select: none !important;
 }
@@ -1242,9 +1249,28 @@ body.resizing-bottom-panel * {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.projector-section.projector-section-resized {
+  max-height: none;
+}
+
+.projector-resizer {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  cursor: row-resize;
+}
+
+.projector-resizer::after {
+  inset: 1px 0;
 }
 
 .projector-tree-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
