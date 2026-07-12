@@ -16,6 +16,7 @@ pub struct LoadedModel {
 }
 
 pub struct ModelState(pub Mutex<Option<LoadedModel>>);
+pub struct ProjectorState(pub Mutex<Option<LoadedModel>>);
 
 fn is_standalone_projector_gguf<'a>(
     architecture: &str,
@@ -90,6 +91,34 @@ pub async fn open_model(
 }
 
 #[tauri::command]
+pub async fn open_projector(
+    path: String,
+    projector_state: State<'_, ProjectorState>,
+) -> Result<ModelInfo, String> {
+    let projector_path = PathBuf::from(&path);
+    let model = parse_gguf(&projector_path).map_err(|e| e.to_string())?;
+    if !is_standalone_projector_gguf(
+        &model.metadata.architecture,
+        model.tensors.iter().map(|tensor| tensor.name.as_str()),
+    ) {
+        return Err("This is a model GGUF. Add it in the model GGUF section.".to_string());
+    }
+
+    let mut guard = projector_state.0.lock().map_err(|e| e.to_string())?;
+    *guard = Some(LoadedModel {
+        path: projector_path,
+        info: model.clone(),
+    });
+    Ok(model)
+}
+
+#[tauri::command]
+pub async fn close_projector(projector_state: State<'_, ProjectorState>) -> Result<(), String> {
+    *projector_state.0.lock().map_err(|e| e.to_string())? = None;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_tensors(
     state: State<'_, ModelState>,
 ) -> Result<Vec<crate::gguf::types::TensorInfo>, String> {
@@ -103,6 +132,8 @@ pub async fn get_tensors(
 #[tauri::command]
 pub async fn get_tensor_values(
     state: State<'_, ModelState>,
+    projector_state: State<'_, ProjectorState>,
+    source: Option<String>,
     tensor_name: String,
     row_offset: u64,
     col_offset: u64,
@@ -120,12 +151,22 @@ pub async fn get_tensor_values(
         ));
     }
 
-    let path = {
-        let guard = state.0.lock().map_err(|e| e.to_string())?;
-        match &*guard {
-            Some(model) => model.path.clone(),
-            None => return Err("No model loaded".into()),
+    let path = match source.as_deref() {
+        Some("mmproj") => {
+            let guard = projector_state.0.lock().map_err(|e| e.to_string())?;
+            match &*guard {
+                Some(model) => model.path.clone(),
+                None => return Err("No MMPROJ loaded".into()),
+            }
         }
+        None | Some("model") => {
+            let guard = state.0.lock().map_err(|e| e.to_string())?;
+            match &*guard {
+                Some(model) => model.path.clone(),
+                None => return Err("No model loaded".into()),
+            }
+        }
+        Some(source) => return Err(format!("Unknown tensor source: {source}")),
     };
     let preview = runtime_bindings::preview_tensor_values(
         path.to_string_lossy().as_ref(),
