@@ -1249,6 +1249,8 @@ fn download_terminal_bench_dataset_blocking(
     run_managed_child(
         "uvx",
         vec![
+            "--python".to_string(),
+            TERMINAL_BENCH_UV_PYTHON.to_string(),
             "--from".to_string(),
             "harbor".to_string(),
             "harbor".to_string(),
@@ -2032,7 +2034,14 @@ fn run_harbor_probe() -> Result<String, String> {
     let mut command = Command::new("uvx");
     hide_child_console(&mut command);
     let output = command
-        .args(["--from", "harbor", "harbor", "--help"])
+        .args([
+            "--python",
+            TERMINAL_BENCH_UV_PYTHON,
+            "--from",
+            "harbor",
+            "harbor",
+            "--help",
+        ])
         .output()
         .map_err(|e| format!("Harbor was not found or could not be started with uvx: {e}"))?;
 
@@ -2917,6 +2926,7 @@ fn terminal_bench_task_images(task_root: &Path) -> Result<BTreeSet<String>, Stri
 
 const TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH: &str =
     "modelinspector_terminus2:ModelInspectorTerminus2";
+const TERMINAL_BENCH_UV_PYTHON: &str = "3.12";
 
 fn write_terminal_bench_terminus_shim(run_dir: &Path) -> Result<&'static str, String> {
     let script = r#"from harbor.agents.terminus_2.terminus_2 import Terminus2
@@ -2943,6 +2953,8 @@ fn terminal_bench_harbor_benchmark_args(
     agent_import_path: &str,
 ) -> Vec<String> {
     let mut args = vec![
+        "--python".to_string(),
+        TERMINAL_BENCH_UV_PYTHON.to_string(),
         "--from".to_string(),
         "harbor".to_string(),
         "harbor".to_string(),
@@ -3760,6 +3772,8 @@ mod tests {
             TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH,
         );
 
+        assert_eq!(args[0], "--python");
+        assert_eq!(args[1], "3.12");
         assert!(args.contains(&"--path".to_string()));
         assert!(args.contains(&task.to_string_lossy().to_string()));
         assert!(args.contains(&"--agent".to_string()));
