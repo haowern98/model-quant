@@ -327,15 +327,33 @@ export function ExplorerPanel({
       </section>
 
       <section className="explorer-section projector-section">
-        <button
-          type="button"
-          className="explorer-section-header"
-          aria-label="MMPROJ"
-          onClick={() => toggleSection("mmproj")}
-        >
-          <span className={`tree-chevron ${sections.mmproj ? "expanded" : ""}`} />
-          <span>MMPROJ</span>
-        </button>
+        {projectorPath ? (
+          <ExplorerSectionHeader
+            label={basename(projectorPath)}
+            expanded={projectorExpanded}
+            onClick={() => setProjectorExpanded((current) => !current)}
+            action={
+              <button
+                type="button"
+                className="tree-action-button"
+                aria-label="Projector actions"
+                onClick={() => setProjectorActionsOpen((current) => !current)}
+              >
+                ...
+              </button>
+            }
+          />
+        ) : (
+          <button
+            type="button"
+            className="explorer-section-header"
+            aria-label="MMPROJ"
+            onClick={() => toggleSection("mmproj")}
+          >
+            <span className={`tree-chevron ${sections.mmproj ? "expanded" : ""}`} />
+            <span>MMPROJ</span>
+          </button>
+        )}
         {sections.mmproj && !projectorPath ? (
           <div className="future-section-empty">
             <button type="button" onClick={onOpenProjector}>Add projector...</button>
@@ -343,21 +361,6 @@ export function ExplorerPanel({
         ) : null}
         {sections.mmproj && projectorPath ? (
           <>
-            <ExplorerSectionHeader
-              label={basename(projectorPath)}
-              expanded={projectorExpanded}
-              onClick={() => setProjectorExpanded((current) => !current)}
-              action={
-                <button
-                  type="button"
-                  className="tree-action-button"
-                  aria-label="Projector actions"
-                  onClick={() => setProjectorActionsOpen((current) => !current)}
-                >
-                  ...
-                </button>
-              }
-            />
             {projectorExpanded && projectorActionsOpen ? (
               <div className="model-actions-popover">
                 <div className="model-action-buttons">
