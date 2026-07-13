@@ -353,6 +353,16 @@ extern "C" {
         log_user_data: *mut c_void,
         out_session: *mut *mut MsRuntimeChatSession,
     ) -> c_int;
+    fn ms_runtime_open_recipe_chat_session_with_projector_and_progress(
+        path: *const c_char,
+        projector_path: *const c_char,
+        targets: *const MsRecipeTensorTarget,
+        target_count: u64,
+        context_tokens: u32,
+        log_callback: MsRuntimeLogCallback,
+        log_user_data: *mut c_void,
+        out_session: *mut *mut MsRuntimeChatSession,
+    ) -> c_int;
     fn ms_runtime_close_recipe_chat_session(session: *mut MsRuntimeChatSession);
     fn ms_runtime_generate_recipe_chat_session(
         session: *mut MsRuntimeChatSession,
@@ -373,6 +383,21 @@ extern "C" {
         session: *mut MsRuntimeChatSession,
         messages: *const MsChatMessage,
         message_count: u64,
+        params: *const ChatGenerationParams,
+        stop_strings: *const *const c_char,
+        stop_count: u64,
+        chat_template_kwargs_json: *const c_char,
+        reasoning_format: *const c_char,
+        stream_callback: MsChatStreamCallback,
+        stream_user_data: *mut c_void,
+        out_result: *mut MsChatGenerationResult,
+    ) -> c_int;
+    fn ms_runtime_generate_recipe_chat_session_multimodal_stream(
+        session: *mut MsRuntimeChatSession,
+        messages: *const MsChatMessage,
+        message_count: u64,
+        image_data_urls: *const *const c_char,
+        image_count: u64,
         params: *const ChatGenerationParams,
         stop_strings: *const *const c_char,
         stop_count: u64,
@@ -1220,6 +1245,129 @@ impl RecipeChatSession {
         }
     }
 
+    pub fn generate_chat_multimodal_streaming<F>(
+        &mut self,
+        messages: &[(String, String)],
+        image_data_urls: &[String],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        mut on_delta: F,
+    ) -> Result<ChatGenerationOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<(), String>,
+    {
+        let c_roles = messages
+            .iter()
+            .map(|(role, _)| {
+                CString::new(role.as_str())
+                    .map_err(|_| format!("chat role contains an interior NUL byte: {}", role))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let c_contents = messages
+            .iter()
+            .map(|(_, content)| {
+                CString::new(content.as_str())
+                    .map_err(|_| "chat message content contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_messages = c_roles
+            .iter()
+            .zip(c_contents.iter())
+            .map(|(role, content)| MsChatMessage {
+                role: role.as_ptr(),
+                content: content.as_ptr(),
+            })
+            .collect::<Vec<_>>();
+        let c_image_data_urls = image_data_urls
+            .iter()
+            .map(|url| {
+                CString::new(url.as_str())
+                    .map_err(|_| "image_url contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_image_data_urls = c_image_data_urls
+            .iter()
+            .map(|url| url.as_ptr())
+            .collect::<Vec<_>>();
+        let c_stop_strings = stop_strings
+            .iter()
+            .map(|stop| {
+                CString::new(stop.as_str())
+                    .map_err(|_| "chat stop string contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_stop_strings = c_stop_strings
+            .iter()
+            .map(|stop| stop.as_ptr())
+            .collect::<Vec<_>>();
+        let c_chat_template_kwargs_json = chat_template_kwargs_json
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "chat_template_kwargs contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let c_reasoning_format = reasoning_format
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "reasoning_format contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let mut native_result = MsChatGenerationResult {
+            benchmark: empty_benchmark(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            finish_reason: ChatFinishReason::Stop as u32,
+        };
+        let mut callback_state = ChatStreamCallbackState {
+            on_delta: &mut on_delta,
+            text: String::new(),
+            reasoning_text: String::new(),
+            error: None,
+        };
+
+        let status = unsafe {
+            ms_runtime_generate_recipe_chat_session_multimodal_stream(
+                self.ptr.as_ptr(),
+                native_messages.as_ptr(),
+                native_messages.len() as u64,
+                native_image_data_urls.as_ptr(),
+                native_image_data_urls.len() as u64,
+                params,
+                native_stop_strings.as_ptr(),
+                native_stop_strings.len() as u64,
+                c_chat_template_kwargs_json
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                c_reasoning_format
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                Some(recipe_chat_stream_trampoline::<F>),
+                &mut callback_state as *mut ChatStreamCallbackState<F> as *mut c_void,
+                &mut native_result,
+            )
+        };
+
+        if let Some(error) = callback_state.error {
+            return Err(error);
+        }
+
+        if status == 0 {
+            Ok(ChatGenerationOutput {
+                text: callback_state.text,
+                reasoning_text: (!callback_state.reasoning_text.is_empty())
+                    .then_some(callback_state.reasoning_text),
+                benchmark: native_result.benchmark,
+                finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+            })
+        } else {
+            Err(unsafe { c_string(ms_runtime_last_error()) })
+        }
+    }
+
     pub fn counters(&self) -> Result<MsRuntimeChatSessionCounters, String> {
         let mut counters = MsRuntimeChatSessionCounters {
             model_load_count: 0,
@@ -1282,6 +1430,43 @@ where
             unsafe {
                 ms_runtime_open_recipe_chat_session_with_progress(
                     c_path,
+                    native_targets.as_ptr(),
+                    native_targets.len() as u64,
+                    context_tokens,
+                    Some(recipe_chat_session_log_trampoline::<F>),
+                    log_user_data,
+                    session,
+                )
+            }
+        },
+    )
+}
+
+pub fn open_recipe_chat_session_with_projector_and_progress<F>(
+    path: &str,
+    projector_path: Option<&str>,
+    targets: &[(String, String)],
+    context_tokens: u32,
+    mut on_log: F,
+) -> Result<RecipeChatSession, String>
+where
+    F: FnMut(&str),
+{
+    let Some(projector_path) = projector_path else {
+        return open_recipe_chat_session_with_progress(path, targets, context_tokens, on_log);
+    };
+    let c_projector_path = CString::new(projector_path)
+        .map_err(|_| format!("projector path contains an interior NUL byte: {projector_path}"))?;
+    open_recipe_chat_session_with_native_call(
+        path,
+        targets,
+        context_tokens,
+        |c_path, native_targets, session| {
+            let log_user_data = &mut on_log as *mut F as *mut c_void;
+            unsafe {
+                ms_runtime_open_recipe_chat_session_with_projector_and_progress(
+                    c_path,
+                    c_projector_path.as_ptr(),
                     native_targets.as_ptr(),
                     native_targets.len() as u64,
                     context_tokens,
