@@ -311,7 +311,7 @@ export function ExplorerPanel({
 
             {!modelPath && (
               <div className="future-section-empty">
-                <button type="button" onClick={onOpenModel}>
+                <button type="button" disabled={running} onClick={onOpenModel}>
                   Add model GGUF...
                 </button>
               </div>

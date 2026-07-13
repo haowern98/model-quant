@@ -706,6 +706,8 @@ function App() {
   );
 
   const handleOpenModel = useCallback(async () => {
+    if (running) return;
+
     let selected: string | null = null;
 
     if (!hasTauriRuntime()) {
@@ -755,7 +757,7 @@ function App() {
       const loadedModel = await openModel(selected);
       if (loadedModel) resetForLoadedModel(selected, loadedModel);
     }
-  }, [openModel, resetForLoadedModel]);
+  }, [openModel, resetForLoadedModel, running]);
 
   const handleOpenProjector = useCallback(async () => {
     let selected: string | null = null;
@@ -1328,6 +1330,7 @@ function App() {
     <div className="app-root">
       <TitleBar
         modelPath={modelPath}
+        running={running}
         bottomPanelVisible={bottomPanelVisible}
         onOpenModel={handleOpenModel}
         onToggleBottomPanel={() => setBottomPanelVisible((visible) => !visible)}
