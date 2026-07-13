@@ -55,6 +55,7 @@ const BOTTOM_PANEL_MIN_HEIGHT = 64;
 type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
 type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
 type TerminalBenchTab = "details" | "dataset" | "configuration";
+type MmmuProTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -202,11 +203,13 @@ export function EditorPane({
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
+  const showingMmmuProBenchmark = activeEditor?.kind === "mmmu-pro-details";
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
     : null;
-  const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
+  const showingBenchmark =
+    showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark || showingMmmuProBenchmark;
   const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
   const bottomPanelMaxHeight = () => {
@@ -346,6 +349,8 @@ export function EditorPane({
           onConfigChange={onTerminalBenchConfigChange}
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
+      ) : showingMmmuProBenchmark ? (
+        <MmmuProBenchmarkView />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : (
@@ -1846,6 +1851,99 @@ function TerminalBenchView({
               <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
               <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
               <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MmmuProBenchmarkView() {
+  const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
+
+  return (
+    <section className="benchmark-editor-surface">
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-title">
+              <h1>MMMU-Pro</h1>
+              <div className="benchmark-page-meta">
+                <span>MMMU-Pro</span>
+                <span>|</span>
+                <span>multimodal reasoning</span>
+                <span>|</span>
+                <span>visual tasks</span>
+              </div>
+              <p>MMMU-Pro benchmark page for multimodal visual reasoning.</p>
+              <div className="benchmark-page-actions">
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Download dataset
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Verify hash
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Install harness
+                </button>
+                <button type="button" className="benchmark-action-button secondary" disabled>
+                  Refresh
+                </button>
+                <button type="button" className="benchmark-action-button primary" disabled>
+                  Run Benchmark
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="MMMU-Pro sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Benchmark</h2>
+                <p>
+                  MMMU-Pro is reserved for evaluating multimodal visual reasoning through the
+                  app&apos;s in-process OpenAI-compatible chat API.
+                </p>
+                <h2>Availability</h2>
+                <p>Dataset, harness, configuration, and execution are not wired yet.</p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                <p>MMMU-Pro dataset preview is not wired yet.</p>
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <h2>Configuration</h2>
+                <p>MMMU-Pro run configuration is not wired yet.</p>
+              </div>
+            )}
+          </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">MMMU-Pro is not wired yet.</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="Not wired" />
+              <BenchmarkInfoRow label="Dataset" value="MMMU-Pro" />
+              <BenchmarkInfoRow label="Metric" value="Not wired" />
+              <BenchmarkInfoRow label="Status" value="Not wired" />
+              <BenchmarkInfoRow label="Vision model" value="Required" />
+              <BenchmarkInfoRow label="MMPROJ" value="Required" />
             </BenchmarkInfoSection>
           </aside>
         </div>

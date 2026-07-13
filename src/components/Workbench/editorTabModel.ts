@@ -6,6 +6,7 @@ export const GPQA_DETAILS_TAB_ID = "benchmark:gpqa_diamond:details";
 export const GPQA_DATASET_TAB_ID = "benchmark:gpqa_diamond:dataset";
 export const HUMANEVAL_DETAILS_TAB_ID = "benchmark:humaneval:details";
 export const TERMINAL_BENCH_DETAILS_TAB_ID = "benchmark:terminal_bench_2_1:details";
+export const MMMU_PRO_DETAILS_TAB_ID = "benchmark:mmmu_pro:details";
 
 export type EditorTab =
   | {
@@ -46,6 +47,10 @@ export type EditorTab =
   | {
       id: typeof TERMINAL_BENCH_DETAILS_TAB_ID;
       kind: "terminal-bench-details";
+    }
+  | {
+      id: typeof MMMU_PRO_DETAILS_TAB_ID;
+      kind: "mmmu-pro-details";
     };
 
 export function layerEditorTab(
@@ -117,6 +122,13 @@ export function terminalBenchDetailsEditorTab(): EditorTab {
   };
 }
 
+export function mmmuProDetailsEditorTab(): EditorTab {
+  return {
+    id: MMMU_PRO_DETAILS_TAB_ID,
+    kind: "mmmu-pro-details",
+  };
+}
+
 export function evalResultsEditorTab(result: BenchmarkResult): EditorTab {
   return {
     id: `eval-results:${Date.now()}:${Math.random().toString(36).slice(2)}`,
@@ -131,6 +143,7 @@ export function editorTabLabel(tab: EditorTab): string {
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";
   if (tab.kind === "humaneval-details") return "HumanEval";
   if (tab.kind === "terminal-bench-details") return "Terminal-Bench 2.1";
+  if (tab.kind === "mmmu-pro-details") return "MMMU-Pro";
   if (tab.kind === "tensor-values") return tab.tensorName;
   if (tab.label) return tab.label;
   if (tab.layerIndex < 0) return "Global tensors";

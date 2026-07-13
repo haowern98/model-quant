@@ -14,11 +14,13 @@ interface TestingPanelProps {
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
   terminalBenchEditorActive: boolean;
+  mmmuProEditorActive: boolean;
   onRefreshAllBenchmarks: () => void;
   onOpenGpqaDetails: () => void;
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
   onOpenTerminalBenchDetails: () => void;
+  onOpenMmmuProDetails: () => void;
 }
 
 type TestingSectionId = "benchmarks" | "latestRuns";
@@ -31,10 +33,12 @@ export function TestingPanel({
   gpqaEditorActive,
   humanevalEditorActive,
   terminalBenchEditorActive,
+  mmmuProEditorActive,
   onRefreshAllBenchmarks,
   onOpenGpqaDetails,
   onOpenHumanEvalDetails,
   onOpenTerminalBenchDetails,
+  onOpenMmmuProDetails,
 }: TestingPanelProps) {
   const [sections, setSections] = useState<Record<TestingSectionId, boolean>>({
     benchmarks: true,
@@ -95,6 +99,15 @@ export function TestingPanel({
               onClick={onOpenHumanEvalDetails}
             />
             <BenchmarkCard
+              title="MMMU-Pro"
+              description="Multimodal visual reasoning benchmark"
+              meta="EvalScope · 1,730 samples · acc"
+              status="Not wired"
+              icon="device-camera"
+              active={mmmuProEditorActive}
+              onClick={onOpenMmmuProDetails}
+            />
+            <BenchmarkCard
               title="Terminal-Bench 2.1"
               description="Terminal task benchmark"
               meta="Harbor - terminal-bench-2-1"
@@ -147,7 +160,7 @@ function BenchmarkCard({
   meta?: string;
   status: string;
   active?: boolean;
-  icon?: "beaker" | "code";
+  icon?: "beaker" | "code" | "device-camera";
   onClick?: () => void;
 }) {
   return (

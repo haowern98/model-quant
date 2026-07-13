@@ -99,6 +99,7 @@ interface WorkbenchShellProps {
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
   onOpenTerminalBenchDetails: () => void;
+  onOpenMmmuProDetails: () => void;
   onInstallTerminalBenchHarness: () => void;
   onDownloadTerminalBenchDataset: () => void;
   onDeleteTerminalBenchDataset: () => void;
@@ -181,6 +182,7 @@ export function WorkbenchShell({
   onOpenGpqaDataset,
   onOpenHumanEvalDetails,
   onOpenTerminalBenchDetails,
+  onOpenMmmuProDetails,
   onInstallTerminalBenchHarness,
   onDownloadTerminalBenchDataset,
   onDeleteTerminalBenchDataset,
@@ -206,6 +208,7 @@ export function WorkbenchShell({
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
   const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
+  const mmmuProEditorActive = activeEditor?.kind === "mmmu-pro-details";
 
   useEffect(() => {
     setProjectorExpanded(true);
@@ -316,11 +319,13 @@ export function WorkbenchShell({
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           terminalBenchEditorActive={terminalBenchEditorActive}
+          mmmuProEditorActive={mmmuProEditorActive}
           onRefreshAllBenchmarks={onRefreshAllBenchmarks}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
           onOpenHumanEvalDetails={onOpenHumanEvalDetails}
           onOpenTerminalBenchDetails={onOpenTerminalBenchDetails}
+          onOpenMmmuProDetails={onOpenMmmuProDetails}
         />
       ) : (
         <ExplorerPanel

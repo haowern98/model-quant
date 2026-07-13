@@ -7,6 +7,7 @@ import {
   gpqaDetailsEditorTab,
   humanevalDetailsEditorTab,
   layerEditorTab,
+  mmmuProDetailsEditorTab,
   terminalBenchDetailsEditorTab,
   tensorValuesEditorTab,
   type EditorTab,
@@ -684,6 +685,10 @@ function App() {
 
   const handleOpenTerminalBenchDetails = useCallback(() => {
     openEditorTab(terminalBenchDetailsEditorTab());
+  }, [openEditorTab]);
+
+  const handleOpenMmmuProDetails = useCallback(() => {
+    openEditorTab(mmmuProDetailsEditorTab());
   }, [openEditorTab]);
 
   const handleToggleRunTarget = useCallback(
@@ -1421,6 +1426,7 @@ function App() {
           onOpenGpqaDataset={handleOpenGpqaDataset}
           onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
           onOpenTerminalBenchDetails={handleOpenTerminalBenchDetails}
+          onOpenMmmuProDetails={handleOpenMmmuProDetails}
           onInstallTerminalBenchHarness={handleInstallTerminalBenchHarness}
           onDownloadTerminalBenchDataset={handleDownloadTerminalBenchDataset}
           onDeleteTerminalBenchDataset={handleDeleteTerminalBenchDataset}
