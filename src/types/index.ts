@@ -175,6 +175,7 @@ export type BenchmarkRunId =
   | "gpqa_diamond"
   | "humaneval"
   | "terminal_bench"
+  | "mmmu_pro"
   | "mmlu_pro"
   | "mmlu_redux"
   | "supergpqa"
@@ -295,6 +296,12 @@ export interface TerminalBenchStatus {
   harbor: string | null;
   dockerReady: boolean;
   docker: string | null;
+  detail: string;
+}
+
+export interface MmmuProStatus {
+  ready: boolean;
+  statusLabel: string;
   detail: string;
 }
 

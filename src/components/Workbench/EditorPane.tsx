@@ -20,6 +20,7 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  MmmuProStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -80,6 +81,7 @@ interface EditorPaneProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  mmmuProStatus: MmmuProStatus;
   terminalBenchStatus: TerminalBenchStatus;
   terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
@@ -151,6 +153,7 @@ export function EditorPane({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  mmmuProStatus,
   terminalBenchStatus,
   terminalBenchDatasetStatus,
   gpqaShotMode,
@@ -264,6 +267,7 @@ export function EditorPane({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          mmmuProStatus={mmmuProStatus}
           terminalBenchStatus={terminalBenchStatus}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
@@ -350,7 +354,7 @@ export function EditorPane({
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
       ) : showingMmmuProBenchmark ? (
-        <MmmuProBenchmarkView />
+        <MmmuProBenchmarkView status={mmmuProStatus} />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : (
@@ -1859,7 +1863,7 @@ function TerminalBenchView({
   );
 }
 
-function MmmuProBenchmarkView() {
+function MmmuProBenchmarkView({ status }: { status: MmmuProStatus }) {
   const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
 
   return (
@@ -1936,12 +1940,12 @@ function MmmuProBenchmarkView() {
             )}
           </div>
           <aside className="benchmark-page-side">
-            <p className="benchmark-readiness">MMMU-Pro is not wired yet.</p>
+            <p className="benchmark-readiness">{status.detail}</p>
             <BenchmarkInfoSection title="Harness">
-              <BenchmarkInfoRow label="Framework" value="Not wired" />
+              <BenchmarkInfoRow label="Framework" value="EvalScope" />
               <BenchmarkInfoRow label="Dataset" value="MMMU-Pro" />
-              <BenchmarkInfoRow label="Metric" value="Not wired" />
-              <BenchmarkInfoRow label="Status" value="Not wired" />
+              <BenchmarkInfoRow label="Metric" value="acc" />
+              <BenchmarkInfoRow label="Status" value={status.statusLabel} />
               <BenchmarkInfoRow label="Vision model" value="Required" />
               <BenchmarkInfoRow label="MMPROJ" value="Required" />
             </BenchmarkInfoSection>

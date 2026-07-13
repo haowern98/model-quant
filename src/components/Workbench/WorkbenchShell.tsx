@@ -7,6 +7,7 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   HumanEvalStatus,
+  MmmuProStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -55,6 +56,7 @@ interface WorkbenchShellProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  mmmuProStatus: MmmuProStatus;
   terminalBenchStatus: TerminalBenchStatus;
   terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
@@ -138,6 +140,7 @@ export function WorkbenchShell({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  mmmuProStatus,
   terminalBenchStatus,
   terminalBenchDatasetStatus,
   gpqaShotMode,
@@ -315,6 +318,7 @@ export function WorkbenchShell({
           running={running}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          mmmuProStatus={mmmuProStatus}
           terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
@@ -408,6 +412,7 @@ export function WorkbenchShell({
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
         humanevalStatus={humanevalStatus}
+        mmmuProStatus={mmmuProStatus}
         terminalBenchStatus={terminalBenchStatus}
         terminalBenchDatasetStatus={terminalBenchDatasetStatus}
         gpqaShotMode={gpqaShotMode}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import {
@@ -49,6 +49,7 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   HumanEvalStatus,
+  MmmuProStatus,
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
@@ -435,6 +436,28 @@ function App() {
   const [terminalBenchConfig, setTerminalBenchConfig] =
     useState<TerminalBenchBenchmarkConfigInput>(DEFAULT_TERMINAL_BENCH_CONFIG_INPUT);
 
+  const mmmuProStatus = useMemo<MmmuProStatus>(() => {
+    if (!modelPath) {
+      return {
+        ready: false,
+        statusLabel: "Needs vision model",
+        detail: "Open a vision-capable GGUF model before running MMMU-Pro.",
+      };
+    }
+    if (!projectorPath) {
+      return {
+        ready: false,
+        statusLabel: "Needs MMPROJ",
+        detail: "Load the matching MMPROJ projector before running MMMU-Pro.",
+      };
+    }
+    return {
+      ready: true,
+      statusLabel: "Ready",
+      detail: "A model and MMPROJ are loaded. Compatibility is checked before MMMU-Pro runs.",
+    };
+  }, [modelPath, projectorPath]);
+
   const refreshGpqaStatus = useCallback(async () => {
     try {
       setGpqaStatus(await getGpqaDiamondStatus());
@@ -697,7 +720,8 @@ function App() {
         target !== "ppl_check" &&
         target !== "gpqa_diamond" &&
         target !== "humaneval" &&
-        target !== "terminal_bench"
+        target !== "terminal_bench" &&
+        target !== "mmmu_pro"
       ) {
         return;
       }
@@ -840,7 +864,8 @@ function App() {
             id === "ppl_check" ||
             id === "gpqa_diamond" ||
             id === "humaneval" ||
-            id === "terminal_bench",
+            id === "terminal_bench" ||
+            id === "mmmu_pro",
         )
       ) {
         setAppError("Open a GGUF model before running selected tests.");
@@ -849,6 +874,39 @@ function App() {
     }
     if (recipe.baseModel !== modelPath) {
       setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
+      return;
+    }
+    if (selectedRunIds.includes("mmmu_pro")) {
+      if (!mmmuProStatus.ready) {
+        setAppError(mmmuProStatus.detail);
+        return;
+      }
+
+      startOperation("Checking MMMU-Pro model and MMPROJ compatibility");
+      let apiStarted = false;
+      try {
+        await startModelInspectorApi({
+          benchmarkLabel: "MMMU-Pro compatibility check",
+          contextWindow: 512,
+          defaultEnableThinking: false,
+        });
+        apiStarted = true;
+      } catch (error) {
+        const detail = (error as Error).message;
+        if (/mmproj|vision projector|image input/i.test(detail)) {
+          setAppError("Loaded MMPROJ is incompatible with the current model.");
+        } else {
+          setAppError(`MMMU-Pro compatibility check failed: ${detail}`);
+        }
+        return;
+      } finally {
+        if (apiStarted) {
+          await stopModelInspectorApi().catch(() => undefined);
+        }
+        endOperation();
+      }
+
+      setAppError("MMMU-Pro execution is not wired yet.");
       return;
     }
     const runQueue = selectedRunIds.filter(
@@ -985,6 +1043,7 @@ function App() {
     terminalBenchStatus.ready,
     terminalBenchStatus.statusLabel,
     terminalBenchDatasetStatus.datasetReady,
+    mmmuProStatus,
     gpqaShotMode,
     gpqaConfig,
     humanevalConfig,
@@ -1382,6 +1441,7 @@ function App() {
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          mmmuProStatus={mmmuProStatus}
           terminalBenchStatus={terminalBenchStatus}
           terminalBenchDatasetStatus={terminalBenchDatasetStatus}
           gpqaShotMode={gpqaShotMode}

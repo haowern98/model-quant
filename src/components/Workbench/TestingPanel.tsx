@@ -2,6 +2,7 @@ import { useState } from "react";
 import type {
   GpqaDiamondStatus,
   HumanEvalStatus,
+  MmmuProStatus,
   TerminalBenchStatus,
 } from "../../types";
 import { ExplorerSectionHeader } from "./ExplorerTree";
@@ -10,6 +11,7 @@ interface TestingPanelProps {
   running: boolean;
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  mmmuProStatus: MmmuProStatus;
   terminalBenchStatus: TerminalBenchStatus;
   gpqaEditorActive: boolean;
   humanevalEditorActive: boolean;
@@ -29,6 +31,7 @@ export function TestingPanel({
   running,
   gpqaStatus,
   humanevalStatus,
+  mmmuProStatus,
   terminalBenchStatus,
   gpqaEditorActive,
   humanevalEditorActive,
@@ -102,7 +105,7 @@ export function TestingPanel({
               title="MMMU-Pro"
               description="Multimodal visual reasoning benchmark"
               meta="EvalScope · 1,730 samples · acc"
-              status="Not wired"
+              status={mmmuProStatus.statusLabel}
               icon="device-camera"
               active={mmmuProEditorActive}
               onClick={onOpenMmmuProDetails}
