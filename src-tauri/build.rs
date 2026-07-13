@@ -46,10 +46,20 @@ fn link_native_runtime() {
         .join("model_surgery_runtime")
         .join(native_profile);
     let mut llama_bin_dir = native_build_dir.join("bin").join(native_profile);
+    let mut mtmd_dir = native_build_dir
+        .join("llama.cpp")
+        .join("tools")
+        .join("mtmd")
+        .join(native_profile);
 
     if !runtime_dir.join("model_surgery_runtime.lib").exists() {
         runtime_dir = native_build_dir.join("model_surgery_runtime").join("Debug");
         llama_bin_dir = native_build_dir.join("bin").join("Debug");
+        mtmd_dir = native_build_dir
+            .join("llama.cpp")
+            .join("tools")
+            .join("mtmd")
+            .join("Debug");
     }
 
     if !runtime_dir.join("model_surgery_runtime.lib").exists() {
@@ -97,6 +107,8 @@ fn link_native_runtime() {
         &llama_bin_dir.join("llama-common.dll"),
         &target_test_deps_dir,
     );
+    copy_dll(&mtmd_dir.join("mtmd.dll"), target_profile_dir);
+    copy_dll(&mtmd_dir.join("mtmd.dll"), &target_test_deps_dir);
     copy_dll(&llama_bin_dir.join("ggml.dll"), target_profile_dir);
     copy_dll(&llama_bin_dir.join("ggml.dll"), &target_test_deps_dir);
     copy_all_matching_dlls(&llama_bin_dir, "ggml", target_profile_dir);

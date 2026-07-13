@@ -18,6 +18,13 @@ pub struct LoadedModel {
 pub struct ModelState(pub Mutex<Option<LoadedModel>>);
 pub struct ProjectorState(pub Mutex<Option<LoadedModel>>);
 
+pub(crate) fn projector_path(projector_state: &ProjectorState) -> Result<Option<String>, String> {
+    let guard = projector_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .as_ref()
+        .map(|projector| projector.path.to_string_lossy().into_owned()))
+}
+
 fn is_standalone_projector_gguf<'a>(
     architecture: &str,
     tensor_names: impl Iterator<Item = &'a str>,

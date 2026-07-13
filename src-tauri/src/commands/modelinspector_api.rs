@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
+use crate::commands::model::{projector_path, ProjectorState};
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
     ChatFinishReason, ChatGenerationParams, MsBaselineBenchmark, MsRuntimeChatSessionCounters,
@@ -20,6 +21,7 @@ use crate::quant::recipe::{QuantType, RecipeState};
 
 const API_CHAT_CONTEXT_TOKENS: u32 = 20_000;
 const API_CHAT_UNTIL_CONTEXT_MAX_TOKENS: u32 = 0;
+const MULTIMODAL_IMAGE_MARKER: &str = "<__media__>";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,6 +300,7 @@ pub async fn start_modelinspector_api(
     app: AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     recipe_state: State<'_, RecipeStore>,
+    projector_state: State<'_, ProjectorState>,
 ) -> Result<ModelInspectorApiStatus, String> {
     let recipe = recipe_state
         .0
@@ -345,32 +348,35 @@ pub async fn start_modelinspector_api(
     let targets = recipe_targets(&recipe);
     crate::progress::emit_api_output(&app, "ModelInspector API: loading in-process model session");
     let output_app = app.clone();
+    let projector_path = projector_path(&projector_state)?;
     let context_tokens = context_window.unwrap_or(API_CHAT_CONTEXT_TOKENS);
     if context_tokens == 0 {
         return Err("ModelInspector API context window must be greater than 0.".to_string());
     }
     let load_start = Instant::now();
-    let session = match crate::ffi::runtime_bindings::open_recipe_chat_session_with_progress(
-        &recipe.base_model,
-        &targets,
-        context_tokens,
-        |message| {
-            crate::progress::emit_api_output(&output_app, message);
-        },
-    ) {
-        Ok(session) => session,
-        Err(error) => {
-            let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
-            let was_cancelled = startup.cancel_requested();
-            guard.finish_start(&startup, None);
-            if was_cancelled || error.to_lowercase().contains("cancel") {
-                return Err("ModelInspector API startup cancelled".to_string());
+    let session =
+        match crate::ffi::runtime_bindings::open_recipe_chat_session_with_projector_and_progress(
+            &recipe.base_model,
+            projector_path.as_deref(),
+            &targets,
+            context_tokens,
+            |message| {
+                crate::progress::emit_api_output(&output_app, message);
+            },
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
+                let was_cancelled = startup.cancel_requested();
+                guard.finish_start(&startup, None);
+                if was_cancelled || error.to_lowercase().contains("cancel") {
+                    return Err("ModelInspector API startup cancelled".to_string());
+                }
+                return Err(format!(
+                    "Failed to load Model Inspector API model session: {error}"
+                ));
             }
-            return Err(format!(
-                "Failed to load Model Inspector API model session: {error}"
-            ));
-        }
-    };
+        };
     let load_ms = load_start.elapsed().as_secs_f64() * 1000.0;
     if startup.cancel_requested() {
         let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
@@ -414,6 +420,7 @@ pub async fn start_modelinspector_api(
         benchmark_label,
         benchmark_sample_count,
         default_enable_thinking,
+        vision_enabled: projector_path.is_some(),
         completion_count: AtomicU64::new(0),
         app: Some(app),
     });
@@ -511,6 +518,7 @@ struct HttpApiState {
     benchmark_label: Option<String>,
     benchmark_sample_count: Option<u64>,
     default_enable_thinking: Option<bool>,
+    vision_enabled: bool,
     completion_count: AtomicU64,
     app: Option<AppHandle>,
 }
@@ -729,34 +737,72 @@ fn stop_strings(stop: Option<&StopField>) -> Vec<String> {
 
 fn chat_messages_for_generation(
     messages: Option<&[ChatMessage]>,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<ChatGenerationMessages, String> {
     let messages = messages.unwrap_or_default();
-    messages
-        .iter()
-        .map(|message| {
-            let content = chat_message_content_text(&message.content).ok_or_else(|| {
-                "messages must use string content or text content parts".to_string()
-            })?;
-            Ok((message.role.clone(), content))
-        })
-        .collect()
+    let mut native_messages = Vec::with_capacity(messages.len());
+    let mut image_data_urls = Vec::new();
+    for message in messages {
+        let content = chat_message_content_for_generation(&message.content, &mut image_data_urls)?;
+        native_messages.push((message.role.clone(), content));
+    }
+    Ok(ChatGenerationMessages {
+        messages: native_messages,
+        image_data_urls,
+    })
 }
 
-fn chat_message_content_text(content: &Value) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChatGenerationMessages {
+    messages: Vec<(String, String)>,
+    image_data_urls: Vec<String>,
+}
+
+fn chat_message_content_for_generation(
+    content: &Value,
+    image_data_urls: &mut Vec<String>,
+) -> Result<String, String> {
     match content {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Ok(text.clone()),
         Value::Array(parts) => {
             let mut text = String::new();
             for part in parts {
                 let part_type = part.get("type").and_then(Value::as_str);
-                if part_type != Some("text") {
-                    return None;
+                match part_type {
+                    Some("text") => {
+                        text.push_str(part.get("text").and_then(Value::as_str).unwrap_or_default());
+                    }
+                    Some("image_url") => {
+                        let image_url = part
+                            .get("image_url")
+                            .and_then(|value| {
+                                value
+                                    .as_str()
+                                    .or_else(|| value.get("url").and_then(Value::as_str))
+                            })
+                            .ok_or("image_url content part requires a string url")?;
+                        if !image_url.starts_with("data:image/") {
+                            return Err(
+                                "image_url must be a base64 data:image URL; remote URLs are not supported"
+                                    .to_string(),
+                            );
+                        }
+                        text.push_str(MULTIMODAL_IMAGE_MARKER);
+                        image_data_urls.push(image_url.to_string());
+                    }
+                    _ => {
+                        return Err(
+                            "messages must use string content, text content parts, or image_url data:image parts"
+                                .to_string(),
+                        )
+                    }
                 }
-                text.push_str(part.get("text").and_then(Value::as_str).unwrap_or_default());
             }
-            Some(text)
+            Ok(text)
         }
-        _ => None,
+        _ => Err(
+            "messages must use string content, text content parts, or image_url data:image parts"
+                .to_string(),
+        ),
     }
 }
 
@@ -984,8 +1030,9 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
     };
     let native_params = config.to_native_params();
     let model = payload.model.unwrap_or_else(|| state.model_id.clone());
-    if messages.is_empty()
+    if messages.messages.is_empty()
         || messages
+            .messages
             .iter()
             .all(|(_, content)| content.trim().is_empty())
     {
@@ -995,6 +1042,19 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
             json!({
                 "error": {
                     "message": "Chat completion request must include at least one message",
+                    "type": "invalid_request_error"
+                }
+            }),
+        );
+    }
+
+    if !messages.image_data_urls.is_empty() && !state.vision_enabled {
+        return json_response(
+            400,
+            "Bad Request",
+            json!({
+                "error": {
+                    "message": "Image input requires an MMPROJ GGUF loaded in the MMPROJ section.",
                     "type": "invalid_request_error"
                 }
             }),
@@ -1014,24 +1074,46 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                 .lock()
                 .map_err(|e| e.to_string())
                 .and_then(|mut session| {
-                    session.generate_chat_streaming(
-                        &messages,
-                        &native_params,
-                        &config.native_stop_strings(),
-                        config.native_chat_template_kwargs_json().as_deref(),
-                        config.native_reasoning_format(),
-                        |visible_delta, reasoning_delta| {
-                            emit_streaming_completion_delta(
-                                app.as_ref(),
-                                benchmark_label.as_deref(),
-                                completion_count,
-                                benchmark_sample_count,
-                                visible_delta,
-                                reasoning_delta,
-                            );
-                            Ok(())
-                        },
-                    )
+                    if messages.image_data_urls.is_empty() {
+                        session.generate_chat_streaming(
+                            &messages.messages,
+                            &native_params,
+                            &config.native_stop_strings(),
+                            config.native_chat_template_kwargs_json().as_deref(),
+                            config.native_reasoning_format(),
+                            |visible_delta, reasoning_delta| {
+                                emit_streaming_completion_delta(
+                                    app.as_ref(),
+                                    benchmark_label.as_deref(),
+                                    completion_count,
+                                    benchmark_sample_count,
+                                    visible_delta,
+                                    reasoning_delta,
+                                );
+                                Ok(())
+                            },
+                        )
+                    } else {
+                        session.generate_chat_multimodal_streaming(
+                            &messages.messages,
+                            &messages.image_data_urls,
+                            &native_params,
+                            &config.native_stop_strings(),
+                            config.native_chat_template_kwargs_json().as_deref(),
+                            config.native_reasoning_format(),
+                            |visible_delta, reasoning_delta| {
+                                emit_streaming_completion_delta(
+                                    app.as_ref(),
+                                    benchmark_label.as_deref(),
+                                    completion_count,
+                                    benchmark_sample_count,
+                                    visible_delta,
+                                    reasoning_delta,
+                                );
+                                Ok(())
+                            },
+                        )
+                    }
                 }) {
                 Ok(output) => (
                     output.text,
@@ -1055,6 +1137,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         }
         None => {
             let prompt_chars = messages
+                .messages
                 .iter()
                 .map(|(_, content)| content.chars().count())
                 .sum::<usize>();
@@ -1150,8 +1233,9 @@ fn chat_completions_stream(
     };
     let native_params = config.to_native_params();
     let model = payload.model.unwrap_or_else(|| state.model_id.clone());
-    if messages.is_empty()
+    if messages.messages.is_empty()
         || messages
+            .messages
             .iter()
             .all(|(_, content)| content.trim().is_empty())
     {
@@ -1163,6 +1247,22 @@ fn chat_completions_stream(
                 json!({
                     "error": {
                         "message": "Chat completion request must include at least one message",
+                        "type": "invalid_request_error"
+                    }
+                }),
+            ),
+        );
+    }
+
+    if !messages.image_data_urls.is_empty() && !state.vision_enabled {
+        return write_response(
+            stream,
+            json_response(
+                400,
+                "Bad Request",
+                json!({
+                    "error": {
+                        "message": "Image input requires an MMPROJ GGUF loaded in the MMPROJ section.",
                         "type": "invalid_request_error"
                     }
                 }),
@@ -1197,31 +1297,61 @@ fn chat_completions_stream(
             let app = state.app.clone();
             let benchmark_label = state.benchmark_label.clone();
             let benchmark_sample_count = state.benchmark_sample_count;
-            match session.generate_chat_streaming(
-                &messages,
-                &native_params,
-                &config.native_stop_strings(),
-                config.native_chat_template_kwargs_json().as_deref(),
-                config.native_reasoning_format(),
-                |visible_delta, reasoning_delta| {
-                    emit_streaming_completion_delta(
-                        app.as_ref(),
-                        benchmark_label.as_deref(),
-                        completion_count,
-                        benchmark_sample_count,
-                        visible_delta,
-                        reasoning_delta,
-                    );
-                    write_chat_completion_stream_delta(
-                        stream,
-                        &id,
-                        created,
-                        &model,
-                        visible_delta,
-                        reasoning_delta,
-                    )
-                },
-            ) {
+            let generation = if messages.image_data_urls.is_empty() {
+                session.generate_chat_streaming(
+                    &messages.messages,
+                    &native_params,
+                    &config.native_stop_strings(),
+                    config.native_chat_template_kwargs_json().as_deref(),
+                    config.native_reasoning_format(),
+                    |visible_delta, reasoning_delta| {
+                        emit_streaming_completion_delta(
+                            app.as_ref(),
+                            benchmark_label.as_deref(),
+                            completion_count,
+                            benchmark_sample_count,
+                            visible_delta,
+                            reasoning_delta,
+                        );
+                        write_chat_completion_stream_delta(
+                            stream,
+                            &id,
+                            created,
+                            &model,
+                            visible_delta,
+                            reasoning_delta,
+                        )
+                    },
+                )
+            } else {
+                session.generate_chat_multimodal_streaming(
+                    &messages.messages,
+                    &messages.image_data_urls,
+                    &native_params,
+                    &config.native_stop_strings(),
+                    config.native_chat_template_kwargs_json().as_deref(),
+                    config.native_reasoning_format(),
+                    |visible_delta, reasoning_delta| {
+                        emit_streaming_completion_delta(
+                            app.as_ref(),
+                            benchmark_label.as_deref(),
+                            completion_count,
+                            benchmark_sample_count,
+                            visible_delta,
+                            reasoning_delta,
+                        );
+                        write_chat_completion_stream_delta(
+                            stream,
+                            &id,
+                            created,
+                            &model,
+                            visible_delta,
+                            reasoning_delta,
+                        )
+                    },
+                )
+            };
+            match generation {
                 Ok(output) => Ok((
                     output.text,
                     output.reasoning_text,
@@ -1234,6 +1364,7 @@ fn chat_completions_stream(
         None => {
             write_sse_headers(stream)?;
             let prompt_chars = messages
+                .messages
                 .iter()
                 .map(|(_, content)| content.chars().count())
                 .sum::<usize>();
@@ -1691,6 +1822,7 @@ mod tests {
             benchmark_label: None,
             benchmark_sample_count: None,
             default_enable_thinking: None,
+            vision_enabled: true,
             completion_count: AtomicU64::new(0),
             app: None,
         }
@@ -2012,9 +2144,77 @@ mod tests {
         let messages = chat_messages_for_generation(payload.messages.as_deref()).unwrap();
 
         assert_eq!(
-            messages,
+            messages.messages,
             vec![("user".to_string(), "Say hello".to_string())]
         );
+        assert!(messages.image_data_urls.is_empty());
+    }
+
+    #[test]
+    fn accepts_openai_data_image_content_parts_for_chat_messages() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this image?"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
+                ]
+            }]
+        }))
+        .unwrap();
+
+        let messages = chat_messages_for_generation(payload.messages.as_deref()).unwrap();
+
+        assert_eq!(
+            messages.messages,
+            vec![(
+                "user".to_string(),
+                format!("What is in this image?{MULTIMODAL_IMAGE_MARKER}")
+            )]
+        );
+        assert_eq!(messages.image_data_urls.len(), 1);
+        assert!(messages.image_data_urls[0].starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn rejects_image_input_without_a_loaded_projector() {
+        let body = json!({
+            "model": "Qwen3.5-9B-Q4_K_M.gguf",
+            "messages": [{
+                "role": "user",
+                "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}]
+            }]
+        })
+        .to_string();
+        let mut no_projector_state = state();
+        no_projector_state.vision_enabled = false;
+
+        let response = handle_request(
+            &request("POST", "/v1/chat/completions", Some("test-token"), &body),
+            &no_projector_state,
+        );
+
+        assert_eq!(response.status, 400);
+        assert!(response.body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("MMPROJ"));
+    }
+
+    #[test]
+    fn rejects_remote_image_urls_for_chat_messages() {
+        let payload = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "messages": [{
+                "role": "user",
+                "content": [{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}]
+            }]
+        }))
+        .unwrap();
+
+        let error = chat_messages_for_generation(payload.messages.as_deref()).unwrap_err();
+
+        assert!(error.contains("remote URLs are not supported"));
     }
 
     #[test]
