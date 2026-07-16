@@ -314,6 +314,15 @@ export interface HumanEvalDatasetStatus {
   expectedDatasetHash: string;
 }
 
+export interface MmmuProDatasetStatus {
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+}
+
 export interface TerminalBenchDatasetStatus {
   datasetReady: boolean;
   datasetStatusLabel: string;
@@ -336,6 +345,15 @@ export interface HumanEvalDatasetRow {
   entryPoint: string;
   prompt: string;
   canonicalSolution: string;
+}
+
+export interface MmmuProDatasetRow {
+  index: number;
+  taskId: string;
+  subject: string;
+  question: string;
+  choices: string[];
+  imageUrls: string[];
 }
 
 export interface GpqaDatasetRow {

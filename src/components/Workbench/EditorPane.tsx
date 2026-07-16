@@ -20,6 +20,8 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  MmmuProDatasetRow,
+  MmmuProDatasetStatus,
   MmmuProStatus,
   ProgressEvent,
   QuantType,
@@ -39,15 +41,22 @@ import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
+  deleteGpqaDiamondHarness,
   deleteHumanEvalDataset,
   deleteHumanEvalHarness,
+  deleteMmmuProDataset,
   downloadHumanEvalDataset,
+  downloadMmmuProDataset,
   getGpqaDiamondDatasetRows,
+  getGpqaDiamondStatus,
   getHumanEvalDatasetRows,
+  getMmmuProDatasetRows,
+  getMmmuProDatasetStatus,
   getTerminalBenchDatasetRows,
   getHumanEvalDatasetStatus,
   getHumanEvalStatus,
   getTensorValues,
+  installGpqaDiamondHarness,
   installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
 
@@ -354,7 +363,12 @@ export function EditorPane({
           onRunBenchmark={onRunTerminalBenchBenchmark}
         />
       ) : showingMmmuProBenchmark ? (
-        <MmmuProBenchmarkView status={mmmuProStatus} />
+        <MmmuProBenchmarkView
+          status={mmmuProStatus}
+          running={running}
+          onBeginSetup={onBeginBenchmarkSetup}
+          onEndSetup={onEndBenchmarkSetup}
+        />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : (
@@ -1863,8 +1877,148 @@ function TerminalBenchView({
   );
 }
 
-function MmmuProBenchmarkView({ status }: { status: MmmuProStatus }) {
+function MmmuProBenchmarkView({
+  status,
+  running,
+  onBeginSetup,
+  onEndSetup,
+}: {
+  status: MmmuProStatus;
+  running: boolean;
+  onBeginSetup: (message?: string | null) => void;
+  onEndSetup: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
+  const [datasetStatus, setDatasetStatus] = useState<MmmuProDatasetStatus>({
+    datasetReady: false,
+    datasetStatusLabel: "Missing",
+    datasetPath: null,
+    datasetHash: null,
+    datasetUrl: "AI-ModelScope/MMMU_Pro",
+    expectedDatasetHash: "EvalScope dataset cache marker",
+  });
+  const [harnessStatus, setHarnessStatus] = useState<GpqaDiamondStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [datasetRows, setDatasetRows] = useState<MmmuProDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
+  const harnessInstalled = Boolean(harnessStatus?.python && harnessStatus?.evalscope);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMmmuProDatasetStatus()
+      .then((nextDatasetStatus) => {
+        if (cancelled) return;
+        setDatasetStatus(nextDatasetStatus);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setDetail(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGpqaDiamondStatus()
+      .then((nextHarnessStatus) => {
+        if (!cancelled) setHarnessStatus(nextHarnessStatus);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setDetail(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getMmmuProDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetStatus.datasetReady]);
+
+  const refreshStatus = async (message = "Refreshing status") => {
+    setBusy(true);
+    onBeginSetup(message);
+    try {
+      const [datasetResult, harnessResult] = await Promise.allSettled([
+        getMmmuProDatasetStatus().then(setDatasetStatus),
+        getGpqaDiamondStatus().then(setHarnessStatus),
+      ]);
+      const failure = [datasetResult, harnessResult].find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
+      setDetail(null);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setDetail((error as Error).message);
+    } finally {
+      setBusy(false);
+      onEndSetup();
+    }
+  };
+
+  const changeHarness = async () => {
+    setBusy(true);
+    onBeginSetup(harnessInstalled ? "Deleting harness" : "Installing harness");
+    try {
+      const nextHarnessStatus = harnessInstalled
+        ? await deleteGpqaDiamondHarness()
+        : await installGpqaDiamondHarness();
+      setHarnessStatus(nextHarnessStatus);
+      setDetail(null);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setDetail((error as Error).message);
+    } finally {
+      setBusy(false);
+      onEndSetup();
+    }
+  };
+
+  const changeDataset = async () => {
+    setBusy(true);
+    onBeginSetup(datasetStatus.datasetReady ? "Deleting dataset" : "Downloading dataset");
+    try {
+      setDatasetStatus(
+        datasetStatus.datasetReady ? await deleteMmmuProDataset() : await downloadMmmuProDataset(),
+      );
+      setDetail(null);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setDetail((error as Error).message);
+    } finally {
+      setBusy(false);
+      onEndSetup();
+    }
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -1874,24 +2028,44 @@ function MmmuProBenchmarkView({ status }: { status: MmmuProStatus }) {
             <div className="benchmark-page-title">
               <h1>MMMU-Pro</h1>
               <div className="benchmark-page-meta">
-                <span>MMMU-Pro</span>
+                <span>EvalScope</span>
                 <span>|</span>
-                <span>multimodal reasoning</span>
+                <span>mmmu_pro</span>
                 <span>|</span>
-                <span>visual tasks</span>
+                <span>1,730 samples</span>
               </div>
-              <p>MMMU-Pro benchmark page for multimodal visual reasoning.</p>
+              <p>Official MMMU-Pro harness for multimodal visual reasoning through the in-process chat API.</p>
               <div className="benchmark-page-actions">
-                <button type="button" className="benchmark-action-button secondary" disabled>
-                  Download dataset
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running || (!datasetStatus.datasetReady && !harnessInstalled)}
+                  onClick={changeDataset}
+                >
+                  {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Verifying hash")}
+                >
                   Verify hash
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
-                  Install harness
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running}
+                  onClick={changeHarness}
+                >
+                  {harnessInstalled ? "Delete harness" : "Install harness"}
                 </button>
-                <button type="button" className="benchmark-action-button secondary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Refreshing status")}
+                >
                   Refresh
                 </button>
                 <button type="button" className="benchmark-action-button primary" disabled>
@@ -1921,16 +2095,67 @@ function MmmuProBenchmarkView({ status }: { status: MmmuProStatus }) {
               <div className="benchmark-copy">
                 <h2>About This Benchmark</h2>
                 <p>
-                  MMMU-Pro is reserved for evaluating multimodal visual reasoning through the
-                  app&apos;s in-process OpenAI-compatible chat API.
+                  MMMU-Pro evaluates multimodal visual reasoning through EvalScope using the
+                  app&apos;s in-process OpenAI-compatible chat API and a compatible MMPROJ.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains 1,730 multiple-choice visual reasoning tasks across 30
+                  academic subjects. Dataset images are available in the preview after download.
                 </p>
                 <h2>Availability</h2>
-                <p>Dataset, harness, configuration, and execution are not wired yet.</p>
+                <p>Dataset setup and preview are available. MMMU-Pro execution is not wired yet.</p>
               </div>
             ) : activeTab === "dataset" ? (
               <div className="benchmark-copy">
                 <h2>Dataset Preview</h2>
-                <p>MMMU-Pro dataset preview is not wired yet.</p>
+                {!datasetStatus.datasetReady ? (
+                  <p>Download and verify the dataset to preview samples and images.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset samples...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset samples found.</p>
+                ) : (
+                  <div className="benchmark-dataset-table" role="table" aria-label="MMMU-Pro dataset samples">
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Task</span>
+                      <span role="columnheader">Question</span>
+                      <span role="columnheader">Images</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.index}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">
+                          {row.taskId || "Unavailable"}
+                          {row.subject ? `\n${row.subject}` : ""}
+                        </span>
+                        <span role="cell">
+                          {row.question || "Unavailable"}
+                          {row.choices.length > 0 ? `\n${row.choices.join("\n")}` : ""}
+                        </span>
+                        <span role="cell">
+                          {row.imageUrls.length > 0 ? (
+                            <span style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                              {row.imageUrls.map((imageUrl, index) => (
+                                <img
+                                  key={`${row.index}-${index}`}
+                                  src={imageUrl}
+                                  alt={`${row.taskId || "MMMU-Pro sample"} image ${index + 1}`}
+                                  style={{ width: 112, maxHeight: 84, objectFit: "contain" }}
+                                />
+                              ))}
+                            </span>
+                          ) : (
+                            "No image"
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="benchmark-copy">
@@ -1940,14 +2165,23 @@ function MmmuProBenchmarkView({ status }: { status: MmmuProStatus }) {
             )}
           </div>
           <aside className="benchmark-page-side">
-            <p className="benchmark-readiness">{status.detail}</p>
+            <p className="benchmark-readiness">{detail ?? status.detail}</p>
             <BenchmarkInfoSection title="Harness">
               <BenchmarkInfoRow label="Framework" value="EvalScope" />
-              <BenchmarkInfoRow label="Dataset" value="MMMU-Pro" />
+              <BenchmarkInfoRow label="Dataset" value="mmmu_pro" />
               <BenchmarkInfoRow label="Metric" value="acc" />
               <BenchmarkInfoRow label="Status" value={status.statusLabel} />
               <BenchmarkInfoRow label="Vision model" value="Required" />
               <BenchmarkInfoRow label="MMPROJ" value="Required" />
+              <BenchmarkInfoRow label="Shared harness" value={harnessInstalled ? "Installed" : "Needs harness"} />
+              <BenchmarkInfoRow label="EvalScope" value={harnessStatus?.evalscope ?? "Unavailable"} />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="MMMU-Pro Dataset">
+              <BenchmarkInfoRow label="Downloaded" value={datasetStatus.datasetReady ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetStatusLabel === "Verified" ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Samples" value="1,730" />
+              <BenchmarkInfoRow label="Official asset" value="AI-ModelScope/MMMU_Pro" />
+              <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
             </BenchmarkInfoSection>
           </aside>
         </div>
