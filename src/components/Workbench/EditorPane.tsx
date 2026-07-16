@@ -365,6 +365,7 @@ export function EditorPane({
       ) : showingMmmuProBenchmark ? (
         <MmmuProBenchmarkView
           status={mmmuProStatus}
+          gpqaStatus={gpqaStatus}
           running={running}
           onBeginSetup={onBeginBenchmarkSetup}
           onEndSetup={onEndBenchmarkSetup}
@@ -1879,11 +1880,13 @@ function TerminalBenchView({
 
 function MmmuProBenchmarkView({
   status,
+  gpqaStatus,
   running,
   onBeginSetup,
   onEndSetup,
 }: {
   status: MmmuProStatus;
+  gpqaStatus: GpqaDiamondStatus;
   running: boolean;
   onBeginSetup: (message?: string | null) => void;
   onEndSetup: () => void;
@@ -1897,7 +1900,7 @@ function MmmuProBenchmarkView({
     datasetUrl: "AI-ModelScope/MMMU_Pro",
     expectedDatasetHash: "EvalScope dataset cache marker",
   });
-  const [harnessStatus, setHarnessStatus] = useState<GpqaDiamondStatus | null>(null);
+  const [harnessStatus, setHarnessStatus] = useState(gpqaStatus);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
   const [datasetRows, setDatasetRows] = useState<MmmuProDatasetRow[]>([]);
@@ -1921,18 +1924,8 @@ function MmmuProBenchmarkView({
   }, [status]);
 
   useEffect(() => {
-    let cancelled = false;
-    getGpqaDiamondStatus()
-      .then((nextHarnessStatus) => {
-        if (!cancelled) setHarnessStatus(nextHarnessStatus);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setDetail(error instanceof Error ? error.message : String(error));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [status]);
+    setHarnessStatus(gpqaStatus);
+  }, [gpqaStatus]);
 
   useEffect(() => {
     if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
