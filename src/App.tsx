@@ -22,6 +22,7 @@ import {
   cancelOfficialBenchmark,
   getGpqaDiamondStatus,
   getHumanEvalStatus,
+  getMmmuProDatasetStatus,
   getTerminalBenchStatus,
   getTerminalBenchDatasetStatus,
   installGpqaDiamondHarness,
@@ -49,6 +50,7 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   HumanEvalStatus,
+  MmmuProDatasetStatus,
   MmmuProStatus,
   RecipeEvalPreset,
   RecipeState,
@@ -104,6 +106,15 @@ const DEFAULT_TERMINAL_BENCH_DATASET_STATUS: TerminalBenchDatasetStatus = {
   datasetHash: null,
   datasetUrl: "terminal-bench/terminal-bench-2-1",
   expectedDatasetHash: "Harbor dataset cache marker",
+};
+
+const DEFAULT_MMMU_PRO_DATASET_STATUS: MmmuProDatasetStatus = {
+  datasetReady: false,
+  datasetStatusLabel: "Missing",
+  datasetPath: null,
+  datasetHash: null,
+  datasetUrl: "AI-ModelScope/MMMU_Pro",
+  expectedDatasetHash: "EvalScope dataset cache marker",
 };
 
 const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
@@ -425,6 +436,8 @@ function App() {
   );
   const [terminalBenchDatasetStatus, setTerminalBenchDatasetStatus] =
     useState<TerminalBenchDatasetStatus>(DEFAULT_TERMINAL_BENCH_DATASET_STATUS);
+  const [mmmuProDatasetStatus, setMmmuProDatasetStatus] =
+    useState<MmmuProDatasetStatus>(DEFAULT_MMMU_PRO_DATASET_STATUS);
   const [gpqaShotMode, setGpqaShotMode] =
     useState<GpqaShotMode>("five_shot_cot");
   const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
@@ -451,12 +464,26 @@ function App() {
         detail: "Load the matching MMPROJ projector before running MMMU-Pro.",
       };
     }
+    if (gpqaStatus.statusLabel !== "Ready" && gpqaStatus.statusLabel !== "Download") {
+      return {
+        ready: false,
+        statusLabel: gpqaStatus.statusLabel,
+        detail: `MMMU-Pro requires the shared EvalScope harness. ${gpqaStatus.detail}`,
+      };
+    }
+    if (!mmmuProDatasetStatus.datasetReady) {
+      return {
+        ready: false,
+        statusLabel: "Download",
+        detail: "Download and verify the MMMU-Pro dataset before running the benchmark.",
+      };
+    }
     return {
       ready: true,
       statusLabel: "Ready",
       detail: "A model and MMPROJ are loaded. Compatibility is checked before MMMU-Pro runs.",
     };
-  }, [modelPath, projectorPath]);
+  }, [gpqaStatus, mmmuProDatasetStatus.datasetReady, modelPath, projectorPath]);
 
   const refreshGpqaStatus = useCallback(async () => {
     try {
@@ -521,6 +548,18 @@ function App() {
     void refreshTerminalBenchDatasetStatus();
   }, [refreshTerminalBenchDatasetStatus]);
 
+  const refreshMmmuProDatasetStatus = useCallback(async () => {
+    try {
+      setMmmuProDatasetStatus(await getMmmuProDatasetStatus());
+    } catch {
+      setMmmuProDatasetStatus(DEFAULT_MMMU_PRO_DATASET_STATUS);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshMmmuProDatasetStatus();
+  }, [refreshMmmuProDatasetStatus]);
+
   const refreshAllBenchmarkStatuses = useCallback(async () => {
     startOperation("Refreshing benchmark statuses");
     try {
@@ -536,6 +575,7 @@ function App() {
           }),
         refreshTerminalBenchStatus(),
         refreshTerminalBenchDatasetStatus(),
+        refreshMmmuProDatasetStatus(),
       ]);
       setAppError(null);
     } finally {
@@ -544,6 +584,7 @@ function App() {
   }, [
     endOperation,
     refreshGpqaStatus,
+    refreshMmmuProDatasetStatus,
     refreshTerminalBenchDatasetStatus,
     refreshTerminalBenchStatus,
     startOperation,
@@ -555,6 +596,7 @@ function App() {
       void refreshHumanEvalStatus();
       void refreshTerminalBenchStatus();
       void refreshTerminalBenchDatasetStatus();
+      void refreshMmmuProDatasetStatus();
     };
     window.addEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
     return () => {
@@ -563,6 +605,7 @@ function App() {
   }, [
     refreshGpqaStatus,
     refreshHumanEvalStatus,
+    refreshMmmuProDatasetStatus,
     refreshTerminalBenchStatus,
     refreshTerminalBenchDatasetStatus,
   ]);
