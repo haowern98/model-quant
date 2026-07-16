@@ -21,6 +21,7 @@ import {
   cancelRecipeTest,
   cancelOfficialBenchmark,
   getGpqaDiamondStatus,
+  getHumanEvalDatasetStatus,
   getHumanEvalStatus,
   getMmmuProDatasetStatus,
   getTerminalBenchStatus,
@@ -49,6 +50,7 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalDatasetStatus,
   HumanEvalStatus,
   MmmuProDatasetStatus,
   MmmuProStatus,
@@ -106,6 +108,15 @@ const DEFAULT_TERMINAL_BENCH_DATASET_STATUS: TerminalBenchDatasetStatus = {
   datasetHash: null,
   datasetUrl: "terminal-bench/terminal-bench-2-1",
   expectedDatasetHash: "Harbor dataset cache marker",
+};
+
+const DEFAULT_HUMANEVAL_DATASET_STATUS: HumanEvalDatasetStatus = {
+  datasetReady: false,
+  datasetStatusLabel: "Missing",
+  datasetPath: null,
+  datasetHash: null,
+  datasetUrl: "openai_humaneval",
+  expectedDatasetHash: "EvalScope dataset cache marker",
 };
 
 const DEFAULT_MMMU_PRO_DATASET_STATUS: MmmuProDatasetStatus = {
@@ -431,6 +442,8 @@ function App() {
   const [humanevalStatus, setHumanEvalStatus] = useState<HumanEvalStatus>(
     DEFAULT_HUMANEVAL_STATUS,
   );
+  const [humanevalDatasetStatus, setHumanEvalDatasetStatus] =
+    useState<HumanEvalDatasetStatus>(DEFAULT_HUMANEVAL_DATASET_STATUS);
   const [terminalBenchStatus, setTerminalBenchStatus] = useState<TerminalBenchStatus>(
     DEFAULT_TERMINAL_BENCH_STATUS,
   );
@@ -485,6 +498,26 @@ function App() {
     };
   }, [gpqaStatus, mmmuProDatasetStatus.datasetReady, modelPath, projectorPath]);
 
+  const humanevalDisplayStatus = useMemo<HumanEvalStatus>(() => {
+    if (!humanevalStatus.ready || humanevalDatasetStatus.datasetReady) return humanevalStatus;
+    return {
+      ...humanevalStatus,
+      statusLabel: "Needs dataset",
+      detail: "Download and verify the HumanEval dataset before running the benchmark.",
+    };
+  }, [humanevalDatasetStatus.datasetReady, humanevalStatus]);
+
+  const terminalBenchDisplayStatus = useMemo<TerminalBenchStatus>(() => {
+    if (!terminalBenchStatus.ready || terminalBenchDatasetStatus.datasetReady) {
+      return terminalBenchStatus;
+    }
+    return {
+      ...terminalBenchStatus,
+      statusLabel: "Needs dataset",
+      detail: "Download and verify the Terminal-Bench dataset before running the benchmark.",
+    };
+  }, [terminalBenchDatasetStatus.datasetReady, terminalBenchStatus]);
+
   const refreshGpqaStatus = useCallback(async () => {
     try {
       setGpqaStatus(await getGpqaDiamondStatus());
@@ -520,6 +553,18 @@ function App() {
   }, []);
 
   useEffect(() => refreshHumanEvalStatus(), [refreshHumanEvalStatus]);
+
+  const refreshHumanEvalDatasetStatus = useCallback(async () => {
+    try {
+      setHumanEvalDatasetStatus(await getHumanEvalDatasetStatus());
+    } catch {
+      setHumanEvalDatasetStatus(DEFAULT_HUMANEVAL_DATASET_STATUS);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshHumanEvalDatasetStatus();
+  }, [refreshHumanEvalDatasetStatus]);
 
   const refreshTerminalBenchStatus = useCallback(async () => {
     try {
@@ -573,6 +618,7 @@ function App() {
               detail: (error as Error).message,
             });
           }),
+        refreshHumanEvalDatasetStatus(),
         refreshTerminalBenchStatus(),
         refreshTerminalBenchDatasetStatus(),
         refreshMmmuProDatasetStatus(),
@@ -584,6 +630,7 @@ function App() {
   }, [
     endOperation,
     refreshGpqaStatus,
+    refreshHumanEvalDatasetStatus,
     refreshMmmuProDatasetStatus,
     refreshTerminalBenchDatasetStatus,
     refreshTerminalBenchStatus,
@@ -594,6 +641,7 @@ function App() {
     const refreshBenchmarkStatuses = () => {
       void refreshGpqaStatus();
       void refreshHumanEvalStatus();
+      void refreshHumanEvalDatasetStatus();
       void refreshTerminalBenchStatus();
       void refreshTerminalBenchDatasetStatus();
       void refreshMmmuProDatasetStatus();
@@ -605,6 +653,7 @@ function App() {
   }, [
     refreshGpqaStatus,
     refreshHumanEvalStatus,
+    refreshHumanEvalDatasetStatus,
     refreshMmmuProDatasetStatus,
     refreshTerminalBenchStatus,
     refreshTerminalBenchDatasetStatus,
@@ -1483,9 +1532,9 @@ function App() {
           testMode={recipeTestMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
-          humanevalStatus={humanevalStatus}
+          humanevalStatus={humanevalDisplayStatus}
           mmmuProStatus={mmmuProStatus}
-          terminalBenchStatus={terminalBenchStatus}
+          terminalBenchStatus={terminalBenchDisplayStatus}
           terminalBenchDatasetStatus={terminalBenchDatasetStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
