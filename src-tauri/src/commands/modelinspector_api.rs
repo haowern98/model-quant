@@ -297,6 +297,7 @@ pub async fn start_modelinspector_api(
     benchmark_sample_count: Option<u64>,
     context_window: Option<u32>,
     default_enable_thinking: Option<bool>,
+    enable_multimodal: Option<bool>,
     app: AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     recipe_state: State<'_, RecipeStore>,
@@ -348,7 +349,11 @@ pub async fn start_modelinspector_api(
     let targets = recipe_targets(&recipe);
     crate::progress::emit_api_output(&app, "ModelInspector API: loading in-process model session");
     let output_app = app.clone();
-    let projector_path = projector_path(&projector_state)?;
+    let projector_path = if enable_multimodal.unwrap_or(false) {
+        projector_path(&projector_state)?
+    } else {
+        None
+    };
     let context_tokens = context_window.unwrap_or(API_CHAT_CONTEXT_TOKENS);
     if context_tokens == 0 {
         return Err("ModelInspector API context window must be greater than 0.".to_string());

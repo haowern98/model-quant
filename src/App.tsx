@@ -1020,6 +1020,7 @@ function App() {
           benchmarkLabel: "Multimodal preflight",
           contextWindow: 512,
           defaultEnableThinking: false,
+          enableMultimodal: true,
         });
         apiStarted = true;
         await runMultimodalPreflight(api);
