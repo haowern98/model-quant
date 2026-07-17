@@ -67,6 +67,45 @@ import type {
 import { setMockInvoke } from "./lib/tauri-bridge";
 import { projectorGroupLabel } from "./lib/format";
 
+const MULTIMODAL_PREFLIGHT_IMAGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==";
+
+async function runMultimodalPreflight(api: {
+  baseUrl: string | null;
+  apiKey: string | null;
+  modelId: string | null;
+}): Promise<void> {
+  if (!api.baseUrl || !api.apiKey || !api.modelId) {
+    throw new Error("Model Inspector API did not provide a usable multimodal endpoint.");
+  }
+
+  const response = await fetch(`${api.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${api.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: api.modelId,
+      max_tokens: 1,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Reply with OK." },
+            { type: "image_url", image_url: { url: MULTIMODAL_PREFLIGHT_IMAGE } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
+
 const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
   ready: false,
   statusLabel: "Needs harness",
@@ -974,21 +1013,22 @@ function App() {
         return;
       }
 
-      startOperation("Checking MMMU-Pro model and MMPROJ compatibility");
+      startOperation("Running multimodal preflight");
       let apiStarted = false;
       try {
-        await startModelInspectorApi({
-          benchmarkLabel: "MMMU-Pro compatibility check",
+        const api = await startModelInspectorApi({
+          benchmarkLabel: "Multimodal preflight",
           contextWindow: 512,
           defaultEnableThinking: false,
         });
         apiStarted = true;
+        await runMultimodalPreflight(api);
       } catch (error) {
         const detail = (error as Error).message;
         if (/mmproj|vision projector|image input/i.test(detail)) {
           setAppError("Loaded MMPROJ is incompatible with the current model.");
         } else {
-          setAppError(`MMMU-Pro compatibility check failed: ${detail}`);
+          setAppError(`Multimodal preflight failed: ${detail}`);
         }
         return;
       } finally {

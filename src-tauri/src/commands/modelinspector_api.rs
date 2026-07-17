@@ -839,6 +839,9 @@ fn handle_connection(stream: &mut TcpStream, state: &HttpApiState) -> Result<(),
 
     let raw = String::from_utf8_lossy(&buffer);
     let request = parse_request(&raw)?;
+    if request.method == "OPTIONS" {
+        return write_response(stream, json_response(204, "No Content", json!({})));
+    }
     if !is_public_route(&request) && !authorized(&request, &state.token) {
         return write_response(
             stream,
@@ -1627,7 +1630,7 @@ fn json_response(status: u16, reason: &'static str, body: serde_json::Value) -> 
 fn write_response(stream: &mut TcpStream, response: HttpResponse) -> Result<(), String> {
     let body = serde_json::to_string(&response.body).map_err(|e| e.to_string())?;
     let response_text = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         response.reason,
         body.as_bytes().len(),
@@ -1641,7 +1644,7 @@ fn write_response(stream: &mut TcpStream, response: HttpResponse) -> Result<(), 
 fn write_sse_headers(stream: &mut TcpStream) -> Result<(), String> {
     stream
         .write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
         )
         .map_err(|e| e.to_string())?;
     stream.flush().map_err(|e| e.to_string())
