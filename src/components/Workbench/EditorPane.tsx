@@ -1892,6 +1892,17 @@ function MmmuProBenchmarkView({
   onEndSetup: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
+  const [config, setConfig] = useState<GpqaBenchmarkConfigInput>({
+    thinking: "off",
+    temperature: "0",
+    topK: "40",
+    repeatPenalty: "1.1",
+    presencePenalty: "0",
+    topP: "0.95",
+    minP: "0.05",
+    contextWindow: "20000",
+    sampleLimit: "5",
+  });
   const [datasetStatus, setDatasetStatus] = useState<MmmuProDatasetStatus>({
     datasetReady: false,
     datasetStatusLabel: "Missing",
@@ -2012,6 +2023,29 @@ function MmmuProBenchmarkView({
       onEndSetup();
     }
   };
+
+  const updateIntegerField =
+    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+    };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) {
+        setConfig((current) => ({ ...current, [field]: value }));
+      }
+    };
+  const updateSignedDecimalField =
+    (field: "presencePenalty") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+        setConfig((current) => ({ ...current, [field]: value }));
+      }
+    };
 
   return (
     <section className="benchmark-editor-surface">
@@ -2152,8 +2186,83 @@ function MmmuProBenchmarkView({
               </div>
             ) : (
               <div className="benchmark-copy">
-                <h2>Configuration</h2>
-                <p>MMMU-Pro run configuration is not wired yet.</p>
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="MMMU-Pro thinking"
+                    value={config.thinking}
+                    onChange={(thinking) => setConfig((current) => ({ ...current, thinking }))}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="MMMU-Pro temperature"
+                    value={config.temperature}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("temperature")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="MMMU-Pro top K sampling"
+                    value={config.topK}
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("topK")}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="MMMU-Pro repeat penalty"
+                    value={config.repeatPenalty}
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("repeatPenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="MMMU-Pro presence penalty"
+                    value={config.presencePenalty}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateSignedDecimalField("presencePenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="MMMU-Pro top P sampling"
+                    value={config.topP}
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("topP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="MMMU-Pro min P sampling"
+                    value={config.minP}
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("minP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="MMMU-Pro context window"
+                    value={config.contextWindow}
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("contextWindow")}
+                  />
+                  <BenchmarkInfoRow label="Batch size" value="1" />
+                  <BenchmarkInputRow
+                    label="Samples"
+                    inputLabel="MMMU-Pro samples"
+                    value={config.sampleLimit}
+                    placeholder="1730"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("sampleLimit")}
+                  />
+                </BenchmarkInfoSection>
               </div>
             )}
           </div>
