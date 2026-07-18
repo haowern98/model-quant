@@ -860,6 +860,37 @@ pub async fn run_humaneval_benchmark(
 }
 
 #[tauri::command]
+pub async fn run_mmmu_pro_benchmark(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    config: Option<GpqaRunConfig>,
+    app: tauri::AppHandle,
+    api_state: State<'_, ModelInspectorApiState>,
+    runner: State<'_, OfficialBenchmarkRunner>,
+) -> Result<BenchmarkResult, String> {
+    let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
+    let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
+    let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let child = runner.child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_mmmu_pro_blocking(
+            base_url,
+            api_key,
+            model_id,
+            config,
+            tensor_summary,
+            model_summary,
+            runtime_totals,
+            app,
+            child,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn run_terminal_bench_benchmark(
     base_url: String,
     api_key: String,
@@ -1885,6 +1916,184 @@ fn run_humaneval_blocking(
         model_summary,
         runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
     )?)
+}
+
+fn run_mmmu_pro_blocking(
+    base_url: String,
+    api_key: String,
+    model_id: String,
+    config: Option<GpqaRunConfig>,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
+    app: tauri::AppHandle,
+    child_slot: Arc<Mutex<Option<Child>>>,
+) -> Result<BenchmarkResult, String> {
+    let mut effective_config = effective_gpqa_run_config(config)?;
+    effective_config.sample_limit = effective_config.sample_limit.min(MMMU_PRO_SAMPLE_COUNT);
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let shared_status = detect_gpqa_diamond_status(app_data_dir.clone());
+    if !shared_status.ready {
+        return Err(format!(
+            "MMMU-Pro requires the shared EvalScope harness. Current status: {}. {}",
+            shared_status.status_label, shared_status.detail
+        ));
+    }
+    let dataset_status = detect_mmmu_pro_dataset_status(&app_data_dir);
+    if !dataset_status.dataset_ready {
+        return Err("MMMU-Pro dataset is not downloaded or verified yet.".to_string());
+    }
+
+    let env_dir = gpqa_env_dir(&app_data_dir);
+    let venv_python = venv_python_path(&env_dir);
+    let evalscope_cli = evalscope_cli_path(&env_dir);
+    if !venv_python.exists() {
+        return Err(
+            "EvalScope MMMU-Pro harness is not installed. Install it from Model Evaluation first."
+                .to_string(),
+        );
+    }
+
+    let run_dir = gpqa_run_dir(&app_data_dir).join(format!("mmmu-pro-{}", unix_millis()));
+    std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
+
+    let generation_config = gpqa_generation_config(&effective_config).to_string();
+    let mut command = if evalscope_cli.exists() {
+        Command::new(&evalscope_cli)
+    } else {
+        let mut fallback = Command::new(&venv_python);
+        fallback.args(["-m", "evalscope"]);
+        fallback
+    };
+    hide_child_console(&mut command);
+    command
+        .args([
+            "eval".to_string(),
+            "--eval-type".to_string(),
+            "openai_api".to_string(),
+            "--model".to_string(),
+            model_id.clone(),
+            "--model-id".to_string(),
+            "modelinspector-mmmu-pro".to_string(),
+            "--api-url".to_string(),
+            base_url.clone(),
+            "--api-key".to_string(),
+            api_key.clone(),
+            "--datasets".to_string(),
+            "mmmu_pro".to_string(),
+            "--dataset-dir".to_string(),
+            mmmu_pro_dataset_cache_root(&app_data_dir)
+                .to_string_lossy()
+                .to_string(),
+            "--generation-config".to_string(),
+            generation_config,
+            "--limit".to_string(),
+            effective_config.sample_limit.to_string(),
+            "--eval-batch-size".to_string(),
+            "1".to_string(),
+            "--repeats".to_string(),
+            "1".to_string(),
+            "--work-dir".to_string(),
+            run_dir.to_string_lossy().to_string(),
+            "--no-timestamp".to_string(),
+            "--enable-progress-tracker".to_string(),
+            "--no-collect-perf".to_string(),
+        ])
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    crate::progress::emit_benchmark_output(&app, "EvalScope: starting MMMU-Pro official harness");
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("EvalScope: work directory {}", run_dir.display()),
+    );
+    crate::progress::ProgressEmitter::new(app.clone()).emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.05,
+        "MMMU-Pro running",
+    );
+
+    let start = Instant::now();
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to start MMMU-Pro harness: {e}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    {
+        let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            let _ = child.kill();
+            return Err("An official benchmark is already running.".to_string());
+        }
+        *guard = Some(child);
+    }
+
+    let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("EvalScope stdout"));
+    let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("EvalScope stderr"));
+    let status = loop {
+        {
+            let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+            let child = guard
+                .as_mut()
+                .ok_or("Official benchmark process was not available.")?;
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                break status;
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    {
+        let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
+        let _ = guard.take();
+    }
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+    let output = format!("{stdout}\n{stderr}");
+    if !status.success() {
+        if output.to_lowercase().contains("cancel") {
+            crate::progress::emit_benchmark_output(
+                &app,
+                "EvalScope: MMMU-Pro official harness cancelled",
+            );
+            return Err("MMMU-Pro benchmark cancelled".to_string());
+        }
+        crate::progress::emit_benchmark_output(
+            &app,
+            format!("EvalScope: MMMU-Pro official harness failed with status {status}"),
+        );
+        return Err(format!(
+            "MMMU-Pro harness failed with status {status}: {}",
+            output.trim()
+        ));
+    }
+
+    let report_path = find_mmmu_pro_report_path(&run_dir).ok_or_else(|| {
+        format!(
+            "EvalScope finished but did not write an MMMU-Pro report under {}",
+            run_dir.display()
+        )
+    })?;
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("EvalScope: MMMU-Pro report {}", report_path.display()),
+    );
+    crate::progress::emit_benchmark_output(&app, "EvalScope: MMMU-Pro official harness finished");
+    mmmu_pro_result_from_report(
+        &model_id,
+        &report_path,
+        start.elapsed().as_millis() as f64,
+        tensor_summary,
+        model_summary,
+        runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
+    )
 }
 
 fn read_pipe_streaming(
@@ -3572,6 +3781,25 @@ fn find_humaneval_report_path(run_dir: &Path) -> Option<PathBuf> {
     visit(&run_dir.join("reports")).or_else(|| visit(run_dir))
 }
 
+fn find_mmmu_pro_report_path(run_dir: &Path) -> Option<PathBuf> {
+    fn visit(dir: &Path) -> Option<PathBuf> {
+        let entries = std::fs::read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = visit(&path) {
+                    return Some(found);
+                }
+            } else if path.file_name().and_then(|name| name.to_str()) == Some("mmmu_pro.json") {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    visit(&run_dir.join("reports")).or_else(|| visit(run_dir))
+}
+
 fn ready_humaneval_report_path(run_dir: &Path) -> Option<PathBuf> {
     let path = find_humaneval_report_path(run_dir)?;
     let report = std::fs::read_to_string(&path).ok()?;
@@ -3725,6 +3953,84 @@ fn humaneval_result_from_report(
                 same_prediction_count: 0,
                 baseline_accuracy: None,
                 recipe_accuracy: pass_at_1,
+                accuracy_delta: None,
+                baseline_avg_margin: None,
+                recipe_avg_margin: 0.0,
+                margin_delta: None,
+                baseline_avg_correct_nll: None,
+                recipe_avg_correct_nll: 0.0,
+            }],
+            sample_audits: Vec::new(),
+        }),
+    })
+}
+
+fn mmmu_pro_result_from_report(
+    model_id: &str,
+    report_path: &Path,
+    elapsed_ms: f64,
+    tensor_summary: ModelInspectorApiTensorSummary,
+    model_summary: ModelInspectorApiModelSummary,
+    runtime_summary: ModelInspectorApiRuntimeSummary,
+) -> Result<BenchmarkResult, String> {
+    let report_text = std::fs::read_to_string(report_path)
+        .map_err(|e| format!("Failed to read EvalScope MMMU-Pro report: {e}"))?;
+    let report_json: serde_json::Value = serde_json::from_str(&report_text)
+        .map_err(|e| format!("Failed to parse EvalScope MMMU-Pro report JSON: {e}"))?;
+    let accuracy = extract_accuracy_from_json(&report_json).unwrap_or(0.0);
+    let metric = extract_metric_from_json(&report_json).unwrap_or_else(|| "mean_acc".to_string());
+    let sample_count =
+        extract_sample_count_from_json(&report_json).unwrap_or(MMMU_PRO_SAMPLE_COUNT);
+    Ok(BenchmarkResult {
+        prompt_eval_tps: runtime_summary.prompt_eval_tps,
+        token_gen_tps: runtime_summary.token_gen_tps,
+        ttft_ms: runtime_summary.ttft_ms,
+        prompt_eval_ms: runtime_summary.prompt_eval_ms,
+        generation_ms: runtime_summary.generation_ms,
+        vram_peak_mb: runtime_summary.vram_peak_mb,
+        vram_allocated_mb: runtime_summary.vram_allocated_mb,
+        disk_size_mb: 0.0,
+        elapsed_ms,
+        load_ms: runtime_summary.load_ms,
+        test_mode: "official_mmmu_pro".to_string(),
+        status_message: format!("MMMU-Pro EvalScope official harness completed for {model_id}."),
+        native_runtime: Some(format!(
+            "EvalScope MMMU-Pro report: {}",
+            report_path.display()
+        )),
+        model_tensor_count: Some(model_summary.tensor_count),
+        model_metadata_count: Some(model_summary.metadata_count),
+        copied_tensor_count: tensor_summary.copied_tensor_count,
+        converted_tensor_count: tensor_summary.converted_tensor_count,
+        converted_bytes_before: tensor_summary.converted_bytes_before,
+        converted_bytes_after: tensor_summary.converted_bytes_after,
+        requested_target_count: tensor_summary.requested_target_count,
+        verified_target_count: tensor_summary.verified_target_count,
+        baseline_benchmark: None,
+        quality_eval: None,
+        standard_eval: Some(StandardEvalReport {
+            sample_count,
+            task_count: 1,
+            baseline_accuracy: None,
+            recipe_accuracy: accuracy,
+            accuracy_delta: None,
+            correct_to_wrong_count: 0,
+            wrong_to_correct_count: 0,
+            baseline_avg_margin: None,
+            recipe_avg_margin: 0.0,
+            margin_delta: None,
+            tasks: vec![StandardEvalTaskReport {
+                task: "mmmu_pro".to_string(),
+                metric,
+                n_shot: 0,
+                sample_count,
+                baseline_correct_count: None,
+                recipe_correct_count: (accuracy * sample_count as f64).round() as u64,
+                correct_to_wrong_count: 0,
+                wrong_to_correct_count: 0,
+                same_prediction_count: 0,
+                baseline_accuracy: None,
+                recipe_accuracy: accuracy,
                 accuracy_delta: None,
                 baseline_avg_margin: None,
                 recipe_avg_margin: 0.0,
@@ -4435,5 +4741,19 @@ mod tests {
         assert_eq!(standard_eval.recipe_accuracy, 0.5);
         assert_eq!(standard_eval.tasks[0].metric, "acc");
         assert_eq!(standard_eval.tasks[0].sample_count, 198);
+    }
+
+    #[test]
+    fn finds_mmmu_pro_report_path_in_nested_reports() {
+        let report_dir =
+            std::env::temp_dir().join(format!("mmmu-pro-report-test-{}", unix_millis()));
+        let nested_dir = report_dir.join("reports").join("modelinspector-mmmu-pro");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        let report_path = nested_dir.join("mmmu_pro.json");
+        std::fs::write(&report_path, "{}").unwrap();
+
+        assert_eq!(find_mmmu_pro_report_path(&report_dir), Some(report_path));
+
+        let _ = std::fs::remove_dir_all(&report_dir);
     }
 }

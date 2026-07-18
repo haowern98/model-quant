@@ -69,6 +69,7 @@ pub fn run() {
             commands::official_benchmarks::delete_humaneval_harness,
             commands::official_benchmarks::run_gpqa_diamond_benchmark,
             commands::official_benchmarks::run_humaneval_benchmark,
+            commands::official_benchmarks::run_mmmu_pro_benchmark,
             commands::official_benchmarks::run_terminal_bench_benchmark,
             commands::official_benchmarks::cancel_official_benchmark,
         ])

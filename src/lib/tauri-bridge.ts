@@ -261,6 +261,20 @@ export async function runHumanEvalBenchmark(
   });
 }
 
+export async function runMmmuProBenchmark(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  config: GpqaBenchmarkConfig,
+): Promise<BenchmarkResult> {
+  return invoke<BenchmarkResult>("run_mmmu_pro_benchmark", {
+    baseUrl,
+    apiKey,
+    modelId,
+    config,
+  });
+}
+
 export async function runTerminalBenchBenchmark(
   baseUrl: string,
   apiKey: string,

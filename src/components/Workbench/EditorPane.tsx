@@ -96,6 +96,7 @@ interface EditorPaneProps {
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
+  mmmuProConfig: GpqaBenchmarkConfigInput;
   terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
@@ -115,12 +116,14 @@ interface EditorPaneProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onMmmuProConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onTerminalBenchConfigChange: (config: TerminalBenchBenchmarkConfigInput) => void;
   onInstallTerminalBenchHarness: () => void;
   onDownloadTerminalBenchDataset: () => void;
   onDeleteTerminalBenchDataset: () => void;
   onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunMmmuProBenchmark: () => void;
   onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
@@ -139,6 +142,7 @@ function basename(path: string | null): string {
 function benchmarkResultLabel(result: BenchmarkResult): string | null {
   if (result.testMode === "official_gpqa_diamond") return "GPQA Diamond";
   if (result.testMode === "official_humaneval") return "HumanEval";
+  if (result.testMode === "official_mmmu_pro") return "MMMU-Pro";
   if (result.testMode === "official_terminal_bench") return "Terminal-Bench 2.1";
   return null;
 }
@@ -168,6 +172,7 @@ export function EditorPane({
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
+  mmmuProConfig,
   terminalBenchConfig,
   onSelectEditor,
   onCloseEditor,
@@ -187,12 +192,14 @@ export function EditorPane({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onMmmuProConfigChange,
   onTerminalBenchConfigChange,
   onInstallTerminalBenchHarness,
   onDownloadTerminalBenchDataset,
   onDeleteTerminalBenchDataset,
   onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunMmmuProBenchmark,
   onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
@@ -366,9 +373,12 @@ export function EditorPane({
         <MmmuProBenchmarkView
           status={mmmuProStatus}
           gpqaStatus={gpqaStatus}
+          config={mmmuProConfig}
           running={running}
           onBeginSetup={onBeginBenchmarkSetup}
           onEndSetup={onEndBenchmarkSetup}
+          onConfigChange={onMmmuProConfigChange}
+          onRunBenchmark={onRunMmmuProBenchmark}
         />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
@@ -1881,28 +1891,23 @@ function TerminalBenchView({
 function MmmuProBenchmarkView({
   status,
   gpqaStatus,
+  config,
   running,
   onBeginSetup,
   onEndSetup,
+  onConfigChange,
+  onRunBenchmark,
 }: {
   status: MmmuProStatus;
   gpqaStatus: GpqaDiamondStatus;
+  config: GpqaBenchmarkConfigInput;
   running: boolean;
   onBeginSetup: (message?: string | null) => void;
   onEndSetup: () => void;
+  onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onRunBenchmark: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
-  const [config, setConfig] = useState<GpqaBenchmarkConfigInput>({
-    thinking: "off",
-    temperature: "0",
-    topK: "40",
-    repeatPenalty: "1.1",
-    presencePenalty: "0",
-    topP: "0.95",
-    minP: "0.05",
-    contextWindow: "20000",
-    sampleLimit: "5",
-  });
   const [datasetStatus, setDatasetStatus] = useState<MmmuProDatasetStatus>({
     datasetReady: false,
     datasetStatusLabel: "Missing",
@@ -2028,14 +2033,14 @@ function MmmuProBenchmarkView({
     (field: "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
-      if (/^\d*$/.test(value)) setConfig((current) => ({ ...current, [field]: value }));
+      if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
     };
   const updateDecimalField =
     (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*(?:\.\d*)?$/.test(value)) {
-        setConfig((current) => ({ ...current, [field]: value }));
+        onConfigChange({ ...config, [field]: value });
       }
     };
   const updateSignedDecimalField =
@@ -2043,7 +2048,7 @@ function MmmuProBenchmarkView({
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^-?\d*(?:\.\d*)?$/.test(value)) {
-        setConfig((current) => ({ ...current, [field]: value }));
+        onConfigChange({ ...config, [field]: value });
       }
     };
 
@@ -2095,7 +2100,12 @@ function MmmuProBenchmarkView({
                 >
                   Refresh
                 </button>
-                <button type="button" className="benchmark-action-button primary" disabled>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={busy || running || !status.ready}
+                  onClick={onRunBenchmark}
+                >
                   Run Benchmark
                 </button>
               </div>
@@ -2131,7 +2141,7 @@ function MmmuProBenchmarkView({
                   academic subjects. Dataset images are available in the preview after download.
                 </p>
                 <h2>Availability</h2>
-                <p>Dataset setup and preview are available. MMMU-Pro execution is not wired yet.</p>
+                <p>MMMU-Pro runs through EvalScope after multimodal compatibility is verified.</p>
               </div>
             ) : activeTab === "dataset" ? (
               <div className="benchmark-copy">
@@ -2191,7 +2201,7 @@ function MmmuProBenchmarkView({
                     label="Thinking"
                     selectLabel="MMMU-Pro thinking"
                     value={config.thinking}
-                    onChange={(thinking) => setConfig((current) => ({ ...current, thinking }))}
+                    onChange={(thinking) => onConfigChange({ ...config, thinking })}
                     options={[
                       { value: "off", label: "Off" },
                       { value: "on", label: "On" },
