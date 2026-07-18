@@ -1888,6 +1888,39 @@ function TerminalBenchView({
   );
 }
 
+const MMMU_PRO_SUBJECTS = [
+  "Accounting",
+  "Agriculture",
+  "Architecture and Engineering",
+  "Art",
+  "Art Theory",
+  "Basic Medical Science",
+  "Biology",
+  "Chemistry",
+  "Clinical Medicine",
+  "Computer Science",
+  "Design",
+  "Diagnostics and Laboratory Medicine",
+  "Economics",
+  "Electronics",
+  "Energy and Power",
+  "Finance",
+  "Geography",
+  "History",
+  "Literature",
+  "Manage",
+  "Marketing",
+  "Materials",
+  "Math",
+  "Mechanical Engineering",
+  "Music",
+  "Pharmacy",
+  "Physics",
+  "Psychology",
+  "Public Health",
+  "Sociology",
+] as const;
+
 function MmmuProBenchmarkView({
   status,
   gpqaStatus,
@@ -2264,14 +2297,46 @@ function MmmuProBenchmarkView({
                     onChange={updateIntegerField("contextWindow")}
                   />
                   <BenchmarkInfoRow label="Batch size" value="1" />
-                  <BenchmarkInputRow
-                    label="Samples"
-                    inputLabel="MMMU-Pro samples"
-                    value={config.sampleLimit}
-                    placeholder="1730"
-                    inputMode="numeric"
-                    onChange={updateIntegerField("sampleLimit")}
-                  />
+                  <div className="mmmu-pro-subjects" aria-label="MMMU-Pro subject configuration">
+                    <div className="mmmu-pro-subjects-header">
+                      <span>Subject Selection</span>
+                      <span>30 subjects</span>
+                    </div>
+                    <div className="mmmu-pro-subjects-actions">
+                      <button type="button" className="benchmark-action-button secondary">
+                        Select all
+                      </button>
+                      <button type="button" className="benchmark-action-button secondary">
+                        Clear
+                      </button>
+                    </div>
+                    <div className="mmmu-pro-subjects-table" role="table" aria-label="MMMU-Pro subjects">
+                      <div className="mmmu-pro-subject-row header" role="row">
+                        <span role="columnheader">Subject</span>
+                        <span role="columnheader">Samples</span>
+                        <span role="columnheader">Include</span>
+                      </div>
+                      {MMMU_PRO_SUBJECTS.map((subject) => (
+                        <div className="mmmu-pro-subject-row" role="row" key={subject}>
+                          <span role="cell">{subject}</span>
+                          <span role="cell">
+                            <input
+                              aria-label={`${subject} samples`}
+                              className="benchmark-config-input mmmu-pro-subject-samples"
+                              defaultValue={config.sampleLimit}
+                              inputMode="numeric"
+                              readOnly
+                            />
+                          </span>
+                          <span role="cell">
+                            <span className="run-menu-check" aria-label={`${subject} included`} role="checkbox" aria-checked="true">
+                              <span className="codicon codicon-check" aria-hidden="true" />
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </BenchmarkInfoSection>
               </div>
             )}

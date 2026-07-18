@@ -2196,6 +2196,63 @@ body.resizing-projector * {
   color: var(--vscode-muted);
 }
 
+.mmmu-pro-subjects {
+  border-top: 1px solid var(--vscode-border-subtle);
+  color: var(--vscode-muted);
+  font-size: 13px;
+}
+
+.mmmu-pro-subjects-header {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mmmu-pro-subjects-header span:first-child {
+  color: var(--vscode-text);
+}
+
+.mmmu-pro-subjects-actions {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.mmmu-pro-subjects-table {
+  border-top: 1px solid var(--vscode-border-subtle);
+}
+
+.mmmu-pro-subject-row {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 52px;
+  align-items: center;
+  column-gap: 10px;
+  border-bottom: 1px solid var(--vscode-border-subtle);
+}
+
+.mmmu-pro-subject-row > span {
+  min-width: 0;
+}
+
+.mmmu-pro-subject-row.header {
+  min-height: 30px;
+  color: var(--vscode-muted);
+  font-weight: 600;
+}
+
+.mmmu-pro-subject-row > span:last-child {
+  display: flex;
+  justify-content: center;
+}
+
+.mmmu-pro-subject-samples {
+  width: 72px;
+  height: 28px;
+  padding: 0 7px;
+}
+
 .benchmark-icon-button {
   width: 30px;
   height: 30px;
