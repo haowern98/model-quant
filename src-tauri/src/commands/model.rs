@@ -26,18 +26,31 @@ pub(crate) fn projector_path(projector_state: &ProjectorState) -> Result<Option<
 }
 
 fn is_matching_multimodal_identity(
+    model_architecture: &str,
     model_name: &str,
     projector_name: &str,
     model_basename: &str,
     projector_basename: &str,
 ) -> bool {
     if !model_name.is_empty() && !projector_name.is_empty() {
-        return model_name == projector_name;
+        if model_name == projector_name {
+            return true;
+        }
     }
 
-    !model_basename.is_empty()
+    let matching_basename = !model_basename.is_empty()
         && !projector_basename.is_empty()
-        && model_basename == projector_basename
+        && model_basename == projector_basename;
+    if matching_basename {
+        return true;
+    }
+
+    // Qwen3.5 fine-tunes retain the qwen35 architecture but usually have a
+    // different general.name from the upstream Qwen projector.
+    model_architecture.eq_ignore_ascii_case("qwen35")
+        && format!("{projector_name} {projector_basename}")
+            .to_ascii_lowercase()
+            .contains("qwen3.5")
 }
 
 pub(crate) fn multimodal_projector_path(
@@ -48,11 +61,14 @@ pub(crate) fn multimodal_projector_path(
         projector_path(projector_state)?.ok_or_else(|| "No MMPROJ loaded.".to_string())?;
     let model_identity = read_gguf_identity(PathBuf::from(model_path).as_path())
         .map_err(|error| format!("Could not read model GGUF identity: {error}"))?;
+    let model = parse_gguf(PathBuf::from(model_path).as_path())
+        .map_err(|error| format!("Could not read model GGUF metadata: {error}"))?;
     let projector_identity = read_gguf_identity(PathBuf::from(&projector_path).as_path())
         .map_err(|error| format!("Could not read MMPROJ GGUF identity: {error}"))?;
 
     if projector_identity.file_type != "mmproj"
         || !is_matching_multimodal_identity(
+            &model.metadata.architecture,
             &model_identity.name,
             &projector_identity.name,
             &model_identity.basename,
@@ -274,16 +290,25 @@ mod tests {
     #[test]
     fn accepts_only_matching_model_and_projector_identities() {
         assert!(is_matching_multimodal_identity(
+            "qwen35",
             "Qwen_Qwen3.5 9B",
             "Qwen_Qwen3.5 9B",
             "Qwen_Qwen3.5",
             "Qwen_Qwen3.5",
         ));
         assert!(!is_matching_multimodal_identity(
+            "qwen35",
             "Qwen_Qwen3.5 9B",
             "Zai org_GLM 4.6V Flash",
             "Qwen_Qwen3.5",
             "zai-org_GLM",
+        ));
+        assert!(is_matching_multimodal_identity(
+            "qwen35",
+            "Ornith 1.0 9B",
+            "Qwen_Qwen3.5 9B",
+            "Ornith-1.0",
+            "Qwen_Qwen3.5",
         ));
     }
 }
