@@ -1065,6 +1065,13 @@ function App() {
       setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
       return;
     }
+    if (
+      selectedRunIds.includes("mmmu_pro") &&
+      (!mmmuProStatus.ready || !mmmuProDatasetStatus.datasetReady)
+    ) {
+      setAppError(mmmuProStatus.detail);
+      return;
+    }
     const runQueue = selectedRunIds.filter(
       (id) =>
         id === "ppl_check" ||
