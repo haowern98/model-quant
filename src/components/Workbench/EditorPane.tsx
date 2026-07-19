@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { MMMU_PRO_SUBJECTS } from "../../types";
 import { TensorTable } from "../DetailPanel/TensorTable";
 import type {
   BenchmarkResult,
@@ -23,6 +24,7 @@ import type {
   MmmuProDatasetRow,
   MmmuProDatasetStatus,
   MmmuProStatus,
+  MmmuProBenchmarkConfigInput,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -373,7 +375,7 @@ export function EditorPane({
         <MmmuProBenchmarkView
           status={mmmuProStatus}
           gpqaStatus={gpqaStatus}
-          config={mmmuProConfig}
+          config={mmmuProConfig as MmmuProBenchmarkConfigInput}
           running={running}
           onBeginSetup={onBeginBenchmarkSetup}
           onEndSetup={onEndBenchmarkSetup}
@@ -1888,39 +1890,6 @@ function TerminalBenchView({
   );
 }
 
-const MMMU_PRO_SUBJECTS = [
-  "Accounting",
-  "Agriculture",
-  "Architecture and Engineering",
-  "Art",
-  "Art Theory",
-  "Basic Medical Science",
-  "Biology",
-  "Chemistry",
-  "Clinical Medicine",
-  "Computer Science",
-  "Design",
-  "Diagnostics and Laboratory Medicine",
-  "Economics",
-  "Electronics",
-  "Energy and Power",
-  "Finance",
-  "Geography",
-  "History",
-  "Literature",
-  "Manage",
-  "Marketing",
-  "Materials",
-  "Math",
-  "Mechanical Engineering",
-  "Music",
-  "Pharmacy",
-  "Physics",
-  "Psychology",
-  "Public Health",
-  "Sociology",
-] as const;
-
 function MmmuProBenchmarkView({
   status,
   gpqaStatus,
@@ -1933,11 +1902,11 @@ function MmmuProBenchmarkView({
 }: {
   status: MmmuProStatus;
   gpqaStatus: GpqaDiamondStatus;
-  config: GpqaBenchmarkConfigInput;
+  config: MmmuProBenchmarkConfigInput;
   running: boolean;
   onBeginSetup: (message?: string | null) => void;
   onEndSetup: () => void;
-  onConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onConfigChange: (config: MmmuProBenchmarkConfigInput) => void;
   onRunBenchmark: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
@@ -2084,6 +2053,23 @@ function MmmuProBenchmarkView({
         onConfigChange({ ...config, [field]: value });
       }
     };
+  const subjectConfigs = MMMU_PRO_SUBJECTS.map((subject) => {
+    const saved = config.subjects?.find((entry) => entry.subject === subject.id);
+    return saved ?? { subject: subject.id, included: true, sampleLimit: config.sampleLimit };
+  });
+  const updateSubjects = (subjects: typeof subjectConfigs) => {
+    onConfigChange({ ...config, subjects });
+  };
+  const updateSubject = (
+    subjectId: (typeof MMMU_PRO_SUBJECTS)[number]["id"],
+    update: Partial<(typeof subjectConfigs)[number]>,
+  ) => {
+    updateSubjects(
+      subjectConfigs.map((subject) =>
+        subject.subject === subjectId ? { ...subject, ...update } : subject,
+      ),
+    );
+  };
 
   return (
     <section className="benchmark-editor-surface">
@@ -2303,10 +2289,24 @@ function MmmuProBenchmarkView({
                       <span>30 subjects</span>
                     </div>
                     <div className="mmmu-pro-subjects-actions">
-                      <button type="button" className="benchmark-action-button secondary">
+                      <button
+                        type="button"
+                        className="benchmark-action-button secondary"
+                        disabled={busy || running}
+                        onClick={() =>
+                          updateSubjects(subjectConfigs.map((subject) => ({ ...subject, included: true })))
+                        }
+                      >
                         Select all
                       </button>
-                      <button type="button" className="benchmark-action-button secondary">
+                      <button
+                        type="button"
+                        className="benchmark-action-button secondary"
+                        disabled={busy || running}
+                        onClick={() =>
+                          updateSubjects(subjectConfigs.map((subject) => ({ ...subject, included: false })))
+                        }
+                      >
                         Clear
                       </button>
                     </div>
@@ -2316,22 +2316,44 @@ function MmmuProBenchmarkView({
                         <span role="columnheader">Samples</span>
                         <span role="columnheader">Include</span>
                       </div>
-                      {MMMU_PRO_SUBJECTS.map((subject) => (
-                        <div className="mmmu-pro-subject-row" role="row" key={subject}>
-                          <span role="cell">{subject}</span>
+                      {subjectConfigs.map((subject) => (
+                        <div className="mmmu-pro-subject-row" role="row" key={subject.subject}>
+                          <span role="cell">
+                            {MMMU_PRO_SUBJECTS.find((entry) => entry.id === subject.subject)?.label ?? subject.subject}
+                          </span>
                           <span role="cell">
                             <input
-                              aria-label={`${subject} samples`}
+                              aria-label={`${subject.subject} samples`}
                               className="benchmark-config-input mmmu-pro-subject-samples"
-                              defaultValue={config.sampleLimit}
+                              value={subject.sampleLimit}
                               inputMode="numeric"
-                              readOnly
+                              disabled={busy || running}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value;
+                                if (/^\d*$/.test(value)) updateSubject(subject.subject, { sampleLimit: value });
+                              }}
                             />
                           </span>
                           <span role="cell">
-                            <span className="run-menu-check" aria-label={`${subject} included`} role="checkbox" aria-checked="true">
-                              <span className="codicon codicon-check" aria-hidden="true" />
-                            </span>
+                            <span
+                              className="run-menu-check"
+                              aria-label={`${subject.subject} included`}
+                              role="checkbox"
+                              aria-checked={subject.included}
+                              aria-disabled={busy || running}
+                              tabIndex={busy || running ? -1 : 0}
+                              onClick={() => {
+                                if (!busy && !running) updateSubject(subject.subject, { included: !subject.included });
+                              }}
+                              onKeyDown={(event) => {
+                                if ((event.key === " " || event.key === "Enter") && !busy && !running) {
+                                  event.preventDefault();
+                                  updateSubject(subject.subject, { included: !subject.included });
+                                }
+                              }}
+                            >
+                              {subject.included ? <span className="codicon codicon-check" aria-hidden="true" /> : null}
+                             </span>
                           </span>
                         </div>
                       ))}

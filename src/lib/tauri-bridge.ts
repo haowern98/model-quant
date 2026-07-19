@@ -11,6 +11,7 @@ import type {
   HardwareSnapshot,
   ModelInspectorApiStatus,
   GpqaBenchmarkConfig,
+  MmmuProBenchmarkConfig,
   GpqaDatasetRow,
   GpqaDiamondStatus,
   GpqaShotMode,
@@ -265,7 +266,7 @@ export async function runMmmuProBenchmark(
   baseUrl: string,
   apiKey: string,
   modelId: string,
-  config: GpqaBenchmarkConfig,
+  config: MmmuProBenchmarkConfig,
 ): Promise<BenchmarkResult> {
   return invoke<BenchmarkResult>("run_mmmu_pro_benchmark", {
     baseUrl,

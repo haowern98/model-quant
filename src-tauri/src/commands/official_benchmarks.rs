@@ -28,6 +28,38 @@ const MMMU_PRO_SAMPLE_COUNT: u64 = 1_730;
 const MMMU_PRO_DATASET_ID: &str = "AI-ModelScope/MMMU_Pro";
 const MMMU_PRO_DATASET_MARKER_VERSION: u32 = 1;
 const MMMU_PRO_PREVIEW_ROW_LIMIT: usize = 20;
+const MMMU_PRO_SUBSETS: &[&str] = &[
+    "Accounting",
+    "Agriculture",
+    "Architecture_and_Engineering",
+    "Art",
+    "Art_Theory",
+    "Basic_Medical_Science",
+    "Biology",
+    "Chemistry",
+    "Clinical_Medicine",
+    "Computer_Science",
+    "Design",
+    "Diagnostics_and_Laboratory_Medicine",
+    "Economics",
+    "Electronics",
+    "Energy_and_Power",
+    "Finance",
+    "Geography",
+    "History",
+    "Literature",
+    "Manage",
+    "Marketing",
+    "Materials",
+    "Math",
+    "Mechanical_Engineering",
+    "Music",
+    "Pharmacy",
+    "Physics",
+    "Psychology",
+    "Public_Health",
+    "Sociology",
+];
 const TERMINAL_BENCH_DATASET_ID: &str = "terminal-bench/terminal-bench-2-1";
 const TERMINAL_BENCH_DATASET_MARKER_VERSION: u32 = 1;
 const EVALSCOPE_VERSION: &str = "1.8.0";
@@ -186,6 +218,21 @@ pub struct GpqaRunConfig {
     pub min_p: Option<f64>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MmmuProSubjectRunConfig {
+    pub subject: String,
+    pub sample_limit: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MmmuProRunConfig {
+    #[serde(flatten)]
+    pub generation: GpqaRunConfig,
+    pub subjects: Option<Vec<MmmuProSubjectRunConfig>>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalBenchRunConfig {
@@ -227,6 +274,12 @@ struct EffectiveGpqaRunConfig {
     presence_penalty: Option<f64>,
     top_p: Option<f64>,
     min_p: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct EffectiveMmmuProRunConfig {
+    generation: EffectiveGpqaRunConfig,
+    subjects: Vec<MmmuProSubjectRunConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -312,6 +365,80 @@ fn effective_gpqa_run_config(
         top_p: config.top_p,
         min_p: config.min_p,
     })
+}
+
+fn effective_mmmu_pro_run_config(
+    config: Option<MmmuProRunConfig>,
+) -> Result<EffectiveMmmuProRunConfig, String> {
+    let config = config.unwrap_or(MmmuProRunConfig {
+        generation: GpqaRunConfig {
+            context_window: None,
+            sample_limit: None,
+            temperature: None,
+            thinking: None,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
+        },
+        subjects: None,
+    });
+    let generation = effective_gpqa_run_config(Some(config.generation))?;
+    let subjects = config.subjects.unwrap_or_else(|| {
+        MMMU_PRO_SUBSETS
+            .iter()
+            .map(|subject| MmmuProSubjectRunConfig {
+                subject: (*subject).to_string(),
+                sample_limit: generation.sample_limit,
+            })
+            .collect()
+    });
+    if subjects.is_empty() {
+        return Err("Select at least one MMMU-Pro subject.".to_string());
+    }
+
+    let allowed_subjects = MMMU_PRO_SUBSETS.iter().copied().collect::<BTreeSet<_>>();
+    let mut selected_subjects = BTreeSet::new();
+    for subject in &subjects {
+        if !allowed_subjects.contains(subject.subject.as_str()) {
+            return Err(format!("Unknown MMMU-Pro subject: {}.", subject.subject));
+        }
+        if !selected_subjects.insert(subject.subject.as_str()) {
+            return Err(format!(
+                "MMMU-Pro subject {} was selected more than once.",
+                subject.subject
+            ));
+        }
+        if subject.sample_limit == 0 || subject.sample_limit > MMMU_PRO_SAMPLE_COUNT {
+            return Err(format!(
+                "MMMU-Pro {} samples must be between 1 and {MMMU_PRO_SAMPLE_COUNT}.",
+                subject.subject.replace('_', " ")
+            ));
+        }
+    }
+
+    Ok(EffectiveMmmuProRunConfig {
+        generation,
+        subjects,
+    })
+}
+
+fn mmmu_pro_subject_groups(
+    subjects: &[MmmuProSubjectRunConfig],
+) -> Vec<(u64, Vec<String>)> {
+    let mut groups: Vec<(u64, Vec<String>)> = Vec::new();
+    for subject in subjects {
+        if let Some((_, grouped_subjects)) = groups
+            .iter_mut()
+            .find(|(sample_limit, _)| *sample_limit == subject.sample_limit)
+        {
+            grouped_subjects.push(subject.subject.clone());
+        } else {
+            groups.push((subject.sample_limit, vec![subject.subject.clone()]));
+        }
+    }
+    groups
 }
 
 fn effective_terminal_bench_run_config(
@@ -864,7 +991,7 @@ pub async fn run_mmmu_pro_benchmark(
     base_url: String,
     api_key: String,
     model_id: String,
-    config: Option<GpqaRunConfig>,
+    config: Option<MmmuProRunConfig>,
     app: tauri::AppHandle,
     api_state: State<'_, ModelInspectorApiState>,
     runner: State<'_, OfficialBenchmarkRunner>,
@@ -1922,15 +2049,14 @@ fn run_mmmu_pro_blocking(
     base_url: String,
     api_key: String,
     model_id: String,
-    config: Option<GpqaRunConfig>,
+    config: Option<MmmuProRunConfig>,
     tensor_summary: ModelInspectorApiTensorSummary,
     model_summary: ModelInspectorApiModelSummary,
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
 ) -> Result<BenchmarkResult, String> {
-    let mut effective_config = effective_gpqa_run_config(config)?;
-    effective_config.sample_limit = effective_config.sample_limit.min(MMMU_PRO_SAMPLE_COUNT);
+    let effective_config = effective_mmmu_pro_run_config(config)?;
 
     let app_data_dir = app
         .path()
@@ -1961,11 +2087,84 @@ fn run_mmmu_pro_blocking(
     let run_dir = gpqa_run_dir(&app_data_dir).join(format!("mmmu-pro-{}", unix_millis()));
     std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
 
-    let generation_config = gpqa_generation_config(&effective_config).to_string();
+    let generation_config = gpqa_generation_config(&effective_config.generation).to_string();
+    let subject_groups = mmmu_pro_subject_groups(&effective_config.subjects);
+
+    crate::progress::emit_benchmark_output(&app, "EvalScope: starting MMMU-Pro official harness");
+    crate::progress::emit_benchmark_output(
+        &app,
+        format!("EvalScope: work directory {}", run_dir.display()),
+    );
+    crate::progress::ProgressEmitter::new(app.clone()).emit(
+        crate::progress::ProgressStage::Benchmarking,
+        0.05,
+        "MMMU-Pro running",
+    );
+
+    let start = Instant::now();
+    let mut reports = Vec::with_capacity(subject_groups.len());
+    for (index, (sample_limit, subjects)) in subject_groups.iter().enumerate() {
+        let group_dir = run_dir.join(format!("group-{}", index + 1));
+        let report_path = run_mmmu_pro_evalscope_group(
+            &base_url,
+            &api_key,
+            &model_id,
+            &app_data_dir,
+            &venv_python,
+            &evalscope_cli,
+            &generation_config,
+            *sample_limit,
+            subjects,
+            &group_dir,
+            &app,
+            &child_slot,
+        )?;
+        reports.push((subjects.clone(), report_path));
+    }
+
+    let elapsed_ms = start.elapsed().as_millis() as f64;
+    let mut results = Vec::with_capacity(reports.len());
+    for (subjects, report_path) in &reports {
+        let mut result = mmmu_pro_result_from_report(
+            &model_id,
+            report_path,
+            elapsed_ms,
+            tensor_summary,
+            model_summary.clone(),
+            runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
+        )?;
+        if let Some(standard_eval) = result.standard_eval.as_mut() {
+            for task in &mut standard_eval.tasks {
+                task.task = subjects.join(", ");
+            }
+        }
+        results.push(result);
+    }
+
+    crate::progress::emit_benchmark_output(&app, "EvalScope: MMMU-Pro official harness finished");
+    combine_mmmu_pro_results(results, elapsed_ms)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_mmmu_pro_evalscope_group(
+    base_url: &str,
+    api_key: &str,
+    model_id: &str,
+    app_data_dir: &Path,
+    venv_python: &Path,
+    evalscope_cli: &Path,
+    generation_config: &str,
+    sample_limit: u64,
+    subjects: &[String],
+    run_dir: &Path,
+    app: &tauri::AppHandle,
+    child_slot: &Arc<Mutex<Option<Child>>>,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(run_dir).map_err(|e| e.to_string())?;
     let mut command = if evalscope_cli.exists() {
-        Command::new(&evalscope_cli)
+        Command::new(evalscope_cli)
     } else {
-        let mut fallback = Command::new(&venv_python);
+        let mut fallback = Command::new(venv_python);
         fallback.args(["-m", "evalscope"]);
         fallback
     };
@@ -1976,23 +2175,25 @@ fn run_mmmu_pro_blocking(
             "--eval-type".to_string(),
             "openai_api".to_string(),
             "--model".to_string(),
-            model_id.clone(),
+            model_id.to_string(),
             "--model-id".to_string(),
             "modelinspector-mmmu-pro".to_string(),
             "--api-url".to_string(),
-            base_url.clone(),
+            base_url.to_string(),
             "--api-key".to_string(),
-            api_key.clone(),
+            api_key.to_string(),
             "--datasets".to_string(),
             "mmmu_pro".to_string(),
             "--dataset-dir".to_string(),
-            mmmu_pro_dataset_cache_root(&app_data_dir)
+            mmmu_pro_dataset_cache_root(app_data_dir)
                 .to_string_lossy()
                 .to_string(),
             "--generation-config".to_string(),
-            generation_config,
+            generation_config.to_string(),
+            "--dataset-args".to_string(),
+            json!({ "mmmu_pro": { "subset_list": subjects } }).to_string(),
             "--limit".to_string(),
-            effective_config.sample_limit.to_string(),
+            sample_limit.to_string(),
             "--eval-batch-size".to_string(),
             "1".to_string(),
             "--repeats".to_string(),
@@ -2007,18 +2208,15 @@ fn run_mmmu_pro_blocking(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    crate::progress::emit_benchmark_output(&app, "EvalScope: starting MMMU-Pro official harness");
     crate::progress::emit_benchmark_output(
-        &app,
-        format!("EvalScope: work directory {}", run_dir.display()),
-    );
-    crate::progress::ProgressEmitter::new(app.clone()).emit(
-        crate::progress::ProgressStage::Benchmarking,
-        0.05,
-        "MMMU-Pro running",
+        app,
+        format!(
+            "EvalScope: MMMU-Pro subjects {} with {} samples each",
+            subjects.join(", "),
+            sample_limit
+        ),
     );
 
-    let start = Instant::now();
     let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to start MMMU-Pro harness: {e}"))?;
@@ -2060,13 +2258,13 @@ fn run_mmmu_pro_blocking(
     if !status.success() {
         if output.to_lowercase().contains("cancel") {
             crate::progress::emit_benchmark_output(
-                &app,
+                app,
                 "EvalScope: MMMU-Pro official harness cancelled",
             );
             return Err("MMMU-Pro benchmark cancelled".to_string());
         }
         crate::progress::emit_benchmark_output(
-            &app,
+            app,
             format!("EvalScope: MMMU-Pro official harness failed with status {status}"),
         );
         return Err(format!(
@@ -2075,25 +2273,17 @@ fn run_mmmu_pro_blocking(
         ));
     }
 
-    let report_path = find_mmmu_pro_report_path(&run_dir).ok_or_else(|| {
+    let report_path = find_mmmu_pro_report_path(run_dir).ok_or_else(|| {
         format!(
             "EvalScope finished but did not write an MMMU-Pro report under {}",
             run_dir.display()
         )
     })?;
     crate::progress::emit_benchmark_output(
-        &app,
+        app,
         format!("EvalScope: MMMU-Pro report {}", report_path.display()),
     );
-    crate::progress::emit_benchmark_output(&app, "EvalScope: MMMU-Pro official harness finished");
-    mmmu_pro_result_from_report(
-        &model_id,
-        &report_path,
-        start.elapsed().as_millis() as f64,
-        tensor_summary,
-        model_summary,
-        runtime_totals.lock().map_err(|e| e.to_string())?.snapshot(),
-    )
+    Ok(report_path)
 }
 
 fn read_pipe_streaming(
@@ -3963,6 +4153,57 @@ fn humaneval_result_from_report(
             sample_audits: Vec::new(),
         }),
     })
+}
+
+fn combine_mmmu_pro_results(
+    mut results: Vec<BenchmarkResult>,
+    elapsed_ms: f64,
+) -> Result<BenchmarkResult, String> {
+    let mut combined = results
+        .drain(..1)
+        .next()
+        .ok_or("MMMU-Pro did not produce any reports.")?;
+    let mut tasks = combined
+        .standard_eval
+        .take()
+        .ok_or("MMMU-Pro report did not include standard evaluation results.")?
+        .tasks;
+
+    for mut result in results {
+        let standard_eval = result
+            .standard_eval
+            .take()
+            .ok_or("MMMU-Pro report did not include standard evaluation results.")?;
+        tasks.extend(standard_eval.tasks);
+    }
+
+    let sample_count = tasks.iter().map(|task| task.sample_count).sum::<u64>();
+    let correct_count = tasks
+        .iter()
+        .map(|task| task.recipe_correct_count)
+        .sum::<u64>();
+    let accuracy = if sample_count == 0 {
+        0.0
+    } else {
+        correct_count as f64 / sample_count as f64
+    };
+
+    combined.elapsed_ms = elapsed_ms;
+    combined.standard_eval = Some(StandardEvalReport {
+        sample_count,
+        task_count: tasks.len() as u64,
+        baseline_accuracy: None,
+        recipe_accuracy: accuracy,
+        accuracy_delta: None,
+        correct_to_wrong_count: 0,
+        wrong_to_correct_count: 0,
+        baseline_avg_margin: None,
+        recipe_avg_margin: 0.0,
+        margin_delta: None,
+        tasks,
+        sample_audits: Vec::new(),
+    });
+    Ok(combined)
 }
 
 fn mmmu_pro_result_from_report(

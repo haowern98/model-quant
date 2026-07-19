@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MMMU_PRO_SUBJECTS } from "./types";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import {
@@ -54,6 +55,8 @@ import type {
   HumanEvalDatasetStatus,
   HumanEvalStatus,
   MmmuProDatasetStatus,
+  MmmuProBenchmarkConfig,
+  MmmuProBenchmarkConfigInput,
   MmmuProStatus,
   RecipeEvalPreset,
   RecipeState,
@@ -192,10 +195,15 @@ const DEFAULT_HUMANEVAL_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
   sampleLimit: String(HUMANEVAL_SAMPLE_COUNT),
 };
 
-const DEFAULT_MMMU_PRO_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
+const DEFAULT_MMMU_PRO_CONFIG_INPUT: MmmuProBenchmarkConfigInput = {
   ...DEFAULT_GPQA_CONFIG_INPUT,
   contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
   sampleLimit: "5",
+  subjects: MMMU_PRO_SUBJECTS.map((subject) => ({
+    subject: subject.id,
+    included: true,
+    sampleLimit: "5",
+  })),
 };
 
 const DEFAULT_TERMINAL_BENCH_CONFIG_INPUT: TerminalBenchBenchmarkConfigInput = {
@@ -325,6 +333,41 @@ function resolveGpqaConfigInput(
     topP,
     minP,
   };
+}
+
+function resolveMmmuProConfigInput(
+  input: MmmuProBenchmarkConfigInput,
+): MmmuProBenchmarkConfig | string {
+  const base = resolveGpqaConfigInput(input);
+  if (typeof base === "string") return base.replaceAll("GPQA", "MMMU-Pro");
+
+  const subjects = input.subjects ?? MMMU_PRO_SUBJECTS.map((subject) => ({
+    subject: subject.id,
+    included: true,
+    sampleLimit: input.sampleLimit,
+  }));
+  const validSubjectIds = new Set(MMMU_PRO_SUBJECTS.map((subject) => subject.id));
+  const selected = subjects.filter((subject) => subject.included);
+  if (selected.length === 0) return "Select at least one MMMU-Pro subject.";
+  if (new Set(selected.map((subject) => subject.subject)).size !== selected.length) {
+    return "Each MMMU-Pro subject may only be selected once.";
+  }
+
+  const resolvedSubjects = [] as MmmuProBenchmarkConfig["subjects"];
+  for (const subject of selected) {
+    if (!validSubjectIds.has(subject.subject)) return `Unknown MMMU-Pro subject: ${subject.subject}.`;
+    const sampleLimit = parseOptionalIntegerField(
+      subject.sampleLimit,
+      base.sampleLimit,
+      1,
+      MMMU_PRO_SAMPLE_COUNT,
+      `${subject.subject.replaceAll("_", " ")} samples`,
+    );
+    if (typeof sampleLimit === "string") return sampleLimit;
+    resolvedSubjects.push({ subject: subject.subject, sampleLimit });
+  }
+
+  return { ...base, subjects: resolvedSubjects };
 }
 
 function resolveTerminalBenchConfigInput(
@@ -506,7 +549,7 @@ function App() {
   const [humanevalConfig, setHumanEvalConfig] = useState<GpqaBenchmarkConfigInput>(
     DEFAULT_HUMANEVAL_CONFIG_INPUT,
   );
-  const [mmmuProConfig, setMmmuProConfig] = useState<GpqaBenchmarkConfigInput>(
+  const [mmmuProConfig, setMmmuProConfig] = useState<MmmuProBenchmarkConfigInput>(
     DEFAULT_MMMU_PRO_CONFIG_INPUT,
   );
   const [terminalBenchConfig, setTerminalBenchConfig] =
@@ -1113,9 +1156,8 @@ function App() {
       }
 
       if (runQueue.includes("mmmu_pro")) {
-        const config = resolveGpqaConfigInput(mmmuProConfig);
-        if (typeof config === "string") throw new Error(config.replaceAll("GPQA", "MMMU-Pro"));
-        config.sampleLimit = Math.min(config.sampleLimit, MMMU_PRO_SAMPLE_COUNT);
+        const config = resolveMmmuProConfigInput(mmmuProConfig);
+        if (typeof config === "string") throw new Error(config);
         const apiStatus = await startModelInspectorApi({
           benchmarkLabel: "MMMU-Pro",
           contextWindow: config.contextWindow,
@@ -1277,12 +1319,11 @@ function App() {
       return;
     }
 
-    const config = resolveGpqaConfigInput(mmmuProConfig);
+    const config = resolveMmmuProConfigInput(mmmuProConfig);
     if (typeof config === "string") {
-      setAppError(config.replaceAll("GPQA", "MMMU-Pro"));
+      setAppError(config);
       return;
     }
-    config.sampleLimit = Math.min(config.sampleLimit, MMMU_PRO_SAMPLE_COUNT);
 
     startOperation();
     let apiStarted = false;
@@ -1691,7 +1732,9 @@ function App() {
           onGpqaShotModeChange={setGpqaShotMode}
           onGpqaConfigChange={setGpqaConfig}
           onHumanEvalConfigChange={setHumanEvalConfig}
-          onMmmuProConfigChange={setMmmuProConfig}
+          onMmmuProConfigChange={(config) =>
+            setMmmuProConfig(config as MmmuProBenchmarkConfigInput)
+          }
           onTerminalBenchConfigChange={setTerminalBenchConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}
           onDownloadGpqaDataset={handleDownloadGpqaDataset}
