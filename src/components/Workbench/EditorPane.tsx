@@ -2057,6 +2057,7 @@ function MmmuProBenchmarkView({
     const saved = config.subjects?.find((entry) => entry.subject === subject.id);
     return saved ?? { subject: subject.id, included: true, sampleLimit: config.sampleLimit };
   });
+  const allSubjectsIncluded = subjectConfigs.every((subject) => subject.included);
   const updateSubjects = (subjects: typeof subjectConfigs) => {
     onConfigChange({ ...config, subjects });
   };
@@ -2294,20 +2295,15 @@ function MmmuProBenchmarkView({
                         className="benchmark-action-button secondary"
                         disabled={busy || running}
                         onClick={() =>
-                          updateSubjects(subjectConfigs.map((subject) => ({ ...subject, included: true })))
+                          updateSubjects(
+                            subjectConfigs.map((subject) => ({
+                              ...subject,
+                              included: !allSubjectsIncluded,
+                            })),
+                          )
                         }
                       >
-                        Select all
-                      </button>
-                      <button
-                        type="button"
-                        className="benchmark-action-button secondary"
-                        disabled={busy || running}
-                        onClick={() =>
-                          updateSubjects(subjectConfigs.map((subject) => ({ ...subject, included: false })))
-                        }
-                      >
-                        Clear
+                        {allSubjectsIncluded ? "Unselect all" : "Select all"}
                       </button>
                     </div>
                     <div className="mmmu-pro-subjects-table" role="table" aria-label="MMMU-Pro subjects">
