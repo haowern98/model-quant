@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
-use crate::commands::model::{projector_path, ProjectorState};
+use crate::commands::model::{multimodal_projector_path, ProjectorState};
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
     ChatFinishReason, ChatGenerationParams, MsBaselineBenchmark, MsRuntimeChatSessionCounters,
@@ -310,6 +310,15 @@ pub async fn start_modelinspector_api(
         .clone()
         .ok_or("No model loaded")?;
 
+    let projector_path = if enable_multimodal.unwrap_or(false) {
+        Some(multimodal_projector_path(
+            &recipe.base_model,
+            &projector_state,
+        )?)
+    } else {
+        None
+    };
+
     let gguf_summary = crate::ffi::runtime_bindings::inspect_gguf(&recipe.base_model)?;
     let model_summary = ModelInspectorApiModelSummary {
         tensor_count: gguf_summary.tensor_count,
@@ -349,11 +358,6 @@ pub async fn start_modelinspector_api(
     let targets = recipe_targets(&recipe);
     crate::progress::emit_api_output(&app, "ModelInspector API: loading in-process model session");
     let output_app = app.clone();
-    let projector_path = if enable_multimodal.unwrap_or(false) {
-        projector_path(&projector_state)?
-    } else {
-        None
-    };
     let context_tokens = context_window.unwrap_or(API_CHAT_CONTEXT_TOKENS);
     if context_tokens == 0 {
         return Err("ModelInspector API context window must be greater than 0.".to_string());

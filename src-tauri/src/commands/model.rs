@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings;
-use crate::gguf::reader::parse_gguf;
+use crate::gguf::reader::{parse_gguf, read_gguf_identity};
 use crate::gguf::types::ModelInfo;
 use crate::quant::recipe::{QuantType, RecipeState};
 
@@ -23,6 +23,46 @@ pub(crate) fn projector_path(projector_state: &ProjectorState) -> Result<Option<
     Ok(guard
         .as_ref()
         .map(|projector| projector.path.to_string_lossy().into_owned()))
+}
+
+fn is_matching_multimodal_identity(
+    model_name: &str,
+    projector_name: &str,
+    model_basename: &str,
+    projector_basename: &str,
+) -> bool {
+    if !model_name.is_empty() && !projector_name.is_empty() {
+        return model_name == projector_name;
+    }
+
+    !model_basename.is_empty()
+        && !projector_basename.is_empty()
+        && model_basename == projector_basename
+}
+
+pub(crate) fn multimodal_projector_path(
+    model_path: &str,
+    projector_state: &ProjectorState,
+) -> Result<String, String> {
+    let projector_path =
+        projector_path(projector_state)?.ok_or_else(|| "No MMPROJ loaded.".to_string())?;
+    let model_identity = read_gguf_identity(PathBuf::from(model_path).as_path())
+        .map_err(|error| format!("Could not read model GGUF identity: {error}"))?;
+    let projector_identity = read_gguf_identity(PathBuf::from(&projector_path).as_path())
+        .map_err(|error| format!("Could not read MMPROJ GGUF identity: {error}"))?;
+
+    if projector_identity.file_type != "mmproj"
+        || !is_matching_multimodal_identity(
+            &model_identity.name,
+            &projector_identity.name,
+            &model_identity.basename,
+            &projector_identity.basename,
+        )
+    {
+        return Err("Loaded MMPROJ is incompatible with the current model.".to_string());
+    }
+
+    Ok(projector_path)
 }
 
 fn is_standalone_projector_gguf<'a>(
@@ -217,7 +257,7 @@ fn parse_default_quant(value: &str) -> QuantType {
 
 #[cfg(test)]
 mod tests {
-    use super::is_standalone_projector_gguf;
+    use super::{is_matching_multimodal_identity, is_standalone_projector_gguf};
 
     #[test]
     fn rejects_standalone_projector_ggufs_but_keeps_integrated_models() {
@@ -228,6 +268,22 @@ mod tests {
         assert!(!is_standalone_projector_gguf(
             "llama",
             ["token_embd.weight", "v.patch_embd.weight"].into_iter(),
+        ));
+    }
+
+    #[test]
+    fn accepts_only_matching_model_and_projector_identities() {
+        assert!(is_matching_multimodal_identity(
+            "Qwen_Qwen3.5 9B",
+            "Qwen_Qwen3.5 9B",
+            "Qwen_Qwen3.5",
+            "Qwen_Qwen3.5",
+        ));
+        assert!(!is_matching_multimodal_identity(
+            "Qwen_Qwen3.5 9B",
+            "Zai org_GLM 4.6V Flash",
+            "Qwen_Qwen3.5",
+            "zai-org_GLM",
         ));
     }
 }

@@ -74,6 +74,10 @@ import { projectorGroupLabel } from "./lib/format";
 const MULTIMODAL_PREFLIGHT_IMAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==";
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function runMultimodalPreflight(api: {
   baseUrl: string | null;
   apiKey: string | null;
@@ -1171,7 +1175,7 @@ function App() {
           try {
             await runMultimodalPreflight(apiStatus);
           } catch (error) {
-            const detail = (error as Error).message;
+            const detail = errorMessage(error);
             if (/mmproj|vision projector|image input/i.test(detail)) {
               throw new Error("Loaded MMPROJ is incompatible with the current model.");
             }
@@ -1215,7 +1219,7 @@ function App() {
 
       setAppError(null);
     } catch (e) {
-      const message = (e as Error).message;
+      const message = errorMessage(e);
       if (!message.toLowerCase().includes("cancelled")) setAppError(message);
     } finally {
       endOperation();
@@ -1341,7 +1345,7 @@ function App() {
       try {
         await runMultimodalPreflight(apiStatus);
       } catch (error) {
-        const detail = (error as Error).message;
+        const detail = errorMessage(error);
         if (/mmproj|vision projector|image input/i.test(detail)) {
           throw new Error("Loaded MMPROJ is incompatible with the current model.");
         }
@@ -1356,7 +1360,7 @@ function App() {
       openEvalResults(result);
       setAppError(null);
     } catch (e) {
-      const message = (e as Error).message;
+      const message = errorMessage(e);
       if (!message.toLowerCase().includes("cancelled")) setAppError(message);
     } finally {
       if (apiStarted) await stopModelInspectorApi();
