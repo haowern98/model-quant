@@ -1,9 +1,12 @@
 #include "model_surgery_runtime.h"
 
 #include "chat.h"
+#include "base64.hpp"
 #include "ggml-backend.h"
 #include "gguf.h"
 #include "llama.h"
+#include "mtmd-helper.h"
+#include "mtmd.h"
 #include "sampling.h"
 
 #include "nlohmann/json.hpp"
@@ -499,6 +502,7 @@ struct ModelSession {
     std::unique_ptr<llama_model, decltype(&llama_model_free)> model;
     common_chat_templates_ptr chat_templates;
     std::unique_ptr<llama_context, decltype(&llama_free)> ctx;
+    std::unique_ptr<mtmd_context, decltype(&mtmd_free)> mctx;
     VramTracker vram;
     double load_ms = 0.0;
     uint64_t copied_tensors = 0;
@@ -513,6 +517,7 @@ struct ModelSession {
         : model(loaded_model, llama_model_free),
           chat_templates(common_chat_templates_init(loaded_model, "")),
           ctx(nullptr, llama_free),
+          mctx(nullptr, mtmd_free),
           vram(vram_tracker),
           load_ms(load_time_ms) {
     }
@@ -2138,6 +2143,286 @@ int32_t emit_chat_stream_parse_delta(
     return 0;
 }
 
+constexpr size_t MAX_MULTIMODAL_IMAGE_BYTES = 20 * 1024 * 1024;
+
+struct MtmdBitmapDeleter {
+    void operator()(mtmd_bitmap * bitmap) const {
+        mtmd_bitmap_free(bitmap);
+    }
+};
+
+struct MtmdChunksDeleter {
+    void operator()(mtmd_input_chunks * chunks) const {
+        mtmd_input_chunks_free(chunks);
+    }
+};
+
+struct MultimodalPromptEvaluation {
+    std::vector<llama_token> sampler_tokens;
+    uint32_t prompt_tokens = 0;
+};
+
+std::vector<unsigned char> decode_image_data_url(const char * image_data_url) {
+    if (image_data_url == nullptr) {
+        throw std::runtime_error("image data URL is null");
+    }
+
+    const std::string value(image_data_url);
+    constexpr std::string_view prefix = "data:image/";
+    if (value.compare(0, prefix.size(), prefix) != 0) {
+        throw std::runtime_error("image_url must be a base64 data:image URL");
+    }
+
+    const size_t separator = value.find(";base64,");
+    if (separator == std::string::npos || separator <= prefix.size()) {
+        throw std::runtime_error("image_url must use base64 encoding");
+    }
+
+    const std::string encoded = value.substr(separator + std::strlen(";base64,"));
+    if (encoded.empty()) {
+        throw std::runtime_error("image_url has no image data");
+    }
+    if (encoded.size() > MAX_MULTIMODAL_IMAGE_BYTES * 2) {
+        throw std::runtime_error("image_url exceeds the 20 MiB limit");
+    }
+
+    const std::string decoded = base64::decode(encoded);
+    if (decoded.empty()) {
+        throw std::runtime_error("image_url decoded to an empty image");
+    }
+    if (decoded.size() > MAX_MULTIMODAL_IMAGE_BYTES) {
+        throw std::runtime_error("image_url exceeds the 20 MiB limit");
+    }
+
+    return std::vector<unsigned char>(decoded.begin(), decoded.end());
+}
+
+int32_t evaluate_multimodal_prompt(
+    ModelSession & session,
+    const char * prompt,
+    const char * const * image_data_urls,
+    uint64_t image_count,
+    uint32_t & max_tokens,
+    MultimodalPromptEvaluation & evaluation) {
+    if (session.mctx == nullptr) {
+        return fail("image input requires an MMPROJ GGUF loaded in the MMPROJ section");
+    }
+    if (image_data_urls == nullptr || image_count == 0) {
+        return fail("multimodal generation requires at least one image");
+    }
+
+    std::vector<std::unique_ptr<mtmd_bitmap, MtmdBitmapDeleter>> bitmaps;
+    bitmaps.reserve(static_cast<size_t>(image_count));
+    for (uint64_t i = 0; i < image_count; ++i) {
+        const std::vector<unsigned char> image = decode_image_data_url(image_data_urls[i]);
+        mtmd_bitmap * bitmap = mtmd_helper_bitmap_init_from_buf(
+            session.mctx.get(), image.data(), image.size());
+        if (bitmap == nullptr) {
+            return fail("failed to decode image input");
+        }
+        bitmaps.emplace_back(bitmap);
+    }
+
+    std::vector<const mtmd_bitmap *> bitmap_ptrs;
+    bitmap_ptrs.reserve(bitmaps.size());
+    for (const auto & bitmap : bitmaps) {
+        bitmap_ptrs.push_back(bitmap.get());
+    }
+
+    std::unique_ptr<mtmd_input_chunks, MtmdChunksDeleter> chunks(
+        mtmd_input_chunks_init());
+    if (chunks == nullptr) {
+        return fail("failed to initialize multimodal input chunks");
+    }
+
+    const mtmd_input_text input = {prompt, true, true};
+    const int32_t tokenize_result = mtmd_tokenize(
+        session.mctx.get(),
+        chunks.get(),
+        &input,
+        bitmap_ptrs.data(),
+        bitmap_ptrs.size());
+    if (tokenize_result != 0) {
+        return fail("failed to tokenize multimodal prompt");
+    }
+
+    const size_t prompt_tokens = mtmd_helper_get_n_tokens(chunks.get());
+    if (prompt_tokens == 0 || prompt_tokens > std::numeric_limits<uint32_t>::max()) {
+        return fail("multimodal prompt produced no tokens");
+    }
+
+    const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
+    max_tokens = context_generation_room(context_tokens, prompt_tokens);
+    if (max_tokens == 0) {
+        return fail(
+            std::string("multimodal prompt exceeds context window: prompt tokens=")
+            + std::to_string(prompt_tokens)
+            + ", context tokens="
+            + std::to_string(context_tokens));
+    }
+
+    reset_session_context(session);
+    llama_pos new_n_past = 0;
+    const int32_t eval_result = mtmd_helper_eval_chunks(
+        session.mctx.get(),
+        session.ctx.get(),
+        chunks.get(),
+        0,
+        0,
+        static_cast<int32_t>(std::min<uint32_t>(512, context_tokens)),
+        true,
+        &new_n_past);
+    if (eval_result != 0) {
+        return fail("failed to evaluate multimodal prompt");
+    }
+    llama_synchronize(session.ctx.get());
+
+    evaluation.sampler_tokens.clear();
+    const size_t chunk_count = mtmd_input_chunks_size(chunks.get());
+    for (size_t index = 0; index < chunk_count; ++index) {
+        const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks.get(), index);
+        if (mtmd_input_chunk_get_type(chunk) != MTMD_INPUT_CHUNK_TYPE_TEXT) {
+            continue;
+        }
+        size_t token_count = 0;
+        const llama_token * tokens = mtmd_input_chunk_get_tokens_text(chunk, &token_count);
+        if (tokens != nullptr && token_count > 0) {
+            evaluation.sampler_tokens.insert(
+                evaluation.sampler_tokens.end(), tokens, tokens + token_count);
+        }
+    }
+    evaluation.prompt_tokens = static_cast<uint32_t>(prompt_tokens);
+    return 0;
+}
+
+int32_t run_session_generate_multimodal_stream(
+    ModelSession & session,
+    const char * prompt,
+    const char * const * image_data_urls,
+    uint64_t image_count,
+    const ms_chat_generation_params & params,
+    const std::vector<std::string> & stop_strings,
+    const common_chat_params & chat_params,
+    common_reasoning_format reasoning_format,
+    ms_chat_stream_callback callback,
+    void * user_data,
+    ms_baseline_benchmark * out_benchmark,
+    uint32_t & out_finish_reason) {
+    out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+    const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
+    uint32_t max_tokens = 0;
+    MultimodalPromptEvaluation evaluation = {};
+
+    const auto prompt_start = std::chrono::steady_clock::now();
+    const int prompt_res = evaluate_multimodal_prompt(
+        session,
+        prompt,
+        image_data_urls,
+        image_count,
+        max_tokens,
+        evaluation);
+    if (prompt_res != 0) {
+        return prompt_res;
+    }
+    const auto prompt_end = std::chrono::steady_clock::now();
+    session.vram.sample();
+
+    common_params_sampling sampling_params = common_sampling_from_chat_params(
+        params,
+        llama_n_ctx(session.ctx.get()));
+    common_sampler_ptr sampler(common_sampler_init(session.model.get(), sampling_params));
+    if (!sampler) {
+        return fail("failed to initialize llama.cpp common sampler");
+    }
+    for (const llama_token token : evaluation.sampler_tokens) {
+        common_sampler_accept(sampler.get(), token, false);
+    }
+
+    uint32_t generated = 0;
+    std::string generated_text;
+    std::string emitted_visible_text;
+    std::string emitted_reasoning_text;
+    const auto generation_start = std::chrono::steady_clock::now();
+    for (uint32_t i = 0; i < max_tokens; ++i) {
+        throw_if_recipe_test_cancelled();
+        llama_token token = common_sampler_sample(sampler.get(), session.ctx.get(), -1);
+        if (llama_vocab_is_eog(vocab, token)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_EOS;
+            break;
+        }
+
+        generated_text += token_to_piece(vocab, token);
+        common_sampler_accept(sampler.get(), token, true);
+        ++generated;
+        if (consume_generated_stop_suffix(generated_text, stop_strings)) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_STOP;
+        }
+
+        const int stream_res = emit_chat_stream_parse_delta(
+            generated_text,
+            chat_params,
+            reasoning_format,
+            true,
+            emitted_visible_text,
+            emitted_reasoning_text,
+            callback,
+            user_data);
+        if (stream_res != 0) {
+            return stream_res;
+        }
+
+        if (out_finish_reason == MS_CHAT_FINISH_REASON_STOP) {
+            break;
+        }
+
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        if (llama_decode(session.ctx.get(), batch) != 0) {
+            return fail("failed to decode generated token");
+        }
+        llama_synchronize(session.ctx.get());
+    }
+
+    const int final_stream_res = emit_chat_stream_parse_delta(
+        generated_text,
+        chat_params,
+        reasoning_format,
+        out_finish_reason == MS_CHAT_FINISH_REASON_LENGTH,
+        emitted_visible_text,
+        emitted_reasoning_text,
+        callback,
+        user_data);
+    if (final_stream_res != 0) {
+        return final_stream_res;
+    }
+
+    const auto generation_end = std::chrono::steady_clock::now();
+    session.vram.sample();
+    const double prompt_time_ms = elapsed_ms(prompt_start, prompt_end);
+    const double generation_time_ms = elapsed_ms(generation_start, generation_end);
+
+    out_benchmark->load_ms = session.load_ms;
+    out_benchmark->prompt_eval_ms = prompt_time_ms;
+    out_benchmark->generation_ms = generation_time_ms;
+    out_benchmark->prompt_eval_tps = prompt_time_ms > 0.0
+        ? (static_cast<double>(evaluation.prompt_tokens) * 1000.0 / prompt_time_ms)
+        : 0.0;
+    out_benchmark->token_gen_tps = generation_time_ms > 0.0
+        ? (static_cast<double>(generated) * 1000.0 / generation_time_ms)
+        : 0.0;
+    out_benchmark->ttft_ms = prompt_time_ms;
+    out_benchmark->vram_peak_mb = session.vram.peak_mb;
+    out_benchmark->vram_allocated_mb = session.vram.current_mb;
+    out_benchmark->prompt_tokens = evaluation.prompt_tokens;
+    out_benchmark->generated_tokens = generated;
+    out_benchmark->copied_tensor_count = 0;
+    out_benchmark->converted_tensor_count = 0;
+    out_benchmark->converted_bytes_before = 0;
+    out_benchmark->converted_bytes_after = 0;
+    out_benchmark->requested_target_count = 0;
+    out_benchmark->verified_target_count = 0;
+    return 0;
+}
+
 int32_t run_session_generate_stream(
     ModelSession & session,
     const char * prompt,
@@ -2888,6 +3173,7 @@ int32_t ms_runtime_generate_recipe_chat(
 
 int32_t open_recipe_chat_session_impl(
     const char * path,
+    const char * projector_path,
     const ms_recipe_tensor_target * targets,
     uint64_t target_count,
     uint32_t context_tokens,
@@ -2924,6 +3210,26 @@ int32_t open_recipe_chat_session_impl(
         if (model_session == nullptr) {
             return -1;
         }
+        if (projector_path != nullptr && projector_path[0] != '\0') {
+            if (log != nullptr) {
+                log->emit("Native runtime: loading MMPROJ vision projector");
+            }
+            const mtmd_context_params projector_params = mtmd_context_params_default();
+            model_session->mctx.reset(mtmd_init_from_file(
+                projector_path,
+                model_session->model.get(),
+                projector_params));
+            if (model_session->mctx == nullptr) {
+                throw std::runtime_error(
+                    std::string("failed to load MMPROJ vision projector: ") + projector_path);
+            }
+            if (!mtmd_support_vision(model_session->mctx.get())) {
+                throw std::runtime_error("loaded MMPROJ does not support image input");
+            }
+            if (log != nullptr) {
+                log->emit("Native runtime: MMPROJ vision projector ready");
+            }
+        }
 
         auto chat_session = std::make_unique<ms_runtime_chat_session>();
         chat_session->model_load_count = 1;
@@ -2945,6 +3251,7 @@ int32_t ms_runtime_open_recipe_chat_session(
     ms_runtime_chat_session ** out_session) {
     return open_recipe_chat_session_impl(
         path,
+        nullptr,
         targets,
         target_count,
         context_tokens,
@@ -2963,6 +3270,27 @@ int32_t ms_runtime_open_recipe_chat_session_with_progress(
     const RuntimeLogSink log{log_callback, log_user_data};
     return open_recipe_chat_session_impl(
         path,
+        nullptr,
+        targets,
+        target_count,
+        context_tokens,
+        log_callback == nullptr ? nullptr : &log,
+        out_session);
+}
+
+int32_t ms_runtime_open_recipe_chat_session_with_projector_and_progress(
+    const char * path,
+    const char * projector_path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    ms_runtime_log_callback log_callback,
+    void * log_user_data,
+    ms_runtime_chat_session ** out_session) {
+    const RuntimeLogSink log{log_callback, log_user_data};
+    return open_recipe_chat_session_impl(
+        path,
+        projector_path,
         targets,
         target_count,
         context_tokens,
@@ -3198,6 +3526,110 @@ int32_t ms_runtime_generate_recipe_chat_session_stream(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native recipe chat session streaming error");
+    }
+}
+
+int32_t ms_runtime_generate_recipe_chat_session_multimodal_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const char * const * image_data_urls,
+    uint64_t image_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
+    ms_chat_generation_result * out_result) {
+    clear_error();
+
+    if (session == nullptr || session->session == nullptr) {
+        return fail("recipe chat session is null");
+    }
+    if (messages == nullptr || message_count == 0) {
+        return fail("chat message set is empty");
+    }
+    if (image_data_urls == nullptr || image_count == 0) {
+        return fail("multimodal image input is empty");
+    }
+    if (params == nullptr) {
+        return fail("chat generation params are null");
+    }
+    if (stop_strings == nullptr && stop_count > 0) {
+        return fail("chat stop string pointer is null");
+    }
+    if (stream_callback == nullptr) {
+        return fail("chat stream callback is null");
+    }
+    if (out_result == nullptr) {
+        return fail("chat generation result output pointer is null");
+    }
+
+    try {
+        std::vector<std::string> request_stops = collect_stop_strings(stop_strings, stop_count);
+        const std::map<std::string, std::string> chat_template_kwargs =
+            chat_template_kwargs_from_json(chat_template_kwargs_json);
+        const common_reasoning_format native_reasoning_format =
+            reasoning_format_from_request(reasoning_format);
+        std::vector<std::pair<std::string, std::string>> chat_messages;
+        chat_messages.reserve(static_cast<size_t>(message_count));
+        for (uint64_t i = 0; i < message_count; ++i) {
+            if (messages[i].role == nullptr || messages[i].role[0] == '\0') {
+                return fail("chat message role is empty");
+            }
+            if (messages[i].content == nullptr) {
+                return fail("chat message content is null");
+            }
+            chat_messages.push_back({messages[i].role, messages[i].content});
+        }
+
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->session->chat_templates.get(),
+            chat_messages,
+            params->add_generation_prompt != 0,
+            chat_template_kwargs,
+            native_reasoning_format);
+        const std::vector<std::string> all_stops = merge_stop_strings(
+            request_stops,
+            chat_params.additional_stops);
+
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        ms_baseline_benchmark benchmark = {};
+        const int32_t result = run_session_generate_multimodal_stream(
+            *session->session,
+            chat_params.prompt.c_str(),
+            image_data_urls,
+            image_count,
+            *params,
+            all_stops,
+            chat_params,
+            native_reasoning_format,
+            stream_callback,
+            stream_user_data,
+            &benchmark,
+            finish_reason);
+        if (result != 0) {
+            return result;
+        }
+
+        benchmark.copied_tensor_count = session->session->copied_tensors;
+        benchmark.converted_tensor_count = session->session->converted_tensors;
+        benchmark.converted_bytes_before = session->session->converted_bytes_before;
+        benchmark.converted_bytes_after = session->session->converted_bytes_after;
+        benchmark.requested_target_count = session->session->requested_target_count;
+        benchmark.verified_target_count = session->session->verified_target_count;
+        out_result->benchmark = benchmark;
+        out_result->prompt_tokens = benchmark.prompt_tokens;
+        out_result->completion_tokens = benchmark.generated_tokens;
+        out_result->finish_reason = finish_reason;
+        session->completion_count += 1;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native multimodal chat session streaming error");
     }
 }
 

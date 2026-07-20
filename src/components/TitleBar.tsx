@@ -7,6 +7,7 @@ import {
 
 interface TitleBarProps {
   modelPath: string | null;
+  running: boolean;
   bottomPanelVisible: boolean;
   onOpenModel: () => void;
   onToggleBottomPanel: () => void;
@@ -19,6 +20,7 @@ function modelLabel(modelPath: string | null): string {
 
 export function TitleBar({
   modelPath,
+  running,
   bottomPanelVisible,
   onOpenModel,
   onToggleBottomPanel,
@@ -47,6 +49,7 @@ export function TitleBar({
           type="button"
           className="command-center"
           aria-label="Model Surgery command center"
+          disabled={running}
           onClick={onOpenModel}
         >
           <span className="command-title">{modelLabel(modelPath)}</span>
@@ -56,6 +59,7 @@ export function TitleBar({
           className="command-center-dropdown"
           aria-label="Command center menu"
           aria-expanded={commandMenuOpen}
+          disabled={running}
           onClick={() => setCommandMenuOpen((open) => !open)}
         >
           <span className="codicon codicon-chevron-down" aria-hidden="true" />
@@ -65,6 +69,7 @@ export function TitleBar({
             <button
               type="button"
               role="menuitem"
+              disabled={running}
               onClick={() => {
                 setCommandMenuOpen(false);
                 onOpenModel();

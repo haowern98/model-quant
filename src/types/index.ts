@@ -175,6 +175,7 @@ export type BenchmarkRunId =
   | "gpqa_diamond"
   | "humaneval"
   | "terminal_bench"
+  | "mmmu_pro"
   | "mmlu_pro"
   | "mmlu_redux"
   | "supergpqa"
@@ -298,7 +299,22 @@ export interface TerminalBenchStatus {
   detail: string;
 }
 
+export interface MmmuProStatus {
+  ready: boolean;
+  statusLabel: string;
+  detail: string;
+}
+
 export interface HumanEvalDatasetStatus {
+  datasetReady: boolean;
+  datasetStatusLabel: string;
+  datasetPath: string | null;
+  datasetHash: string | null;
+  datasetUrl: string;
+  expectedDatasetHash: string;
+}
+
+export interface MmmuProDatasetStatus {
   datasetReady: boolean;
   datasetStatusLabel: string;
   datasetPath: string | null;
@@ -331,6 +347,15 @@ export interface HumanEvalDatasetRow {
   canonicalSolution: string;
 }
 
+export interface MmmuProDatasetRow {
+  index: number;
+  taskId: string;
+  subject: string;
+  question: string;
+  choices: string[];
+  imageUrls: string[];
+}
+
 export interface GpqaDatasetRow {
   index: number;
   question: string;
@@ -360,6 +385,60 @@ export interface GpqaBenchmarkConfig {
   presencePenalty?: number;
   topP?: number;
   minP?: number;
+}
+
+export const MMMU_PRO_SUBJECTS = [
+  { id: "Accounting", label: "Accounting" },
+  { id: "Agriculture", label: "Agriculture" },
+  { id: "Architecture_and_Engineering", label: "Architecture and Engineering" },
+  { id: "Art", label: "Art" },
+  { id: "Art_Theory", label: "Art Theory" },
+  { id: "Basic_Medical_Science", label: "Basic Medical Science" },
+  { id: "Biology", label: "Biology" },
+  { id: "Chemistry", label: "Chemistry" },
+  { id: "Clinical_Medicine", label: "Clinical Medicine" },
+  { id: "Computer_Science", label: "Computer Science" },
+  { id: "Design", label: "Design" },
+  { id: "Diagnostics_and_Laboratory_Medicine", label: "Diagnostics and Laboratory Medicine" },
+  { id: "Economics", label: "Economics" },
+  { id: "Electronics", label: "Electronics" },
+  { id: "Energy_and_Power", label: "Energy and Power" },
+  { id: "Finance", label: "Finance" },
+  { id: "Geography", label: "Geography" },
+  { id: "History", label: "History" },
+  { id: "Literature", label: "Literature" },
+  { id: "Manage", label: "Manage" },
+  { id: "Marketing", label: "Marketing" },
+  { id: "Materials", label: "Materials" },
+  { id: "Math", label: "Math" },
+  { id: "Mechanical_Engineering", label: "Mechanical Engineering" },
+  { id: "Music", label: "Music" },
+  { id: "Pharmacy", label: "Pharmacy" },
+  { id: "Physics", label: "Physics" },
+  { id: "Psychology", label: "Psychology" },
+  { id: "Public_Health", label: "Public Health" },
+  { id: "Sociology", label: "Sociology" },
+] as const;
+
+export type MmmuProSubjectId = (typeof MMMU_PRO_SUBJECTS)[number]["id"];
+
+export interface MmmuProSubjectConfigInput {
+  subject: MmmuProSubjectId;
+  included: boolean;
+  sampleLimit: string;
+}
+
+export interface MmmuProBenchmarkConfigInput extends GpqaBenchmarkConfigInput {
+  subjects?: MmmuProSubjectConfigInput[];
+}
+
+export interface MmmuProSubjectConfig {
+  subject: MmmuProSubjectId;
+  sampleLimit: number;
+}
+
+export interface MmmuProBenchmarkConfig extends GpqaBenchmarkConfig {
+  subjects: MmmuProSubjectConfig[];
 }
 
 export interface TerminalBenchBenchmarkConfigInput {

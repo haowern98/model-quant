@@ -265,6 +265,15 @@ MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session_with_progress(
     ms_runtime_log_callback log_callback,
     void * log_user_data,
     ms_runtime_chat_session ** out_session);
+MS_RUNTIME_API int32_t ms_runtime_open_recipe_chat_session_with_projector_and_progress(
+    const char * path,
+    const char * projector_path,
+    const ms_recipe_tensor_target * targets,
+    uint64_t target_count,
+    uint32_t context_tokens,
+    ms_runtime_log_callback log_callback,
+    void * log_user_data,
+    ms_runtime_chat_session ** out_session);
 MS_RUNTIME_API void ms_runtime_close_recipe_chat_session(ms_runtime_chat_session * session);
 MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session(
     ms_runtime_chat_session * session,
@@ -284,6 +293,20 @@ MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session_stream(
     ms_runtime_chat_session * session,
     const ms_chat_message * messages,
     uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
+    ms_chat_generation_result * out_result);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session_multimodal_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const char * const * image_data_urls,
+    uint64_t image_count,
     const ms_chat_generation_params * params,
     const char * const * stop_strings,
     uint64_t stop_count,

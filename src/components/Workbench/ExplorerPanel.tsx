@@ -28,12 +28,14 @@ interface ExplorerPanelProps {
   activeProjectorGroupId: string | null;
   expandedLayers: Set<number>;
   expandedProjectorGroups: Set<string>;
+  projectorExpanded: boolean;
   running: boolean;
   onOpenLayer: (layerIndex: number) => void;
   onOpenTensorValues: (tensor: TensorInfo, layerLabel: string) => void;
   onOpenModel: () => void;
   onOpenProjector: () => void;
   onRemoveProjector: () => void;
+  onToggleProjector: () => void;
   onOpenProjectorGroup: (groupId: string) => void;
   onToggleProjectorGroup: (groupId: string) => void;
   onOpenProjectorTensorValues: (tensor: TensorInfo, groupId: string) => void;
@@ -66,12 +68,14 @@ export function ExplorerPanel({
   activeProjectorGroupId,
   expandedLayers,
   expandedProjectorGroups,
+  projectorExpanded,
   running,
   onOpenLayer,
   onOpenTensorValues,
   onOpenModel,
   onOpenProjector,
   onRemoveProjector,
+  onToggleProjector,
   onOpenProjectorGroup,
   onToggleProjectorGroup,
   onOpenProjectorTensorValues,
@@ -87,7 +91,6 @@ export function ExplorerPanel({
     lora: false,
   });
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [projectorExpanded, setProjectorExpanded] = useState(true);
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
@@ -199,7 +202,7 @@ export function ExplorerPanel({
       scrollBody.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("resize", scheduleUpdate);
     };
-  }, [expandedProjectorGroups, projectorExpanded, projectorGroups, sections.mmproj]);
+  }, [expandedProjectorGroups, projectorExpanded, projectorGroups]);
 
   const handleBulkAssign = (pattern: AssignPattern, value: string) => {
     if (!value) return;
@@ -308,7 +311,7 @@ export function ExplorerPanel({
 
             {!modelPath && (
               <div className="future-section-empty">
-                <button type="button" onClick={onOpenModel}>
+                <button type="button" disabled={running} onClick={onOpenModel}>
                   Add model GGUF...
                 </button>
               </div>
@@ -379,7 +382,7 @@ export function ExplorerPanel({
           <ExplorerSectionHeader
             label={basename(projectorPath)}
             expanded={projectorExpanded}
-            onClick={() => setProjectorExpanded((current) => !current)}
+            onClick={onToggleProjector}
             action={
               <button
                 type="button"
@@ -407,7 +410,7 @@ export function ExplorerPanel({
             <button type="button" onClick={onOpenProjector}>Add projector...</button>
           </div>
         ) : null}
-        {sections.mmproj && projectorPath ? (
+        {projectorPath ? (
           <>
             {projectorExpanded && projectorActionsOpen ? (
               <div className="model-actions-popover">

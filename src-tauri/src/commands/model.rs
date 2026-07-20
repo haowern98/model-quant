@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings;
-use crate::gguf::reader::parse_gguf;
+use crate::gguf::reader::{parse_gguf, read_gguf_identity};
 use crate::gguf::types::ModelInfo;
 use crate::quant::recipe::{QuantType, RecipeState};
 
@@ -17,6 +17,69 @@ pub struct LoadedModel {
 
 pub struct ModelState(pub Mutex<Option<LoadedModel>>);
 pub struct ProjectorState(pub Mutex<Option<LoadedModel>>);
+
+pub(crate) fn projector_path(projector_state: &ProjectorState) -> Result<Option<String>, String> {
+    let guard = projector_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .as_ref()
+        .map(|projector| projector.path.to_string_lossy().into_owned()))
+}
+
+fn is_matching_multimodal_identity(
+    model_architecture: &str,
+    model_name: &str,
+    projector_name: &str,
+    model_basename: &str,
+    projector_basename: &str,
+) -> bool {
+    if !model_name.is_empty() && !projector_name.is_empty() {
+        if model_name == projector_name {
+            return true;
+        }
+    }
+
+    let matching_basename = !model_basename.is_empty()
+        && !projector_basename.is_empty()
+        && model_basename == projector_basename;
+    if matching_basename {
+        return true;
+    }
+
+    // Qwen3.5 fine-tunes retain the qwen35 architecture but usually have a
+    // different general.name from the upstream Qwen projector.
+    model_architecture.eq_ignore_ascii_case("qwen35")
+        && format!("{projector_name} {projector_basename}")
+            .to_ascii_lowercase()
+            .contains("qwen3.5")
+}
+
+pub(crate) fn multimodal_projector_path(
+    model_path: &str,
+    projector_state: &ProjectorState,
+) -> Result<String, String> {
+    let projector_path =
+        projector_path(projector_state)?.ok_or_else(|| "No MMPROJ loaded.".to_string())?;
+    let model_identity = read_gguf_identity(PathBuf::from(model_path).as_path())
+        .map_err(|error| format!("Could not read model GGUF identity: {error}"))?;
+    let model = parse_gguf(PathBuf::from(model_path).as_path())
+        .map_err(|error| format!("Could not read model GGUF metadata: {error}"))?;
+    let projector_identity = read_gguf_identity(PathBuf::from(&projector_path).as_path())
+        .map_err(|error| format!("Could not read MMPROJ GGUF identity: {error}"))?;
+
+    if projector_identity.file_type != "mmproj"
+        || !is_matching_multimodal_identity(
+            &model.metadata.architecture,
+            &model_identity.name,
+            &projector_identity.name,
+            &model_identity.basename,
+            &projector_identity.basename,
+        )
+    {
+        return Err("Loaded MMPROJ is incompatible with the current model.".to_string());
+    }
+
+    Ok(projector_path)
+}
 
 fn is_standalone_projector_gguf<'a>(
     architecture: &str,
@@ -210,7 +273,7 @@ fn parse_default_quant(value: &str) -> QuantType {
 
 #[cfg(test)]
 mod tests {
-    use super::is_standalone_projector_gguf;
+    use super::{is_matching_multimodal_identity, is_standalone_projector_gguf};
 
     #[test]
     fn rejects_standalone_projector_ggufs_but_keeps_integrated_models() {
@@ -221,6 +284,31 @@ mod tests {
         assert!(!is_standalone_projector_gguf(
             "llama",
             ["token_embd.weight", "v.patch_embd.weight"].into_iter(),
+        ));
+    }
+
+    #[test]
+    fn accepts_only_matching_model_and_projector_identities() {
+        assert!(is_matching_multimodal_identity(
+            "qwen35",
+            "Qwen_Qwen3.5 9B",
+            "Qwen_Qwen3.5 9B",
+            "Qwen_Qwen3.5",
+            "Qwen_Qwen3.5",
+        ));
+        assert!(!is_matching_multimodal_identity(
+            "qwen35",
+            "Qwen_Qwen3.5 9B",
+            "Zai org_GLM 4.6V Flash",
+            "Qwen_Qwen3.5",
+            "zai-org_GLM",
+        ));
+        assert!(is_matching_multimodal_identity(
+            "qwen35",
+            "Ornith 1.0 9B",
+            "Qwen_Qwen3.5 9B",
+            "Ornith-1.0",
+            "Qwen_Qwen3.5",
         ));
     }
 }

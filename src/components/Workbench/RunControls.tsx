@@ -3,6 +3,7 @@ import type {
   BenchmarkRunId,
   GpqaDiamondStatus,
   HumanEvalStatus,
+  MmmuProStatus,
   ProgressEvent,
   RecipeEvalPreset,
   RecipeTestMode,
@@ -19,6 +20,7 @@ interface RunControlsProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  mmmuProStatus: MmmuProStatus;
   terminalBenchStatus: TerminalBenchStatus;
   onEvalPresetChange: (preset: RecipeEvalPreset) => void;
   onTestModeChange: (mode: RecipeTestMode) => void;
@@ -36,6 +38,7 @@ export function RunControls({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  mmmuProStatus,
   terminalBenchStatus,
   onToggleRunTarget,
   onNoTestsSelected,
@@ -81,12 +84,14 @@ export function RunControls({
       id === "ppl_check" ||
       id === "gpqa_diamond" ||
       id === "humaneval" ||
-      id === "terminal_bench",
+      id === "terminal_bench" ||
+      id === "mmmu_pro",
   );
   const hasSelectedApiBenchmark =
     selectedRunIds.includes("gpqa_diamond") ||
     selectedRunIds.includes("humaneval") ||
-    selectedRunIds.includes("terminal_bench");
+    selectedRunIds.includes("terminal_bench") ||
+    selectedRunIds.includes("mmmu_pro");
   const runDisabled = cancelling || (!hasModel && hasSelectedRun && !hasSelectedApiBenchmark);
 
   return (
@@ -151,6 +156,13 @@ export function RunControls({
               checked={selectedRunIds.includes("humaneval")}
               disabled={running}
               onClick={() => onToggleRunTarget("humaneval")}
+            />
+            <RunMenuCheckbox
+              label="MMMU-Pro"
+              status={mmmuProStatus.statusLabel}
+              checked={selectedRunIds.includes("mmmu_pro")}
+              disabled={running}
+              onClick={() => onToggleRunTarget("mmmu_pro")}
             />
             <RunMenuCheckbox
               label="Terminal-Bench 2.1"

@@ -7,6 +7,7 @@ import type {
   GpqaDiamondStatus,
   GpqaShotMode,
   HumanEvalStatus,
+  MmmuProStatus,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -55,11 +56,13 @@ interface WorkbenchShellProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  mmmuProStatus: MmmuProStatus;
   terminalBenchStatus: TerminalBenchStatus;
   terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
+  mmmuProConfig: GpqaBenchmarkConfigInput;
   terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   modelExplorerFocusVersion: number;
   bottomPanelVisible: boolean;
@@ -86,6 +89,7 @@ interface WorkbenchShellProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onMmmuProConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onTerminalBenchConfigChange: (config: TerminalBenchBenchmarkConfigInput) => void;
   onInstallGpqaHarness: () => void;
   onDownloadGpqaDataset: () => void;
@@ -99,11 +103,13 @@ interface WorkbenchShellProps {
   onOpenGpqaDataset: () => void;
   onOpenHumanEvalDetails: () => void;
   onOpenTerminalBenchDetails: () => void;
+  onOpenMmmuProDetails: () => void;
   onInstallTerminalBenchHarness: () => void;
   onDownloadTerminalBenchDataset: () => void;
   onDeleteTerminalBenchDataset: () => void;
   onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunMmmuProBenchmark: () => void;
   onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
@@ -137,11 +143,13 @@ export function WorkbenchShell({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  mmmuProStatus,
   terminalBenchStatus,
   terminalBenchDatasetStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
+  mmmuProConfig,
   terminalBenchConfig,
   modelExplorerFocusVersion,
   bottomPanelVisible,
@@ -168,6 +176,7 @@ export function WorkbenchShell({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onMmmuProConfigChange,
   onTerminalBenchConfigChange,
   onInstallGpqaHarness,
   onDownloadGpqaDataset,
@@ -181,11 +190,13 @@ export function WorkbenchShell({
   onOpenGpqaDataset,
   onOpenHumanEvalDetails,
   onOpenTerminalBenchDetails,
+  onOpenMmmuProDetails,
   onInstallTerminalBenchHarness,
   onDownloadTerminalBenchDataset,
   onDeleteTerminalBenchDataset,
   onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunMmmuProBenchmark,
   onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
@@ -197,6 +208,7 @@ export function WorkbenchShell({
   const shellRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH);
   const [activeActivity, setActiveActivity] = useState<ActivityId>("gguf");
+  const [projectorExpanded, setProjectorExpanded] = useState(true);
   const lastExpandedExplorerWidth = useRef(EXPLORER_DEFAULT_WIDTH);
   const sidePanelVisible = explorerWidth > 0;
   const activeEditor = openEditors.find((editor) => editor.id === activeEditorId) ?? null;
@@ -205,6 +217,11 @@ export function WorkbenchShell({
   const gpqaEditorActive = activeEditor?.kind === "gpqa-details" || activeEditor?.kind === "gpqa-dataset";
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
   const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
+  const mmmuProEditorActive = activeEditor?.kind === "mmmu-pro-details";
+
+  useEffect(() => {
+    setProjectorExpanded(true);
+  }, [projectorPath]);
 
   useEffect(() => {
     if (modelExplorerFocusVersion === 0) return;
@@ -307,15 +324,18 @@ export function WorkbenchShell({
           running={running}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          mmmuProStatus={mmmuProStatus}
           terminalBenchStatus={terminalBenchStatus}
           gpqaEditorActive={gpqaEditorActive}
           humanevalEditorActive={humanevalEditorActive}
           terminalBenchEditorActive={terminalBenchEditorActive}
+          mmmuProEditorActive={mmmuProEditorActive}
           onRefreshAllBenchmarks={onRefreshAllBenchmarks}
           onOpenGpqaDetails={onOpenGpqaDetails}
           onOpenGpqaDataset={onOpenGpqaDataset}
           onOpenHumanEvalDetails={onOpenHumanEvalDetails}
           onOpenTerminalBenchDetails={onOpenTerminalBenchDetails}
+          onOpenMmmuProDetails={onOpenMmmuProDetails}
         />
       ) : (
         <ExplorerPanel
@@ -327,12 +347,14 @@ export function WorkbenchShell({
           activeProjectorGroupId={activeProjectorGroupId}
           expandedLayers={expandedLayers}
           expandedProjectorGroups={expandedProjectorGroups}
+          projectorExpanded={projectorExpanded}
           running={running}
           onOpenLayer={onOpenLayer}
           onOpenTensorValues={onOpenTensorValues}
           onOpenModel={onOpenModel}
           onOpenProjector={onOpenProjector}
           onRemoveProjector={onRemoveProjector}
+          onToggleProjector={() => setProjectorExpanded((current) => !current)}
           onOpenProjectorGroup={onOpenProjectorGroup}
           onToggleProjectorGroup={onToggleProjectorGroup}
           onOpenProjectorTensorValues={onOpenProjectorTensorValues}
@@ -396,11 +418,13 @@ export function WorkbenchShell({
         selectedRunIds={selectedRunIds}
         gpqaStatus={gpqaStatus}
         humanevalStatus={humanevalStatus}
+        mmmuProStatus={mmmuProStatus}
         terminalBenchStatus={terminalBenchStatus}
         terminalBenchDatasetStatus={terminalBenchDatasetStatus}
         gpqaShotMode={gpqaShotMode}
         gpqaConfig={gpqaConfig}
         humanevalConfig={humanevalConfig}
+        mmmuProConfig={mmmuProConfig}
         terminalBenchConfig={terminalBenchConfig}
         onInstallGpqaHarness={onInstallGpqaHarness}
         onDownloadGpqaDataset={onDownloadGpqaDataset}
@@ -420,12 +444,14 @@ export function WorkbenchShell({
         onGpqaShotModeChange={onGpqaShotModeChange}
         onGpqaConfigChange={onGpqaConfigChange}
         onHumanEvalConfigChange={onHumanEvalConfigChange}
+        onMmmuProConfigChange={onMmmuProConfigChange}
         onTerminalBenchConfigChange={onTerminalBenchConfigChange}
         onInstallTerminalBenchHarness={onInstallTerminalBenchHarness}
         onDownloadTerminalBenchDataset={onDownloadTerminalBenchDataset}
         onDeleteTerminalBenchDataset={onDeleteTerminalBenchDataset}
         onRefreshTerminalBenchStatus={onRefreshTerminalBenchStatus}
         onRunHumanEvalBenchmark={onRunHumanEvalBenchmark}
+        onRunMmmuProBenchmark={onRunMmmuProBenchmark}
         onRunTerminalBenchBenchmark={onRunTerminalBenchBenchmark}
         onTest={onTest}
         onCancelTest={onCancelTest}

@@ -14,6 +14,14 @@ pub enum GgufError {
     UnsupportedVersion(u32),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GgufIdentity {
+    pub file_type: String,
+    pub name: String,
+    pub basename: String,
+    pub finetune: String,
+}
+
 impl From<std::io::Error> for GgufError {
     fn from(e: std::io::Error) -> Self {
         GgufError::Io(e)
@@ -108,6 +116,48 @@ fn skip_value<R: Read + Seek>(reader: &mut R, value_type: u32) -> Result<(), Ggu
         _ => {} // unknown type, skip nothing (best effort)
     }
     Ok(())
+}
+
+pub(crate) fn read_gguf_identity(path: &Path) -> Result<GgufIdentity, GgufError> {
+    let mut file = File::open(path)?;
+
+    if read_u32(&mut file)? != GGUF_MAGIC {
+        return Err(GgufError::InvalidMagic);
+    }
+
+    let version = read_u32(&mut file)?;
+    if version != 3 && version != 2 {
+        return Err(GgufError::UnsupportedVersion(version));
+    }
+
+    let _tensor_count = read_u64(&mut file)?;
+    let metadata_kv_count = read_u64(&mut file)? as usize;
+    let mut identity = GgufIdentity {
+        file_type: String::new(),
+        name: String::new(),
+        basename: String::new(),
+        finetune: String::new(),
+    };
+
+    for _ in 0..metadata_kv_count {
+        let key = read_string(&mut file)?;
+        let value_type = read_u32(&mut file)?;
+        if value_type != 8 {
+            skip_value(&mut file, value_type)?;
+            continue;
+        }
+
+        let value = read_string(&mut file)?;
+        match key.as_str() {
+            "general.type" => identity.file_type = value,
+            "general.name" => identity.name = value,
+            "general.basename" => identity.basename = value,
+            "general.finetune" => identity.finetune = value,
+            _ => {}
+        }
+    }
+
+    Ok(identity)
 }
 
 fn ggml_type_name(t: u32) -> &'static str {

@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { MMMU_PRO_SUBJECTS } from "../../types";
 import { TensorTable } from "../DetailPanel/TensorTable";
 import type {
   BenchmarkResult,
@@ -20,6 +21,10 @@ import type {
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  MmmuProDatasetRow,
+  MmmuProDatasetStatus,
+  MmmuProStatus,
+  MmmuProBenchmarkConfigInput,
   ProgressEvent,
   QuantType,
   RecipeEvalPreset,
@@ -38,15 +43,22 @@ import { EditorTabs } from "./EditorTabs";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
+  deleteGpqaDiamondHarness,
   deleteHumanEvalDataset,
   deleteHumanEvalHarness,
+  deleteMmmuProDataset,
   downloadHumanEvalDataset,
+  downloadMmmuProDataset,
   getGpqaDiamondDatasetRows,
+  getGpqaDiamondStatus,
   getHumanEvalDatasetRows,
+  getMmmuProDatasetRows,
+  getMmmuProDatasetStatus,
   getTerminalBenchDatasetRows,
   getHumanEvalDatasetStatus,
   getHumanEvalStatus,
   getTensorValues,
+  installGpqaDiamondHarness,
   installHumanEvalHarness,
 } from "../../lib/tauri-bridge";
 
@@ -55,6 +67,7 @@ const BOTTOM_PANEL_MIN_HEIGHT = 64;
 type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
 type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
 type TerminalBenchTab = "details" | "dataset" | "configuration";
+type MmmuProTab = "details" | "dataset" | "configuration";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -79,11 +92,13 @@ interface EditorPaneProps {
   selectedRunIds: BenchmarkRunId[];
   gpqaStatus: GpqaDiamondStatus;
   humanevalStatus: HumanEvalStatus;
+  mmmuProStatus: MmmuProStatus;
   terminalBenchStatus: TerminalBenchStatus;
   terminalBenchDatasetStatus: TerminalBenchDatasetStatus;
   gpqaShotMode: GpqaShotMode;
   gpqaConfig: GpqaBenchmarkConfigInput;
   humanevalConfig: GpqaBenchmarkConfigInput;
+  mmmuProConfig: GpqaBenchmarkConfigInput;
   terminalBenchConfig: TerminalBenchBenchmarkConfigInput;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
@@ -103,12 +118,14 @@ interface EditorPaneProps {
   onGpqaShotModeChange: (mode: GpqaShotMode) => void;
   onGpqaConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onHumanEvalConfigChange: (config: GpqaBenchmarkConfigInput) => void;
+  onMmmuProConfigChange: (config: GpqaBenchmarkConfigInput) => void;
   onTerminalBenchConfigChange: (config: TerminalBenchBenchmarkConfigInput) => void;
   onInstallTerminalBenchHarness: () => void;
   onDownloadTerminalBenchDataset: () => void;
   onDeleteTerminalBenchDataset: () => void;
   onRefreshTerminalBenchStatus: () => void;
   onRunHumanEvalBenchmark: () => void;
+  onRunMmmuProBenchmark: () => void;
   onRunTerminalBenchBenchmark: () => void;
   onTest: () => void;
   onCancelTest: () => void;
@@ -127,6 +144,7 @@ function basename(path: string | null): string {
 function benchmarkResultLabel(result: BenchmarkResult): string | null {
   if (result.testMode === "official_gpqa_diamond") return "GPQA Diamond";
   if (result.testMode === "official_humaneval") return "HumanEval";
+  if (result.testMode === "official_mmmu_pro") return "MMMU-Pro";
   if (result.testMode === "official_terminal_bench") return "Terminal-Bench 2.1";
   return null;
 }
@@ -150,11 +168,13 @@ export function EditorPane({
   selectedRunIds,
   gpqaStatus,
   humanevalStatus,
+  mmmuProStatus,
   terminalBenchStatus,
   terminalBenchDatasetStatus,
   gpqaShotMode,
   gpqaConfig,
   humanevalConfig,
+  mmmuProConfig,
   terminalBenchConfig,
   onSelectEditor,
   onCloseEditor,
@@ -174,12 +194,14 @@ export function EditorPane({
   onGpqaShotModeChange,
   onGpqaConfigChange,
   onHumanEvalConfigChange,
+  onMmmuProConfigChange,
   onTerminalBenchConfigChange,
   onInstallTerminalBenchHarness,
   onDownloadTerminalBenchDataset,
   onDeleteTerminalBenchDataset,
   onRefreshTerminalBenchStatus,
   onRunHumanEvalBenchmark,
+  onRunMmmuProBenchmark,
   onRunTerminalBenchBenchmark,
   onTest,
   onCancelTest,
@@ -202,11 +224,13 @@ export function EditorPane({
   const showingGpqaBenchmark = showingGpqaDetails || showingGpqaDataset;
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
+  const showingMmmuProBenchmark = activeEditor?.kind === "mmmu-pro-details";
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
     : null;
-  const showingBenchmark = showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark;
+  const showingBenchmark =
+    showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark || showingMmmuProBenchmark;
   const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
 
   const bottomPanelMaxHeight = () => {
@@ -261,6 +285,7 @@ export function EditorPane({
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
           humanevalStatus={humanevalStatus}
+          mmmuProStatus={mmmuProStatus}
           terminalBenchStatus={terminalBenchStatus}
           onEvalPresetChange={onEvalPresetChange}
           onTestModeChange={onTestModeChange}
@@ -345,6 +370,17 @@ export function EditorPane({
           onRefreshStatus={onRefreshTerminalBenchStatus}
           onConfigChange={onTerminalBenchConfigChange}
           onRunBenchmark={onRunTerminalBenchBenchmark}
+        />
+      ) : showingMmmuProBenchmark ? (
+        <MmmuProBenchmarkView
+          status={mmmuProStatus}
+          gpqaStatus={gpqaStatus}
+          config={mmmuProConfig as MmmuProBenchmarkConfigInput}
+          running={running}
+          onBeginSetup={onBeginBenchmarkSetup}
+          onEndSetup={onEndBenchmarkSetup}
+          onConfigChange={onMmmuProConfigChange}
+          onRunBenchmark={onRunMmmuProBenchmark}
         />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
@@ -1846,6 +1882,501 @@ function TerminalBenchView({
               <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
               <BenchmarkInfoRow label="SHA256" value={datasetStatus.datasetHash ?? "Unavailable"} />
               <BenchmarkInfoRow label="Expected SHA256" value={datasetStatus.expectedDatasetHash} />
+            </BenchmarkInfoSection>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MmmuProBenchmarkView({
+  status,
+  gpqaStatus,
+  config,
+  running,
+  onBeginSetup,
+  onEndSetup,
+  onConfigChange,
+  onRunBenchmark,
+}: {
+  status: MmmuProStatus;
+  gpqaStatus: GpqaDiamondStatus;
+  config: MmmuProBenchmarkConfigInput;
+  running: boolean;
+  onBeginSetup: (message?: string | null) => void;
+  onEndSetup: () => void;
+  onConfigChange: (config: MmmuProBenchmarkConfigInput) => void;
+  onRunBenchmark: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<MmmuProTab>("details");
+  const [datasetStatus, setDatasetStatus] = useState<MmmuProDatasetStatus>({
+    datasetReady: false,
+    datasetStatusLabel: "Missing",
+    datasetPath: null,
+    datasetHash: null,
+    datasetUrl: "AI-ModelScope/MMMU_Pro",
+    expectedDatasetHash: "EvalScope dataset cache marker",
+  });
+  const [harnessStatus, setHarnessStatus] = useState(gpqaStatus);
+  const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [datasetRows, setDatasetRows] = useState<MmmuProDatasetRow[]>([]);
+  const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
+  const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
+  const harnessInstalled = Boolean(harnessStatus?.python && harnessStatus?.evalscope);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMmmuProDatasetStatus()
+      .then((nextDatasetStatus) => {
+        if (cancelled) return;
+        setDatasetStatus(nextDatasetStatus);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setDetail(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
+  useEffect(() => {
+    setHarnessStatus(gpqaStatus);
+  }, [gpqaStatus]);
+
+  useEffect(() => {
+    if (activeTab !== "dataset" || !datasetStatus.datasetReady) {
+      setDatasetRows([]);
+      setDatasetRowsError(null);
+      setLoadingDatasetRows(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingDatasetRows(true);
+    getMmmuProDatasetRows()
+      .then((rows) => {
+        if (cancelled) return;
+        setDatasetRows(rows);
+        setDatasetRowsError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setDatasetRows([]);
+        setDatasetRowsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDatasetRows(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetStatus.datasetReady]);
+
+  const refreshStatus = async (message = "Refreshing status") => {
+    setBusy(true);
+    onBeginSetup(message);
+    try {
+      const [datasetResult, harnessResult] = await Promise.allSettled([
+        getMmmuProDatasetStatus().then(setDatasetStatus),
+        getGpqaDiamondStatus().then(setHarnessStatus),
+      ]);
+      const failure = [datasetResult, harnessResult].find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
+      setDetail(null);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setDetail((error as Error).message);
+    } finally {
+      setBusy(false);
+      onEndSetup();
+    }
+  };
+
+  const changeHarness = async () => {
+    setBusy(true);
+    onBeginSetup(harnessInstalled ? "Deleting harness" : "Installing harness");
+    try {
+      const nextHarnessStatus = harnessInstalled
+        ? await deleteGpqaDiamondHarness()
+        : await installGpqaDiamondHarness();
+      setHarnessStatus(nextHarnessStatus);
+      setDetail(null);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setDetail((error as Error).message);
+    } finally {
+      setBusy(false);
+      onEndSetup();
+    }
+  };
+
+  const changeDataset = async () => {
+    setBusy(true);
+    onBeginSetup(datasetStatus.datasetReady ? "Deleting dataset" : "Downloading dataset");
+    try {
+      setDatasetStatus(
+        datasetStatus.datasetReady ? await deleteMmmuProDataset() : await downloadMmmuProDataset(),
+      );
+      setDetail(null);
+      window.dispatchEvent(new Event("modelinspector:benchmark-harness-changed"));
+    } catch (error) {
+      setDetail((error as Error).message);
+    } finally {
+      setBusy(false);
+      onEndSetup();
+    }
+  };
+
+  const updateIntegerField =
+    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
+    };
+  const updateDecimalField =
+    (field: "temperature" | "repeatPenalty" | "topP" | "minP") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^\d*(?:\.\d*)?$/.test(value)) {
+        onConfigChange({ ...config, [field]: value });
+      }
+    };
+  const updateSignedDecimalField =
+    (field: "presencePenalty") =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.currentTarget.value;
+      if (/^-?\d*(?:\.\d*)?$/.test(value)) {
+        onConfigChange({ ...config, [field]: value });
+      }
+    };
+  const subjectConfigs = MMMU_PRO_SUBJECTS.map((subject) => {
+    const saved = config.subjects?.find((entry) => entry.subject === subject.id);
+    return saved ?? { subject: subject.id, included: true, sampleLimit: config.sampleLimit };
+  });
+  const allSubjectsIncluded = subjectConfigs.every((subject) => subject.included);
+  const updateSubjects = (subjects: typeof subjectConfigs) => {
+    onConfigChange({ ...config, subjects });
+  };
+  const updateSubject = (
+    subjectId: (typeof MMMU_PRO_SUBJECTS)[number]["id"],
+    update: Partial<(typeof subjectConfigs)[number]>,
+  ) => {
+    updateSubjects(
+      subjectConfigs.map((subject) =>
+        subject.subject === subjectId ? { ...subject, ...update } : subject,
+      ),
+    );
+  };
+
+  return (
+    <section className="benchmark-editor-surface">
+      <div className="benchmark-page">
+        <div className="benchmark-page-header">
+          <div className="benchmark-page-hero">
+            <div className="benchmark-page-title">
+              <h1>MMMU-Pro</h1>
+              <div className="benchmark-page-meta">
+                <span>EvalScope</span>
+                <span>|</span>
+                <span>mmmu_pro</span>
+                <span>|</span>
+                <span>1,730 samples</span>
+              </div>
+              <p>Official MMMU-Pro harness for multimodal visual reasoning through the in-process chat API.</p>
+              <div className="benchmark-page-actions">
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running || (!datasetStatus.datasetReady && !harnessInstalled)}
+                  onClick={changeDataset}
+                >
+                  {datasetStatus.datasetReady ? "Delete dataset" : "Download dataset"}
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Verifying hash")}
+                >
+                  Verify hash
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running}
+                  onClick={changeHarness}
+                >
+                  {harnessInstalled ? "Delete harness" : "Install harness"}
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button secondary"
+                  disabled={busy || running}
+                  onClick={() => void refreshStatus("Refreshing status")}
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className="benchmark-action-button primary"
+                  disabled={busy || running || !status.ready}
+                  onClick={onRunBenchmark}
+                >
+                  Run Benchmark
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="benchmark-page-tabs" role="tablist" aria-label="MMMU-Pro sections">
+            {(["details", "dataset", "configuration"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "active" : ""}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="benchmark-page-body">
+          <div className="benchmark-page-main">
+            {activeTab === "details" ? (
+              <div className="benchmark-copy">
+                <h2>About This Benchmark</h2>
+                <p>
+                  MMMU-Pro evaluates multimodal visual reasoning through EvalScope using the
+                  app&apos;s in-process OpenAI-compatible chat API and a compatible MMPROJ.
+                </p>
+                <h2>About The Dataset</h2>
+                <p>
+                  The dataset contains 1,730 multiple-choice visual reasoning tasks across 30
+                  academic subjects. Dataset images are available in the preview after download.
+                </p>
+                <h2>Availability</h2>
+                <p>MMMU-Pro runs through EvalScope after multimodal compatibility is verified.</p>
+              </div>
+            ) : activeTab === "dataset" ? (
+              <div className="benchmark-copy">
+                <h2>Dataset Preview</h2>
+                {!datasetStatus.datasetReady ? (
+                  <p>Download and verify the dataset to preview samples and images.</p>
+                ) : loadingDatasetRows ? (
+                  <p>Loading dataset samples...</p>
+                ) : datasetRowsError ? (
+                  <p>{datasetRowsError}</p>
+                ) : datasetRows.length === 0 ? (
+                  <p>No dataset samples found.</p>
+                ) : (
+                  <div className="benchmark-dataset-table" role="table" aria-label="MMMU-Pro dataset samples">
+                    <div className="benchmark-dataset-row header" role="row">
+                      <span role="columnheader">#</span>
+                      <span role="columnheader">Task</span>
+                      <span role="columnheader">Question</span>
+                      <span role="columnheader">Images</span>
+                    </div>
+                    {datasetRows.map((row) => (
+                      <div className="benchmark-dataset-row" role="row" key={row.index}>
+                        <span role="cell">{row.index}</span>
+                        <span role="cell">
+                          {row.taskId || "Unavailable"}
+                          {row.subject ? `\n${row.subject}` : ""}
+                        </span>
+                        <span role="cell">
+                          {row.question || "Unavailable"}
+                          {row.choices.length > 0 ? `\n${row.choices.join("\n")}` : ""}
+                        </span>
+                        <span role="cell">
+                          {row.imageUrls.length > 0 ? (
+                            <span style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                              {row.imageUrls.map((imageUrl, index) => (
+                                <img
+                                  key={`${row.index}-${index}`}
+                                  src={imageUrl}
+                                  alt={`${row.taskId || "MMMU-Pro sample"} image ${index + 1}`}
+                                  style={{ width: 112, maxHeight: 84, objectFit: "contain" }}
+                                />
+                              ))}
+                            </span>
+                          ) : (
+                            "No image"
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="benchmark-copy">
+                <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkSelectRow
+                    label="Thinking"
+                    selectLabel="MMMU-Pro thinking"
+                    value={config.thinking}
+                    onChange={(thinking) => onConfigChange({ ...config, thinking })}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                  />
+                  <BenchmarkInputRow
+                    label="Temperature"
+                    inputLabel="MMMU-Pro temperature"
+                    value={config.temperature}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("temperature")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top K Sampling"
+                    inputLabel="MMMU-Pro top K sampling"
+                    value={config.topK}
+                    placeholder="40"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("topK")}
+                  />
+                  <BenchmarkInputRow
+                    label="Repeat Penalty"
+                    inputLabel="MMMU-Pro repeat penalty"
+                    value={config.repeatPenalty}
+                    placeholder="1.1"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("repeatPenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Presence Penalty"
+                    inputLabel="MMMU-Pro presence penalty"
+                    value={config.presencePenalty}
+                    placeholder="0"
+                    inputMode="decimal"
+                    onChange={updateSignedDecimalField("presencePenalty")}
+                  />
+                  <BenchmarkInputRow
+                    label="Top P Sampling"
+                    inputLabel="MMMU-Pro top P sampling"
+                    value={config.topP}
+                    placeholder="0.95"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("topP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Min P Sampling"
+                    inputLabel="MMMU-Pro min P sampling"
+                    value={config.minP}
+                    placeholder="0.05"
+                    inputMode="decimal"
+                    onChange={updateDecimalField("minP")}
+                  />
+                  <BenchmarkInputRow
+                    label="Context window"
+                    inputLabel="MMMU-Pro context window"
+                    value={config.contextWindow}
+                    placeholder="20000"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("contextWindow")}
+                  />
+                  <BenchmarkInfoRow label="Batch size" value="1" />
+                  <div className="mmmu-pro-subjects" aria-label="MMMU-Pro subject configuration">
+                    <div className="mmmu-pro-subjects-header">
+                      <span>Subject Selection</span>
+                      <span>30 subjects</span>
+                    </div>
+                    <div className="mmmu-pro-subjects-actions">
+                      <button
+                        type="button"
+                        className="benchmark-action-button secondary"
+                        disabled={busy || running}
+                        onClick={() =>
+                          updateSubjects(
+                            subjectConfigs.map((subject) => ({
+                              ...subject,
+                              included: !allSubjectsIncluded,
+                            })),
+                          )
+                        }
+                      >
+                        {allSubjectsIncluded ? "Unselect all" : "Select all"}
+                      </button>
+                    </div>
+                    <div className="mmmu-pro-subjects-table" role="table" aria-label="MMMU-Pro subjects">
+                      <div className="mmmu-pro-subject-row header" role="row">
+                        <span role="columnheader">Subject</span>
+                        <span role="columnheader">Samples</span>
+                        <span role="columnheader">Include</span>
+                      </div>
+                      {subjectConfigs.map((subject) => (
+                        <div className="mmmu-pro-subject-row" role="row" key={subject.subject}>
+                          <span role="cell">
+                            {MMMU_PRO_SUBJECTS.find((entry) => entry.id === subject.subject)?.label ?? subject.subject}
+                          </span>
+                          <span role="cell">
+                            <input
+                              aria-label={`${subject.subject} samples`}
+                              className="benchmark-config-input mmmu-pro-subject-samples"
+                              value={subject.sampleLimit}
+                              inputMode="numeric"
+                              disabled={busy || running}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value;
+                                if (/^\d*$/.test(value)) updateSubject(subject.subject, { sampleLimit: value });
+                              }}
+                            />
+                          </span>
+                          <span role="cell">
+                            <span
+                              className="run-menu-check"
+                              aria-label={`${subject.subject} included`}
+                              role="checkbox"
+                              aria-checked={subject.included}
+                              aria-disabled={busy || running}
+                              tabIndex={busy || running ? -1 : 0}
+                              onClick={() => {
+                                if (!busy && !running) updateSubject(subject.subject, { included: !subject.included });
+                              }}
+                              onKeyDown={(event) => {
+                                if ((event.key === " " || event.key === "Enter") && !busy && !running) {
+                                  event.preventDefault();
+                                  updateSubject(subject.subject, { included: !subject.included });
+                                }
+                              }}
+                            >
+                              {subject.included ? <span className="codicon codicon-check" aria-hidden="true" /> : null}
+                             </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </BenchmarkInfoSection>
+              </div>
+            )}
+          </div>
+          <aside className="benchmark-page-side">
+            <p className="benchmark-readiness">{detail ?? status.detail}</p>
+            <BenchmarkInfoSection title="Harness">
+              <BenchmarkInfoRow label="Framework" value="EvalScope" />
+              <BenchmarkInfoRow label="Dataset" value="mmmu_pro" />
+              <BenchmarkInfoRow label="Metric" value="acc" />
+              <BenchmarkInfoRow label="Status" value={status.statusLabel} />
+              <BenchmarkInfoRow label="Vision model" value="Required" />
+              <BenchmarkInfoRow label="MMPROJ" value="Required" />
+              <BenchmarkInfoRow label="Shared harness" value={harnessInstalled ? "Installed" : "Needs harness"} />
+              <BenchmarkInfoRow label="EvalScope" value={harnessStatus?.evalscope ?? "Unavailable"} />
+            </BenchmarkInfoSection>
+            <BenchmarkInfoSection title="MMMU-Pro Dataset">
+              <BenchmarkInfoRow label="Downloaded" value={datasetStatus.datasetReady ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Verified" value={datasetStatus.datasetStatusLabel === "Verified" ? "Yes" : "No"} />
+              <BenchmarkInfoRow label="Samples" value="1,730" />
+              <BenchmarkInfoRow label="Official asset" value="AI-ModelScope/MMMU_Pro" />
+              <BenchmarkInfoRow label="Cache path" value={datasetStatus.datasetPath ?? "Not downloaded"} />
             </BenchmarkInfoSection>
           </aside>
         </div>

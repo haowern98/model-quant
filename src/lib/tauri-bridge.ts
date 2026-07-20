@@ -11,12 +11,15 @@ import type {
   HardwareSnapshot,
   ModelInspectorApiStatus,
   GpqaBenchmarkConfig,
+  MmmuProBenchmarkConfig,
   GpqaDatasetRow,
   GpqaDiamondStatus,
   GpqaShotMode,
   HumanEvalDatasetRow,
   HumanEvalDatasetStatus,
   HumanEvalStatus,
+  MmmuProDatasetRow,
+  MmmuProDatasetStatus,
   TerminalBenchBenchmarkConfig,
   TerminalBenchDatasetRow,
   TerminalBenchDatasetStatus,
@@ -123,11 +126,13 @@ export async function startModelInspectorApi(options?: {
   benchmarkLabel?: string;
   contextWindow?: number;
   defaultEnableThinking?: boolean;
+  enableMultimodal?: boolean;
 }): Promise<ModelInspectorApiStatus> {
   return invoke<ModelInspectorApiStatus>("start_modelinspector_api", {
     benchmarkLabel: options?.benchmarkLabel ?? null,
     contextWindow: options?.contextWindow ?? null,
     defaultEnableThinking: options?.defaultEnableThinking ?? null,
+    enableMultimodal: options?.enableMultimodal ?? false,
   });
 }
 
@@ -155,6 +160,10 @@ export async function getHumanEvalDatasetStatus(): Promise<HumanEvalDatasetStatu
   return invoke<HumanEvalDatasetStatus>("get_humaneval_dataset_status");
 }
 
+export async function getMmmuProDatasetStatus(): Promise<MmmuProDatasetStatus> {
+  return invoke<MmmuProDatasetStatus>("get_mmmu_pro_dataset_status");
+}
+
 export async function getTerminalBenchDatasetStatus(): Promise<TerminalBenchDatasetStatus> {
   return invoke<TerminalBenchDatasetStatus>("get_terminal_bench_dataset_status");
 }
@@ -165,6 +174,10 @@ export async function getGpqaDiamondDatasetRows(): Promise<GpqaDatasetRow[]> {
 
 export async function getHumanEvalDatasetRows(): Promise<HumanEvalDatasetRow[]> {
   return invoke<HumanEvalDatasetRow[]>("get_humaneval_dataset_rows");
+}
+
+export async function getMmmuProDatasetRows(): Promise<MmmuProDatasetRow[]> {
+  return invoke<MmmuProDatasetRow[]>("get_mmmu_pro_dataset_rows");
 }
 
 export async function getTerminalBenchDatasetRows(): Promise<TerminalBenchDatasetRow[]> {
@@ -187,6 +200,10 @@ export async function downloadHumanEvalDataset(): Promise<HumanEvalDatasetStatus
   return invoke<HumanEvalDatasetStatus>("download_humaneval_dataset");
 }
 
+export async function downloadMmmuProDataset(): Promise<MmmuProDatasetStatus> {
+  return invoke<MmmuProDatasetStatus>("download_mmmu_pro_dataset");
+}
+
 export async function downloadTerminalBenchDataset(): Promise<TerminalBenchDatasetStatus> {
   return invoke<TerminalBenchDatasetStatus>("download_terminal_bench_dataset");
 }
@@ -197,6 +214,10 @@ export async function deleteGpqaDiamondDataset(): Promise<GpqaDiamondStatus> {
 
 export async function deleteHumanEvalDataset(): Promise<HumanEvalDatasetStatus> {
   return invoke<HumanEvalDatasetStatus>("delete_humaneval_dataset");
+}
+
+export async function deleteMmmuProDataset(): Promise<MmmuProDatasetStatus> {
+  return invoke<MmmuProDatasetStatus>("delete_mmmu_pro_dataset");
 }
 
 export async function deleteTerminalBenchDataset(): Promise<TerminalBenchDatasetStatus> {
@@ -234,6 +255,20 @@ export async function runHumanEvalBenchmark(
   config: GpqaBenchmarkConfig,
 ): Promise<BenchmarkResult> {
   return invoke<BenchmarkResult>("run_humaneval_benchmark", {
+    baseUrl,
+    apiKey,
+    modelId,
+    config,
+  });
+}
+
+export async function runMmmuProBenchmark(
+  baseUrl: string,
+  apiKey: string,
+  modelId: string,
+  config: MmmuProBenchmarkConfig,
+): Promise<BenchmarkResult> {
+  return invoke<BenchmarkResult>("run_mmmu_pro_benchmark", {
     baseUrl,
     apiKey,
     modelId,

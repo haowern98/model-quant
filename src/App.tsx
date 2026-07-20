@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { MMMU_PRO_SUBJECTS } from "./types";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
 import {
@@ -7,6 +8,7 @@ import {
   gpqaDetailsEditorTab,
   humanevalDetailsEditorTab,
   layerEditorTab,
+  mmmuProDetailsEditorTab,
   terminalBenchDetailsEditorTab,
   tensorValuesEditorTab,
   type EditorTab,
@@ -20,7 +22,9 @@ import {
   cancelRecipeTest,
   cancelOfficialBenchmark,
   getGpqaDiamondStatus,
+  getHumanEvalDatasetStatus,
   getHumanEvalStatus,
+  getMmmuProDatasetStatus,
   getTerminalBenchStatus,
   getTerminalBenchDatasetStatus,
   installGpqaDiamondHarness,
@@ -31,6 +35,7 @@ import {
   deleteGpqaDiamondHarness,
   runGpqaDiamondBenchmark,
   runHumanEvalBenchmark,
+  runMmmuProBenchmark,
   runTerminalBenchBenchmark,
   saveRecipe,
   loadRecipe,
@@ -47,7 +52,12 @@ import type {
   GpqaBenchmarkConfigInput,
   GpqaDiamondStatus,
   GpqaShotMode,
+  HumanEvalDatasetStatus,
   HumanEvalStatus,
+  MmmuProDatasetStatus,
+  MmmuProBenchmarkConfig,
+  MmmuProBenchmarkConfigInput,
+  MmmuProStatus,
   RecipeEvalPreset,
   RecipeState,
   RecipeTestMode,
@@ -60,6 +70,49 @@ import type {
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 import { projectorGroupLabel } from "./lib/format";
+
+const MULTIMODAL_PREFLIGHT_IMAGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function runMultimodalPreflight(api: {
+  baseUrl: string | null;
+  apiKey: string | null;
+  modelId: string | null;
+}): Promise<void> {
+  if (!api.baseUrl || !api.apiKey || !api.modelId) {
+    throw new Error("Model Inspector API did not provide a usable multimodal endpoint.");
+  }
+
+  const response = await fetch(`${api.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${api.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: api.modelId,
+      max_tokens: 1,
+      temperature: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Reply with OK." },
+            { type: "image_url", image_url: { url: MULTIMODAL_PREFLIGHT_IMAGE } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
 
 const DEFAULT_GPQA_STATUS: GpqaDiamondStatus = {
   ready: false,
@@ -104,9 +157,28 @@ const DEFAULT_TERMINAL_BENCH_DATASET_STATUS: TerminalBenchDatasetStatus = {
   expectedDatasetHash: "Harbor dataset cache marker",
 };
 
+const DEFAULT_HUMANEVAL_DATASET_STATUS: HumanEvalDatasetStatus = {
+  datasetReady: false,
+  datasetStatusLabel: "Missing",
+  datasetPath: null,
+  datasetHash: null,
+  datasetUrl: "openai_humaneval",
+  expectedDatasetHash: "EvalScope dataset cache marker",
+};
+
+const DEFAULT_MMMU_PRO_DATASET_STATUS: MmmuProDatasetStatus = {
+  datasetReady: false,
+  datasetStatusLabel: "Missing",
+  datasetPath: null,
+  datasetHash: null,
+  datasetUrl: "AI-ModelScope/MMMU_Pro",
+  expectedDatasetHash: "EvalScope dataset cache marker",
+};
+
 const GPQA_DEFAULT_CONTEXT_WINDOW = 20_000;
 const GPQA_SAMPLE_COUNT = 198;
 const HUMANEVAL_SAMPLE_COUNT = 164;
+const MMMU_PRO_SAMPLE_COUNT = 1_730;
 const GPQA_DEFAULT_TEMPERATURE = 0;
 
 const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
@@ -125,6 +197,17 @@ const DEFAULT_HUMANEVAL_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
   ...DEFAULT_GPQA_CONFIG_INPUT,
   contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
   sampleLimit: String(HUMANEVAL_SAMPLE_COUNT),
+};
+
+const DEFAULT_MMMU_PRO_CONFIG_INPUT: MmmuProBenchmarkConfigInput = {
+  ...DEFAULT_GPQA_CONFIG_INPUT,
+  contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
+  sampleLimit: "5",
+  subjects: MMMU_PRO_SUBJECTS.map((subject) => ({
+    subject: subject.id,
+    included: true,
+    sampleLimit: "5",
+  })),
 };
 
 const DEFAULT_TERMINAL_BENCH_CONFIG_INPUT: TerminalBenchBenchmarkConfigInput = {
@@ -254,6 +337,41 @@ function resolveGpqaConfigInput(
     topP,
     minP,
   };
+}
+
+function resolveMmmuProConfigInput(
+  input: MmmuProBenchmarkConfigInput,
+): MmmuProBenchmarkConfig | string {
+  const base = resolveGpqaConfigInput(input);
+  if (typeof base === "string") return base.replaceAll("GPQA", "MMMU-Pro");
+
+  const subjects = input.subjects ?? MMMU_PRO_SUBJECTS.map((subject) => ({
+    subject: subject.id,
+    included: true,
+    sampleLimit: input.sampleLimit,
+  }));
+  const validSubjectIds = new Set(MMMU_PRO_SUBJECTS.map((subject) => subject.id));
+  const selected = subjects.filter((subject) => subject.included);
+  if (selected.length === 0) return "Select at least one MMMU-Pro subject.";
+  if (new Set(selected.map((subject) => subject.subject)).size !== selected.length) {
+    return "Each MMMU-Pro subject may only be selected once.";
+  }
+
+  const resolvedSubjects = [] as MmmuProBenchmarkConfig["subjects"];
+  for (const subject of selected) {
+    if (!validSubjectIds.has(subject.subject)) return `Unknown MMMU-Pro subject: ${subject.subject}.`;
+    const sampleLimit = parseOptionalIntegerField(
+      subject.sampleLimit,
+      base.sampleLimit,
+      1,
+      MMMU_PRO_SAMPLE_COUNT,
+      `${subject.subject.replaceAll("_", " ")} samples`,
+    );
+    if (typeof sampleLimit === "string") return sampleLimit;
+    resolvedSubjects.push({ subject: subject.subject, sampleLimit });
+  }
+
+  return { ...base, subjects: resolvedSubjects };
 }
 
 function resolveTerminalBenchConfigInput(
@@ -418,11 +536,15 @@ function App() {
   const [humanevalStatus, setHumanEvalStatus] = useState<HumanEvalStatus>(
     DEFAULT_HUMANEVAL_STATUS,
   );
+  const [humanevalDatasetStatus, setHumanEvalDatasetStatus] =
+    useState<HumanEvalDatasetStatus>(DEFAULT_HUMANEVAL_DATASET_STATUS);
   const [terminalBenchStatus, setTerminalBenchStatus] = useState<TerminalBenchStatus>(
     DEFAULT_TERMINAL_BENCH_STATUS,
   );
   const [terminalBenchDatasetStatus, setTerminalBenchDatasetStatus] =
     useState<TerminalBenchDatasetStatus>(DEFAULT_TERMINAL_BENCH_DATASET_STATUS);
+  const [mmmuProDatasetStatus, setMmmuProDatasetStatus] =
+    useState<MmmuProDatasetStatus>(DEFAULT_MMMU_PRO_DATASET_STATUS);
   const [gpqaShotMode, setGpqaShotMode] =
     useState<GpqaShotMode>("five_shot_cot");
   const [gpqaConfig, setGpqaConfig] = useState<GpqaBenchmarkConfigInput>(
@@ -431,8 +553,67 @@ function App() {
   const [humanevalConfig, setHumanEvalConfig] = useState<GpqaBenchmarkConfigInput>(
     DEFAULT_HUMANEVAL_CONFIG_INPUT,
   );
+  const [mmmuProConfig, setMmmuProConfig] = useState<MmmuProBenchmarkConfigInput>(
+    DEFAULT_MMMU_PRO_CONFIG_INPUT,
+  );
   const [terminalBenchConfig, setTerminalBenchConfig] =
     useState<TerminalBenchBenchmarkConfigInput>(DEFAULT_TERMINAL_BENCH_CONFIG_INPUT);
+
+  const mmmuProStatus = useMemo<MmmuProStatus>(() => {
+    if (!modelPath) {
+      return {
+        ready: false,
+        statusLabel: "Needs vision model",
+        detail: "Open a vision-capable GGUF model before running MMMU-Pro.",
+      };
+    }
+    if (!projectorPath) {
+      return {
+        ready: false,
+        statusLabel: "Needs MMPROJ",
+        detail: "Load the matching MMPROJ projector before running MMMU-Pro.",
+      };
+    }
+    if (gpqaStatus.statusLabel !== "Ready" && gpqaStatus.statusLabel !== "Download") {
+      return {
+        ready: false,
+        statusLabel: gpqaStatus.statusLabel,
+        detail: `MMMU-Pro requires the shared EvalScope harness. ${gpqaStatus.detail}`,
+      };
+    }
+    if (!mmmuProDatasetStatus.datasetReady) {
+      return {
+        ready: false,
+        statusLabel: "Download",
+        detail: "Download and verify the MMMU-Pro dataset before running the benchmark.",
+      };
+    }
+    return {
+      ready: true,
+      statusLabel: "Ready",
+      detail: "A model and MMPROJ are loaded. Compatibility is checked before MMMU-Pro runs.",
+    };
+  }, [gpqaStatus, mmmuProDatasetStatus.datasetReady, modelPath, projectorPath]);
+
+  const humanevalDisplayStatus = useMemo<HumanEvalStatus>(() => {
+    if (!humanevalStatus.ready || humanevalDatasetStatus.datasetReady) return humanevalStatus;
+    return {
+      ...humanevalStatus,
+      statusLabel: "Needs dataset",
+      detail: "Download and verify the HumanEval dataset before running the benchmark.",
+    };
+  }, [humanevalDatasetStatus.datasetReady, humanevalStatus]);
+
+  const terminalBenchDisplayStatus = useMemo<TerminalBenchStatus>(() => {
+    if (!terminalBenchStatus.ready || terminalBenchDatasetStatus.datasetReady) {
+      return terminalBenchStatus;
+    }
+    return {
+      ...terminalBenchStatus,
+      statusLabel: "Needs dataset",
+      detail: "Download and verify the Terminal-Bench dataset before running the benchmark.",
+    };
+  }, [terminalBenchDatasetStatus.datasetReady, terminalBenchStatus]);
 
   const refreshGpqaStatus = useCallback(async () => {
     try {
@@ -470,6 +651,18 @@ function App() {
 
   useEffect(() => refreshHumanEvalStatus(), [refreshHumanEvalStatus]);
 
+  const refreshHumanEvalDatasetStatus = useCallback(async () => {
+    try {
+      setHumanEvalDatasetStatus(await getHumanEvalDatasetStatus());
+    } catch {
+      setHumanEvalDatasetStatus(DEFAULT_HUMANEVAL_DATASET_STATUS);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshHumanEvalDatasetStatus();
+  }, [refreshHumanEvalDatasetStatus]);
+
   const refreshTerminalBenchStatus = useCallback(async () => {
     try {
       setTerminalBenchStatus(await getTerminalBenchStatus());
@@ -497,6 +690,18 @@ function App() {
     void refreshTerminalBenchDatasetStatus();
   }, [refreshTerminalBenchDatasetStatus]);
 
+  const refreshMmmuProDatasetStatus = useCallback(async () => {
+    try {
+      setMmmuProDatasetStatus(await getMmmuProDatasetStatus());
+    } catch {
+      setMmmuProDatasetStatus(DEFAULT_MMMU_PRO_DATASET_STATUS);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshMmmuProDatasetStatus();
+  }, [refreshMmmuProDatasetStatus]);
+
   const refreshAllBenchmarkStatuses = useCallback(async () => {
     startOperation("Refreshing benchmark statuses");
     try {
@@ -510,8 +715,10 @@ function App() {
               detail: (error as Error).message,
             });
           }),
+        refreshHumanEvalDatasetStatus(),
         refreshTerminalBenchStatus(),
         refreshTerminalBenchDatasetStatus(),
+        refreshMmmuProDatasetStatus(),
       ]);
       setAppError(null);
     } finally {
@@ -520,6 +727,8 @@ function App() {
   }, [
     endOperation,
     refreshGpqaStatus,
+    refreshHumanEvalDatasetStatus,
+    refreshMmmuProDatasetStatus,
     refreshTerminalBenchDatasetStatus,
     refreshTerminalBenchStatus,
     startOperation,
@@ -529,8 +738,10 @@ function App() {
     const refreshBenchmarkStatuses = () => {
       void refreshGpqaStatus();
       void refreshHumanEvalStatus();
+      void refreshHumanEvalDatasetStatus();
       void refreshTerminalBenchStatus();
       void refreshTerminalBenchDatasetStatus();
+      void refreshMmmuProDatasetStatus();
     };
     window.addEventListener("modelinspector:benchmark-harness-changed", refreshBenchmarkStatuses);
     return () => {
@@ -539,6 +750,8 @@ function App() {
   }, [
     refreshGpqaStatus,
     refreshHumanEvalStatus,
+    refreshHumanEvalDatasetStatus,
+    refreshMmmuProDatasetStatus,
     refreshTerminalBenchStatus,
     refreshTerminalBenchDatasetStatus,
   ]);
@@ -686,13 +899,18 @@ function App() {
     openEditorTab(terminalBenchDetailsEditorTab());
   }, [openEditorTab]);
 
+  const handleOpenMmmuProDetails = useCallback(() => {
+    openEditorTab(mmmuProDetailsEditorTab());
+  }, [openEditorTab]);
+
   const handleToggleRunTarget = useCallback(
     (target: BenchmarkRunId) => {
       if (
         target !== "ppl_check" &&
         target !== "gpqa_diamond" &&
         target !== "humaneval" &&
-        target !== "terminal_bench"
+        target !== "terminal_bench" &&
+        target !== "mmmu_pro"
       ) {
         return;
       }
@@ -706,6 +924,8 @@ function App() {
   );
 
   const handleOpenModel = useCallback(async () => {
+    if (running) return;
+
     let selected: string | null = null;
 
     if (!hasTauriRuntime()) {
@@ -755,7 +975,7 @@ function App() {
       const loadedModel = await openModel(selected);
       if (loadedModel) resetForLoadedModel(selected, loadedModel);
     }
-  }, [openModel, resetForLoadedModel]);
+  }, [openModel, resetForLoadedModel, running]);
 
   const handleOpenProjector = useCallback(async () => {
     let selected: string | null = null;
@@ -833,7 +1053,8 @@ function App() {
             id === "ppl_check" ||
             id === "gpqa_diamond" ||
             id === "humaneval" ||
-            id === "terminal_bench",
+            id === "terminal_bench" ||
+            id === "mmmu_pro",
         )
       ) {
         setAppError("Open a GGUF model before running selected tests.");
@@ -844,11 +1065,19 @@ function App() {
       setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
       return;
     }
+    if (
+      selectedRunIds.includes("mmmu_pro") &&
+      (!mmmuProStatus.ready || !mmmuProDatasetStatus.datasetReady)
+    ) {
+      setAppError(mmmuProStatus.detail);
+      return;
+    }
     const runQueue = selectedRunIds.filter(
       (id) =>
         id === "ppl_check" ||
         (id === "gpqa_diamond" && gpqaStatus.ready) ||
         (id === "humaneval" && humanevalStatus.ready) ||
+        (id === "mmmu_pro" && mmmuProStatus.ready && mmmuProDatasetStatus.datasetReady) ||
         (id === "terminal_bench" &&
           terminalBenchStatus.ready &&
           terminalBenchDatasetStatus.datasetReady),
@@ -858,6 +1087,8 @@ function App() {
         setAppError(`GPQA Diamond is not ready. Current status: ${gpqaStatus.statusLabel}.`);
       } else if (selectedRunIds.includes("humaneval") && !humanevalStatus.ready) {
         setAppError(`HumanEval is not ready. Current status: ${humanevalStatus.statusLabel}.`);
+      } else if (selectedRunIds.includes("mmmu_pro")) {
+        setAppError(mmmuProStatus.detail);
       } else if (selectedRunIds.includes("terminal_bench")) {
         setAppError(
           terminalBenchStatus.ready
@@ -935,6 +1166,40 @@ function App() {
         }
       }
 
+      if (runQueue.includes("mmmu_pro")) {
+        const config = resolveMmmuProConfigInput(mmmuProConfig);
+        if (typeof config === "string") throw new Error(config);
+        const apiStatus = await startModelInspectorApi({
+          benchmarkLabel: "MMMU-Pro",
+          contextWindow: config.contextWindow,
+          defaultEnableThinking: config.thinking === "on",
+          enableMultimodal: true,
+        });
+        if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+          throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+        }
+        try {
+          try {
+            await runMultimodalPreflight(apiStatus);
+          } catch (error) {
+            const detail = errorMessage(error);
+            if (/mmproj|vision projector|image input/i.test(detail)) {
+              throw new Error("Loaded MMPROJ is incompatible with the current model.");
+            }
+            throw new Error(`Multimodal preflight failed: ${detail}`);
+          }
+          latestResult = await runMmmuProBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            config,
+          );
+          openEvalResults(latestResult);
+        } finally {
+          await stopModelInspectorApi();
+        }
+      }
+
       if (runQueue.includes("terminal_bench")) {
         const config = resolveTerminalBenchConfigInput(terminalBenchConfig);
         if (typeof config === "string") throw new Error(config);
@@ -961,7 +1226,7 @@ function App() {
 
       setAppError(null);
     } catch (e) {
-      const message = (e as Error).message;
+      const message = errorMessage(e);
       if (!message.toLowerCase().includes("cancelled")) setAppError(message);
     } finally {
       endOperation();
@@ -978,9 +1243,12 @@ function App() {
     terminalBenchStatus.ready,
     terminalBenchStatus.statusLabel,
     terminalBenchDatasetStatus.datasetReady,
+    mmmuProStatus,
+    mmmuProDatasetStatus.datasetReady,
     gpqaShotMode,
     gpqaConfig,
     humanevalConfig,
+    mmmuProConfig,
     terminalBenchConfig,
     startOperation,
     endOperation,
@@ -1043,6 +1311,73 @@ function App() {
     humanevalStatus.ready,
     humanevalStatus.statusLabel,
     humanevalConfig,
+    startOperation,
+    endOperation,
+    openEvalResults,
+  ]);
+
+  const handleRunMmmuProBenchmark = useCallback(async () => {
+    if (!recipe || !modelPath) {
+      setAppError("Open a GGUF model before running MMMU-Pro.");
+      return;
+    }
+    if (recipe.baseModel !== modelPath) {
+      setAppError("Recipe model does not match the loaded model. Reload the model or recipe.");
+      return;
+    }
+    if (!mmmuProStatus.ready) {
+      setAppError(mmmuProStatus.detail);
+      return;
+    }
+
+    const config = resolveMmmuProConfigInput(mmmuProConfig);
+    if (typeof config === "string") {
+      setAppError(config);
+      return;
+    }
+
+    startOperation();
+    let apiStarted = false;
+    try {
+      const apiStatus = await startModelInspectorApi({
+        benchmarkLabel: "MMMU-Pro",
+        contextWindow: config.contextWindow,
+        defaultEnableThinking: config.thinking === "on",
+        enableMultimodal: true,
+      });
+      apiStarted = true;
+      if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
+        throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
+      }
+      try {
+        await runMultimodalPreflight(apiStatus);
+      } catch (error) {
+        const detail = errorMessage(error);
+        if (/mmproj|vision projector|image input/i.test(detail)) {
+          throw new Error("Loaded MMPROJ is incompatible with the current model.");
+        }
+        throw new Error(`Multimodal preflight failed: ${detail}`);
+      }
+      const result = await runMmmuProBenchmark(
+        apiStatus.baseUrl,
+        apiStatus.apiKey,
+        apiStatus.modelId,
+        config,
+      );
+      openEvalResults(result);
+      setAppError(null);
+    } catch (e) {
+      const message = errorMessage(e);
+      if (!message.toLowerCase().includes("cancelled")) setAppError(message);
+    } finally {
+      if (apiStarted) await stopModelInspectorApi();
+      endOperation();
+    }
+  }, [
+    recipe,
+    modelPath,
+    mmmuProStatus,
+    mmmuProConfig,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1328,6 +1663,7 @@ function App() {
     <div className="app-root">
       <TitleBar
         modelPath={modelPath}
+        running={running}
         bottomPanelVisible={bottomPanelVisible}
         onOpenModel={handleOpenModel}
         onToggleBottomPanel={() => setBottomPanelVisible((visible) => !visible)}
@@ -1373,12 +1709,14 @@ function App() {
           testMode={recipeTestMode}
           selectedRunIds={selectedRunIds}
           gpqaStatus={gpqaStatus}
-          humanevalStatus={humanevalStatus}
-          terminalBenchStatus={terminalBenchStatus}
+          humanevalStatus={humanevalDisplayStatus}
+          mmmuProStatus={mmmuProStatus}
+          terminalBenchStatus={terminalBenchDisplayStatus}
           terminalBenchDatasetStatus={terminalBenchDatasetStatus}
           gpqaShotMode={gpqaShotMode}
           gpqaConfig={gpqaConfig}
           humanevalConfig={humanevalConfig}
+          mmmuProConfig={mmmuProConfig}
           terminalBenchConfig={terminalBenchConfig}
           modelExplorerFocusVersion={modelExplorerFocusVersion}
           bottomPanelVisible={bottomPanelVisible}
@@ -1405,6 +1743,9 @@ function App() {
           onGpqaShotModeChange={setGpqaShotMode}
           onGpqaConfigChange={setGpqaConfig}
           onHumanEvalConfigChange={setHumanEvalConfig}
+          onMmmuProConfigChange={(config) =>
+            setMmmuProConfig(config as MmmuProBenchmarkConfigInput)
+          }
           onTerminalBenchConfigChange={setTerminalBenchConfig}
           onInstallGpqaHarness={handleInstallGpqaHarness}
           onDownloadGpqaDataset={handleDownloadGpqaDataset}
@@ -1418,11 +1759,13 @@ function App() {
           onOpenGpqaDataset={handleOpenGpqaDataset}
           onOpenHumanEvalDetails={handleOpenHumanEvalDetails}
           onOpenTerminalBenchDetails={handleOpenTerminalBenchDetails}
+          onOpenMmmuProDetails={handleOpenMmmuProDetails}
           onInstallTerminalBenchHarness={handleInstallTerminalBenchHarness}
           onDownloadTerminalBenchDataset={handleDownloadTerminalBenchDataset}
           onDeleteTerminalBenchDataset={handleDeleteTerminalBenchDataset}
           onRefreshTerminalBenchStatus={handleRefreshTerminalBenchStatus}
           onRunHumanEvalBenchmark={handleRunHumanEvalBenchmark}
+          onRunMmmuProBenchmark={handleRunMmmuProBenchmark}
           onRunTerminalBenchBenchmark={handleRunTerminalBenchBenchmark}
           onTest={handleTest}
           onCancelTest={handleCancelTest}
