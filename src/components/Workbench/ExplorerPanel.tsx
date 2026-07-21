@@ -1,21 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import {
-  QUANT_TYPES,
-  type AssignPattern,
-  type QuantType,
-  type TensorInfo,
-} from "../../types";
+import { type AssignPattern, type QuantType, type TensorInfo } from "../../types";
 import { formatTensorName, projectorGroupLabel } from "../../lib/format";
 import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 
 type ExplorerSectionId = "gguf" | "mmproj" | "lora";
-
-const BULK_PATTERNS: { value: AssignPattern; label: string; aria: string }[] = [
-  { value: "all_attn", label: "All Attention", aria: "All Attention target" },
-  { value: "all_ffn", label: "All FFN", aria: "All FFN target" },
-  { value: "all_embeddings", label: "All Embeddings", aria: "All Embeddings target" },
-  { value: "all", label: "Entire Model", aria: "Entire Model target" },
-];
 
 const PROJECTOR_MIN_HEIGHT = 80;
 
@@ -80,17 +68,12 @@ export function ExplorerPanel({
   onToggleProjectorGroup,
   onOpenProjectorTensorValues,
   onToggleLayer,
-  onAssignByPattern,
-  onSaveRecipe,
-  onLoadRecipe,
-  onExport,
 }: ExplorerPanelProps) {
   const [sections, setSections] = useState<Record<ExplorerSectionId, boolean>>({
     gguf: true,
     mmproj: false,
     lora: false,
   });
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
@@ -204,12 +187,6 @@ export function ExplorerPanel({
     };
   }, [expandedProjectorGroups, projectorExpanded, projectorGroups]);
 
-  const handleBulkAssign = (pattern: AssignPattern, value: string) => {
-    if (!value) return;
-    onAssignByPattern(pattern, value as QuantType);
-    setActionsOpen(false);
-  };
-
   const startProjectorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const section = projectorSectionRef.current;
@@ -260,7 +237,6 @@ export function ExplorerPanel({
               type="button"
               className="tree-action-button"
               aria-label="Model actions"
-              onClick={() => setActionsOpen((value) => !value)}
             >
               ...
             </button>
@@ -270,45 +246,6 @@ export function ExplorerPanel({
 
         {sections.gguf && (
           <div className="explorer-section-body" ref={sectionBodyRef}>
-            {actionsOpen && modelPath && (
-              <div className="model-actions-popover">
-                <div className="model-actions-header">Recipe Actions</div>
-                <div className="model-action-buttons">
-                  <button type="button" onClick={onSaveRecipe} disabled={running}>
-                    Save Recipe
-                  </button>
-                  <button type="button" onClick={onLoadRecipe} disabled={running}>
-                    Load Recipe
-                  </button>
-                  <button type="button" onClick={onExport} disabled={running}>
-                    Export GGUF
-                  </button>
-                </div>
-                <div className="model-actions-header">Bulk Assign</div>
-                {BULK_PATTERNS.map((pattern) => (
-                  <label key={pattern.value} className="bulk-action-row">
-                    <span>{pattern.label}</span>
-                    <select
-                      aria-label={pattern.aria}
-                      disabled={running}
-                      defaultValue=""
-                      onChange={(event) => {
-                        handleBulkAssign(pattern.value, event.target.value);
-                        event.currentTarget.value = "";
-                      }}
-                    >
-                      <option value="">Apply...</option>
-                      {QUANT_TYPES.map((quant) => (
-                        <option key={quant.value} value={quant.value}>
-                          {quant.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            )}
-
             {!modelPath && (
               <div className="future-section-empty">
                 <button type="button" disabled={running} onClick={onOpenModel}>
