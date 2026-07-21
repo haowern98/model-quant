@@ -84,6 +84,7 @@ export function ExplorerPanel({
   });
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
   const [modelActionsOpen, setModelActionsOpen] = useState(false);
+  const [bulkQuantSelections, setBulkQuantSelections] = useState<Partial<Record<AssignPattern, QuantType>>>({});
   const modelActionsRef = useRef<HTMLDivElement>(null);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
@@ -93,6 +94,10 @@ export function ExplorerPanel({
   const projectorGroupRefs = useRef(new Map<string, HTMLDivElement>());
   const [stickyProjectorGroups, setStickyProjectorGroups] = useState<Set<string>>(() => new Set());
   const [projectorHeight, setProjectorHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    setBulkQuantSelections({});
+  }, [modelPath]);
 
   useEffect(() => {
     if (!modelActionsOpen) return;
@@ -284,12 +289,12 @@ export function ExplorerPanel({
                         <span>{label}</span>
                         <select
                           aria-label={`${label} quantization`}
-                          defaultValue=""
+                          value={bulkQuantSelections[pattern] ?? ""}
                           onChange={(event) => {
                             const quantType = event.currentTarget.value as QuantType;
                             if (!quantType) return;
+                            setBulkQuantSelections((current) => ({ ...current, [pattern]: quantType }));
                             onAssignByPattern(pattern, quantType);
-                            event.currentTarget.value = "";
                           }}
                         >
                           <option value="">Apply...</option>
