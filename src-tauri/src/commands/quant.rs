@@ -1,7 +1,8 @@
 use std::sync::Mutex;
 use tauri::State;
 
-use crate::quant::recipe::{QuantType, RecipeState};
+use crate::commands::model::ModelState;
+use crate::quant::recipe::{AllowedTargetQuants, QuantType, RecipeState};
 
 pub struct RecipeStore(pub Mutex<Option<RecipeState>>);
 
@@ -22,11 +23,13 @@ pub async fn assign_quant(
 pub async fn assign_all(
     quant_type: String,
     state: State<'_, RecipeStore>,
+    model_state: State<'_, ModelState>,
 ) -> Result<RecipeState, String> {
+    let qt = parse_quant_type(&quant_type)?;
+    let allowed_target_quants = loaded_allowed_target_quants(&model_state)?;
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     let recipe = guard.as_mut().ok_or("No recipe initialized")?;
-    let qt = parse_quant_type(&quant_type)?;
-    recipe.assign_all(qt);
+    recipe.assign_all_with_preflight(qt, &allowed_target_quants);
     Ok(recipe.clone())
 }
 
@@ -35,12 +38,31 @@ pub async fn assign_by_pattern(
     pattern: String,
     quant_type: String,
     state: State<'_, RecipeStore>,
+    model_state: State<'_, ModelState>,
 ) -> Result<RecipeState, String> {
+    let qt = parse_quant_type(&quant_type)?;
+    let allowed_target_quants = loaded_allowed_target_quants(&model_state)?;
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     let recipe = guard.as_mut().ok_or("No recipe initialized")?;
-    let qt = parse_quant_type(&quant_type)?;
-    recipe.assign_by_pattern(&pattern, qt);
+    recipe.assign_by_pattern_with_preflight(&pattern, qt, &allowed_target_quants);
     Ok(recipe.clone())
+}
+
+fn loaded_allowed_target_quants(model_state: &ModelState) -> Result<AllowedTargetQuants, String> {
+    let guard = model_state.0.lock().map_err(|e| e.to_string())?;
+    let model = guard.as_ref().ok_or("No model loaded")?;
+
+    Ok(model
+        .info
+        .tensors
+        .iter()
+        .map(|tensor| {
+            (
+                tensor.name.clone(),
+                tensor.quant_preflight.allowed_target_quants.clone(),
+            )
+        })
+        .collect())
 }
 
 fn parse_quant_type(s: &str) -> Result<QuantType, String> {

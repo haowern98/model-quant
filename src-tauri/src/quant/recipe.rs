@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+
+pub type AllowedTargetQuants = HashMap<String, Vec<String>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[allow(non_camel_case_types)]
@@ -135,22 +139,75 @@ impl RecipeState {
         self.status = RecipeStatus::Draft;
     }
 
+    pub fn assign_all_with_preflight(
+        &mut self,
+        quant_type: QuantType,
+        allowed_target_quants: &AllowedTargetQuants,
+    ) {
+        let mut changed = false;
+        for assign in &mut self.assignments {
+            if allows_target_quant(&assign.tensor_name, &quant_type, allowed_target_quants) {
+                changed |= assign.quant_type != quant_type;
+                assign.quant_type = quant_type.clone();
+            }
+        }
+        if changed {
+            self.status = RecipeStatus::Draft;
+        }
+    }
+
     pub fn assign_by_pattern(&mut self, pattern: &str, quant_type: QuantType) {
-        let is_match: Box<dyn Fn(&str) -> bool> = match pattern {
-            "all_attn" => Box::new(is_attention_tensor),
-            "all_ffn" => Box::new(is_ffn_tensor),
-            "all_embeddings" => Box::new(is_embedding_tensor),
-            _ => Box::new(|_: &str| true),
-        };
+        let is_match = bulk_pattern_matcher(pattern);
 
         for assign in &mut self.assignments {
-            if is_match(&assign.tensor_name) && should_bulk_assign(&assign.tensor_name, &quant_type)
-            {
+            if is_match(&assign.tensor_name) && should_bulk_assign(&assign.tensor_name, &quant_type) {
                 assign.quant_type = quant_type.clone();
             }
         }
         self.status = RecipeStatus::Draft;
     }
+
+    pub fn assign_by_pattern_with_preflight(
+        &mut self,
+        pattern: &str,
+        quant_type: QuantType,
+        allowed_target_quants: &AllowedTargetQuants,
+    ) {
+        let is_match = bulk_pattern_matcher(pattern);
+
+        let mut changed = false;
+        for assign in &mut self.assignments {
+            if is_match(&assign.tensor_name)
+                && allows_target_quant(&assign.tensor_name, &quant_type, allowed_target_quants)
+            {
+                changed |= assign.quant_type != quant_type;
+                assign.quant_type = quant_type.clone();
+            }
+        }
+        if changed {
+            self.status = RecipeStatus::Draft;
+        }
+    }
+}
+
+fn bulk_pattern_matcher(pattern: &str) -> Box<dyn Fn(&str) -> bool> {
+    match pattern {
+        "all_attn" => Box::new(is_attention_tensor),
+        "all_ffn" => Box::new(is_ffn_tensor),
+        "all_embeddings" => Box::new(is_embedding_tensor),
+        _ => Box::new(|_: &str| true),
+    }
+}
+
+fn allows_target_quant(
+    tensor_name: &str,
+    quant_type: &QuantType,
+    allowed_target_quants: &AllowedTargetQuants,
+) -> bool {
+    let requested = format!("{quant_type:?}");
+    allowed_target_quants
+        .get(tensor_name)
+        .is_some_and(|allowed| allowed.iter().any(|target| target == &requested))
 }
 
 fn should_bulk_assign(name: &str, quant_type: &QuantType) -> bool {
@@ -158,22 +215,7 @@ fn should_bulk_assign(name: &str, quant_type: &QuantType) -> bool {
 }
 
 fn is_quantized_target(quant_type: &QuantType) -> bool {
-    matches!(
-        quant_type,
-        QuantType::Q8_0
-            | QuantType::Q6_K
-            | QuantType::Q5_K
-            | QuantType::Q5_K_M
-            | QuantType::Q5_1
-            | QuantType::Q5_0
-            | QuantType::Q4_K
-            | QuantType::Q4_K_M
-            | QuantType::Q4_1
-            | QuantType::Q4_0
-            | QuantType::Q3_K
-            | QuantType::Q3_K_M
-            | QuantType::Q2_K
-    )
+    !matches!(quant_type, QuantType::F32 | QuantType::BF16 | QuantType::F16)
 }
 
 fn is_runtime_quantizable_tensor(name: &str) -> bool {
@@ -248,6 +290,20 @@ mod tests {
         ]
     }
 
+    fn preflight_with_q8_for_runtime_tensors(tensors: &[String]) -> AllowedTargetQuants {
+        tensors
+            .iter()
+            .map(|name| {
+                let allowed = if contains_any(name, &["bias", "norm", "rope", "scale"]) {
+                    Vec::new()
+                } else {
+                    vec!["Q8_0".to_string()]
+                };
+                (name.clone(), allowed)
+            })
+            .collect()
+    }
+
     #[test]
     fn test_new_recipe_default_quant() {
         let recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
@@ -272,8 +328,10 @@ mod tests {
 
     #[test]
     fn test_assign_by_pattern_attn() {
-        let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
-        recipe.assign_by_pattern("all_attn", QuantType::Q8_0);
+        let tensors = make_tensors();
+        let allowed_target_quants = preflight_with_q8_for_runtime_tensors(&tensors);
+        let mut recipe = RecipeState::new("test.gguf".into(), tensors, QuantType::Q4_K_M);
+        recipe.assign_by_pattern_with_preflight("all_attn", QuantType::Q8_0, &allowed_target_quants);
         let attn = recipe
             .assignments
             .iter()
@@ -302,8 +360,10 @@ mod tests {
 
     #[test]
     fn test_assign_by_pattern_ffn() {
-        let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::Q4_K_M);
-        recipe.assign_by_pattern("all_ffn", QuantType::Q8_0);
+        let tensors = make_tensors();
+        let allowed_target_quants = preflight_with_q8_for_runtime_tensors(&tensors);
+        let mut recipe = RecipeState::new("test.gguf".into(), tensors, QuantType::Q4_K_M);
+        recipe.assign_by_pattern_with_preflight("all_ffn", QuantType::Q8_0, &allowed_target_quants);
         let feed_forward = recipe
             .assignments
             .iter()
@@ -332,18 +392,20 @@ mod tests {
 
     #[test]
     fn test_assign_by_pattern_embeddings() {
-        let mut recipe = RecipeState::new(
-            "test.gguf".into(),
-            vec![
-                "token_embd.weight".into(),
-                "model.embed_tokens.weight".into(),
-                "per_layer_token_embd.weight".into(),
-                "output.weight".into(),
-                "blk.0.attn_q.weight".into(),
-            ],
-            QuantType::Q4_K_M,
+        let tensors = vec![
+            "token_embd.weight".into(),
+            "model.embed_tokens.weight".into(),
+            "per_layer_token_embd.weight".into(),
+            "output.weight".into(),
+            "blk.0.attn_q.weight".into(),
+        ];
+        let allowed_target_quants = preflight_with_q8_for_runtime_tensors(&tensors);
+        let mut recipe = RecipeState::new("test.gguf".into(), tensors, QuantType::Q4_K_M);
+        recipe.assign_by_pattern_with_preflight(
+            "all_embeddings",
+            QuantType::Q8_0,
+            &allowed_target_quants,
         );
-        recipe.assign_by_pattern("all_embeddings", QuantType::Q8_0);
 
         for name in [
             "token_embd.weight",
@@ -368,9 +430,11 @@ mod tests {
     }
 
     #[test]
-    fn test_assign_all_quantized_preserves_runtime_only_tensors() {
-        let mut recipe = RecipeState::new("test.gguf".into(), make_tensors(), QuantType::BF16);
-        recipe.assign_all(QuantType::Q8_0);
+    fn test_assign_all_respects_preflight_allowed_targets() {
+        let tensors = make_tensors();
+        let allowed_target_quants = preflight_with_q8_for_runtime_tensors(&tensors);
+        let mut recipe = RecipeState::new("test.gguf".into(), tensors, QuantType::BF16);
+        recipe.assign_all_with_preflight(QuantType::Q8_0, &allowed_target_quants);
 
         for name in [
             "tok_embeddings.weight",
@@ -400,6 +464,28 @@ mod tests {
                 .unwrap();
             assert_eq!(assign.quant_type, QuantType::BF16);
         }
+    }
+
+    #[test]
+    fn test_assign_all_skips_unsupported_full_precision_target() {
+        let tensors: Vec<String> = vec!["linear.weight".into(), "norm.weight".into()];
+        let mut recipe = RecipeState::from_current_quants(
+            "test.gguf".into(),
+            vec![
+                ("linear.weight".into(), QuantType::Q4_K_M),
+                ("norm.weight".into(), QuantType::F32),
+            ],
+        );
+        let allowed_target_quants = HashMap::from([
+            ("linear.weight".into(), vec!["Q4_K_M".into(), "Q6_K".into()]),
+            ("norm.weight".into(), vec!["F32".into()]),
+        ]);
+
+        recipe.assign_all_with_preflight(QuantType::BF16, &allowed_target_quants);
+
+        assert_eq!(recipe.assignments[0].quant_type, QuantType::Q4_K_M);
+        assert_eq!(recipe.assignments[1].quant_type, QuantType::F32);
+        assert_eq!(recipe.assignments.len(), tensors.len());
     }
 
     #[test]
