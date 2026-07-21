@@ -69,6 +69,7 @@ export function ExplorerPanel({
   onOpenTensorValues,
   onOpenModel,
   onOpenProjector,
+  onRemoveProjector,
   onToggleProjector,
   onOpenProjectorGroup,
   onToggleProjectorGroup,
@@ -82,8 +83,10 @@ export function ExplorerPanel({
     lora: false,
   });
   const [modelActionsOpen, setModelActionsOpen] = useState(false);
+  const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
   const [bulkQuantSelections, setBulkQuantSelections] = useState<Partial<Record<AssignPattern, QuantType>>>({});
   const modelActionsRef = useRef<HTMLDivElement>(null);
+  const projectorActionsRef = useRef<HTMLDivElement>(null);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
   const [stickyLayerIndices, setStickyLayerIndices] = useState<Set<number>>(() => new Set());
@@ -98,15 +101,20 @@ export function ExplorerPanel({
   }, [modelPath]);
 
   useEffect(() => {
-    if (!modelActionsOpen) return;
+    if (!modelActionsOpen && !projectorActionsOpen) return;
 
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
-      if (!modelActionsRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!modelActionsRef.current?.contains(target) && !projectorActionsRef.current?.contains(target)) {
         setModelActionsOpen(false);
+        setProjectorActionsOpen(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setModelActionsOpen(false);
+      if (event.key === "Escape") {
+        setModelActionsOpen(false);
+        setProjectorActionsOpen(false);
+      }
     };
 
     document.addEventListener("pointerdown", closeOnOutsidePointerDown);
@@ -115,7 +123,7 @@ export function ExplorerPanel({
       document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [modelActionsOpen]);
+  }, [modelActionsOpen, projectorActionsOpen]);
 
   const groups = useMemo(() => {
     const next = new Map<number, TensorInfo[]>();
@@ -274,6 +282,7 @@ export function ExplorerPanel({
                   aria-expanded={modelActionsOpen}
                   onClick={(event) => {
                     event.stopPropagation();
+                    setProjectorActionsOpen(false);
                     setModelActionsOpen((current) => !current);
                   }}
                 >
@@ -388,13 +397,45 @@ export function ExplorerPanel({
             expanded={projectorExpanded}
             onClick={onToggleProjector}
             action={
-              <button
-                type="button"
-                className="tree-action-button"
-                aria-label="Projector actions"
-              >
-                ...
-              </button>
+              <div ref={projectorActionsRef} className="model-actions-control">
+                <button
+                  type="button"
+                  className={`tree-action-button ${projectorActionsOpen ? "active" : ""}`}
+                  aria-label="Projector actions"
+                  aria-expanded={projectorActionsOpen}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setModelActionsOpen(false);
+                    setProjectorActionsOpen((current) => !current);
+                  }}
+                >
+                  ...
+                </button>
+                {projectorActionsOpen ? (
+                  <div className="projector-action-menu" aria-label="Projector actions">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setProjectorActionsOpen(false);
+                        onOpenProjector();
+                      }}
+                    >
+                      Change Projector
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setProjectorActionsOpen(false);
+                        onRemoveProjector();
+                      }}
+                    >
+                      Remove Projector
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             }
           />
         ) : (
