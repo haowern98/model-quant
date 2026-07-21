@@ -69,7 +69,6 @@ export function ExplorerPanel({
   onOpenTensorValues,
   onOpenModel,
   onOpenProjector,
-  onRemoveProjector,
   onToggleProjector,
   onOpenProjectorGroup,
   onToggleProjectorGroup,
@@ -82,7 +81,6 @@ export function ExplorerPanel({
     mmproj: false,
     lora: false,
   });
-  const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
   const [modelActionsOpen, setModelActionsOpen] = useState(false);
   const [bulkQuantSelections, setBulkQuantSelections] = useState<Partial<Record<AssignPattern, QuantType>>>({});
   const modelActionsRef = useRef<HTMLDivElement>(null);
@@ -394,7 +392,6 @@ export function ExplorerPanel({
                 type="button"
                 className="tree-action-button"
                 aria-label="Projector actions"
-                onClick={() => setProjectorActionsOpen((current) => !current)}
               >
                 ...
               </button>
@@ -418,30 +415,6 @@ export function ExplorerPanel({
         ) : null}
         {projectorPath ? (
           <>
-            {projectorExpanded && projectorActionsOpen ? (
-              <div className="model-actions-popover">
-                <div className="model-action-buttons">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProjectorActionsOpen(false);
-                      onOpenProjector();
-                    }}
-                  >
-                    Change Projector
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProjectorActionsOpen(false);
-                      onRemoveProjector();
-                    }}
-                  >
-                    Remove Projector
-                  </button>
-                </div>
-              </div>
-            ) : null}
             {projectorExpanded ? (
               <div className="explorer-section-body projector-tree-body" ref={projectorBodyRef}>
                 {projectorGroups.map(([groupId, groupTensors]) => {
