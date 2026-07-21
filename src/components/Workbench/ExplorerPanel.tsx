@@ -86,10 +86,12 @@ export function ExplorerPanel({
   const [modelActionsOpen, setModelActionsOpen] = useState(false);
   const [modelActionsAnchor, setModelActionsAnchor] = useState<{ top: number; left: number } | null>(null);
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
+  const [projectorActionsAnchor, setProjectorActionsAnchor] = useState<{ top: number; left: number } | null>(null);
   const [bulkQuantSelections, setBulkQuantSelections] = useState<Partial<Record<AssignPattern, QuantType>>>({});
   const modelActionsRef = useRef<HTMLDivElement>(null);
   const modelActionsMenuRef = useRef<HTMLDivElement>(null);
   const projectorActionsRef = useRef<HTMLDivElement>(null);
+  const projectorActionsMenuRef = useRef<HTMLDivElement>(null);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
   const [stickyLayerIndices, setStickyLayerIndices] = useState<Set<number>>(() => new Set());
@@ -111,11 +113,13 @@ export function ExplorerPanel({
       if (
         !modelActionsRef.current?.contains(target) &&
         !modelActionsMenuRef.current?.contains(target) &&
-        !projectorActionsRef.current?.contains(target)
+        !projectorActionsRef.current?.contains(target) &&
+        !projectorActionsMenuRef.current?.contains(target)
       ) {
         setModelActionsOpen(false);
         setModelActionsAnchor(null);
         setProjectorActionsOpen(false);
+        setProjectorActionsAnchor(null);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -123,6 +127,7 @@ export function ExplorerPanel({
         setModelActionsOpen(false);
         setModelActionsAnchor(null);
         setProjectorActionsOpen(false);
+        setProjectorActionsAnchor(null);
       }
     };
 
@@ -397,35 +402,19 @@ export function ExplorerPanel({
                   onClick={(event) => {
                     event.stopPropagation();
                     setModelActionsOpen(false);
-                    setProjectorActionsOpen((current) => !current);
+                    setModelActionsAnchor(null);
+                    if (projectorActionsOpen) {
+                      setProjectorActionsOpen(false);
+                      setProjectorActionsAnchor(null);
+                      return;
+                    }
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setProjectorActionsAnchor({ top: rect.bottom + 4, left: rect.right + 4 });
+                    setProjectorActionsOpen(true);
                   }}
                 >
                   ...
                 </button>
-                {projectorActionsOpen ? (
-                  <div className="projector-action-menu" aria-label="Projector actions">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setProjectorActionsOpen(false);
-                        onOpenProjector();
-                      }}
-                    >
-                      Change Projector
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setProjectorActionsOpen(false);
-                        onRemoveProjector();
-                      }}
-                    >
-                      Remove Projector
-                    </button>
-                  </div>
-                ) : null}
               </div>
             }
           />
@@ -534,6 +523,43 @@ export function ExplorerPanel({
                   </select>
                 </label>
               ))}
+            </div>,
+            document.body,
+          )
+        : null}
+      {projectorActionsOpen && projectorActionsAnchor
+        ? createPortal(
+            <div
+              ref={projectorActionsMenuRef}
+              className="projector-action-menu"
+              aria-label="Projector actions"
+              style={{
+                position: "fixed",
+                top: projectorActionsAnchor.top,
+                left: projectorActionsAnchor.left - 30,
+                right: "auto",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setProjectorActionsOpen(false);
+                  setProjectorActionsAnchor(null);
+                  onOpenProjector();
+                }}
+              >
+                Change Projector
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProjectorActionsOpen(false);
+                  setProjectorActionsAnchor(null);
+                  onRemoveProjector();
+                }}
+              >
+                Remove Projector
+              </button>
             </div>,
             document.body,
           )
