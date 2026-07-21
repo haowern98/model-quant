@@ -1151,6 +1151,63 @@ body.resizing-projector * {
   border-radius: 3px;
 }
 
+.model-actions-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.model-bulk-action-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 100;
+  width: 268px;
+  padding: 12px 14px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: var(--vscode-sidebar);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+  color: #cccccc;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.tree-action-button.active {
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.model-bulk-action-title {
+  margin-bottom: 8px;
+  color: var(--vscode-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.model-bulk-action-row {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: 8px;
+  color: #d0d0d0;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.model-bulk-action-row select {
+  width: 100%;
+  height: 24px;
+  border: 1px solid #515151;
+  border-radius: 3px;
+  background: #2d2d2d;
+  color: #dcdcdc;
+  font: inherit;
+  font-size: 12px;
+}
+
 .benchmark-refresh-button .codicon {
   font-size: 14px;
   transform: translateY(1px);

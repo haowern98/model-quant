@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { type AssignPattern, type QuantType, type TensorInfo } from "../../types";
+import { QUANT_TYPES, type AssignPattern, type QuantType, type TensorInfo } from "../../types";
 import { formatTensorName, projectorGroupLabel } from "../../lib/format";
 import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 
 type ExplorerSectionId = "gguf" | "mmproj" | "lora";
 
 const PROJECTOR_MIN_HEIGHT = 80;
+
+const BULK_ASSIGNMENTS: Array<{ label: string; pattern: AssignPattern }> = [
+  { label: "All Attention", pattern: "all_attn" },
+  { label: "All FFN", pattern: "all_ffn" },
+  { label: "All Embeddings", pattern: "all_embeddings" },
+  { label: "Entire Model", pattern: "all" },
+];
 
 interface ExplorerPanelProps {
   modelPath: string | null;
@@ -68,6 +75,7 @@ export function ExplorerPanel({
   onToggleProjectorGroup,
   onOpenProjectorTensorValues,
   onToggleLayer,
+  onAssignByPattern,
 }: ExplorerPanelProps) {
   const [sections, setSections] = useState<Record<ExplorerSectionId, boolean>>({
     gguf: true,
@@ -75,6 +83,8 @@ export function ExplorerPanel({
     lora: false,
   });
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
+  const [modelActionsOpen, setModelActionsOpen] = useState(false);
+  const modelActionsRef = useRef<HTMLDivElement>(null);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
   const [stickyLayerIndices, setStickyLayerIndices] = useState<Set<number>>(() => new Set());
@@ -83,6 +93,26 @@ export function ExplorerPanel({
   const projectorGroupRefs = useRef(new Map<string, HTMLDivElement>());
   const [stickyProjectorGroups, setStickyProjectorGroups] = useState<Set<string>>(() => new Set());
   const [projectorHeight, setProjectorHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!modelActionsOpen) return;
+
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!modelActionsRef.current?.contains(event.target as Node)) {
+        setModelActionsOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setModelActionsOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [modelActionsOpen]);
 
   const groups = useMemo(() => {
     const next = new Map<number, TensorInfo[]>();
@@ -233,13 +263,47 @@ export function ExplorerPanel({
           onClick={() => toggleSection("gguf")}
           action={
             modelPath ? (
-            <button
-              type="button"
-              className="tree-action-button"
-              aria-label="Model actions"
-            >
-              ...
-            </button>
+              <div ref={modelActionsRef} className="model-actions-control">
+                <button
+                  type="button"
+                  className={`tree-action-button ${modelActionsOpen ? "active" : ""}`}
+                  aria-label="Model actions"
+                  aria-expanded={modelActionsOpen}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setModelActionsOpen((current) => !current);
+                  }}
+                >
+                  ...
+                </button>
+                {modelActionsOpen ? (
+                  <div className="model-bulk-action-menu" aria-label="Bulk assign">
+                    <div className="model-bulk-action-title">BULK ASSIGN</div>
+                    {BULK_ASSIGNMENTS.map(({ label, pattern }) => (
+                      <label key={pattern} className="model-bulk-action-row">
+                        <span>{label}</span>
+                        <select
+                          aria-label={`${label} quantization`}
+                          defaultValue=""
+                          onChange={(event) => {
+                            const quantType = event.currentTarget.value as QuantType;
+                            if (!quantType) return;
+                            onAssignByPattern(pattern, quantType);
+                            event.currentTarget.value = "";
+                          }}
+                        >
+                          <option value="">Apply...</option>
+                          {QUANT_TYPES.map((quantOption) => (
+                            <option key={quantOption.value} value={quantOption.value}>
+                              {quantOption.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             ) : undefined
           }
         />
