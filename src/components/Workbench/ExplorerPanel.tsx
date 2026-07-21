@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { QUANT_TYPES, type AssignPattern, type QuantType, type TensorInfo } from "../../types";
 import { formatTensorName, projectorGroupLabel } from "../../lib/format";
 import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
@@ -83,9 +84,11 @@ export function ExplorerPanel({
     lora: false,
   });
   const [modelActionsOpen, setModelActionsOpen] = useState(false);
+  const [modelActionsAnchor, setModelActionsAnchor] = useState<{ top: number; left: number } | null>(null);
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
   const [bulkQuantSelections, setBulkQuantSelections] = useState<Partial<Record<AssignPattern, QuantType>>>({});
   const modelActionsRef = useRef<HTMLDivElement>(null);
+  const modelActionsMenuRef = useRef<HTMLDivElement>(null);
   const projectorActionsRef = useRef<HTMLDivElement>(null);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
@@ -105,14 +108,20 @@ export function ExplorerPanel({
 
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!modelActionsRef.current?.contains(target) && !projectorActionsRef.current?.contains(target)) {
+      if (
+        !modelActionsRef.current?.contains(target) &&
+        !modelActionsMenuRef.current?.contains(target) &&
+        !projectorActionsRef.current?.contains(target)
+      ) {
         setModelActionsOpen(false);
+        setModelActionsAnchor(null);
         setProjectorActionsOpen(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setModelActionsOpen(false);
+        setModelActionsAnchor(null);
         setProjectorActionsOpen(false);
       }
     };
@@ -260,7 +269,8 @@ export function ExplorerPanel({
   };
 
   return (
-    <aside className="explorer-panel" aria-label="Explorer">
+    <>
+      <aside className="explorer-panel" aria-label="Explorer">
       <div className="explorer-title">
         <span>MODEL EXPLORER</span>
         <button type="button" aria-label="Explorer actions">...</button>
@@ -283,38 +293,19 @@ export function ExplorerPanel({
                   onClick={(event) => {
                     event.stopPropagation();
                     setProjectorActionsOpen(false);
-                    setModelActionsOpen((current) => !current);
+                    if (modelActionsOpen) {
+                      setModelActionsOpen(false);
+                      setModelActionsAnchor(null);
+                      return;
+                    }
+
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setModelActionsAnchor({ top: rect.bottom + 4, left: rect.right + 4 });
+                    setModelActionsOpen(true);
                   }}
                 >
                   ...
                 </button>
-                {modelActionsOpen ? (
-                  <div className="model-bulk-action-menu" aria-label="Bulk assign">
-                    <div className="model-bulk-action-title">BULK ASSIGN</div>
-                    {BULK_ASSIGNMENTS.map(({ label, pattern }) => (
-                      <label key={pattern} className="model-bulk-action-row">
-                        <span>{label}</span>
-                        <select
-                          aria-label={`${label} quantization`}
-                          value={bulkQuantSelections[pattern] ?? ""}
-                          onChange={(event) => {
-                            const quantType = event.currentTarget.value as QuantType;
-                            if (!quantType) return;
-                            setBulkQuantSelections((current) => ({ ...current, [pattern]: quantType }));
-                            onAssignByPattern(pattern, quantType);
-                          }}
-                        >
-                          <option value="">Apply...</option>
-                          {QUANT_TYPES.map((quantOption) => (
-                            <option key={quantOption.value} value={quantOption.value}>
-                              {quantOption.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             ) : undefined
           }
@@ -506,7 +497,48 @@ export function ExplorerPanel({
         onToggle={toggleSection}
         emptyLabel="Add adapter..."
       />
-    </aside>
+      </aside>
+      {modelActionsOpen && modelActionsAnchor
+        ? createPortal(
+            <div
+              ref={modelActionsMenuRef}
+              className="model-bulk-action-menu"
+              aria-label="Bulk assign"
+              style={{
+                position: "fixed",
+                top: modelActionsAnchor.top,
+                left: modelActionsAnchor.left - 30,
+                right: "auto",
+              }}
+            >
+              <div className="model-bulk-action-title">BULK ASSIGN</div>
+              {BULK_ASSIGNMENTS.map(({ label, pattern }) => (
+                <label key={pattern} className="model-bulk-action-row">
+                  <span>{label}</span>
+                  <select
+                    aria-label={`${label} quantization`}
+                    value={bulkQuantSelections[pattern] ?? ""}
+                    onChange={(event) => {
+                      const quantType = event.currentTarget.value as QuantType;
+                      if (!quantType) return;
+                      setBulkQuantSelections((current) => ({ ...current, [pattern]: quantType }));
+                      onAssignByPattern(pattern, quantType);
+                    }}
+                  >
+                    <option value="">Apply...</option>
+                    {QUANT_TYPES.map((quantOption) => (
+                      <option key={quantOption.value} value={quantOption.value}>
+                        {quantOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
