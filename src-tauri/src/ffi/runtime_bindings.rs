@@ -131,6 +131,7 @@ struct MsChatGenerationResult {
     prompt_tokens: u32,
     completion_tokens: u32,
     finish_reason: u32,
+    actual_seed: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +140,7 @@ pub struct ChatGenerationOutput {
     pub reasoning_text: Option<String>,
     pub benchmark: MsBaselineBenchmark,
     pub finish_reason: ChatFinishReason,
+    pub actual_seed: u32,
 }
 
 #[repr(C)]
@@ -1093,6 +1095,7 @@ impl RecipeChatSession {
             prompt_tokens: 0,
             completion_tokens: 0,
             finish_reason: ChatFinishReason::Stop as u32,
+            actual_seed: 0,
         };
 
         let status = unsafe {
@@ -1130,6 +1133,7 @@ impl RecipeChatSession {
                 reasoning_text: (!reasoning_text.is_empty()).then_some(reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                actual_seed: native_result.actual_seed,
             })
         } else {
             Err(unsafe { c_string(ms_runtime_last_error()) })
@@ -1198,6 +1202,7 @@ impl RecipeChatSession {
             prompt_tokens: 0,
             completion_tokens: 0,
             finish_reason: ChatFinishReason::Stop as u32,
+            actual_seed: 0,
         };
         let mut callback_state = ChatStreamCallbackState {
             on_delta: &mut on_delta,
@@ -1239,6 +1244,7 @@ impl RecipeChatSession {
                     .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                actual_seed: native_result.actual_seed,
             })
         } else {
             Err(unsafe { c_string(ms_runtime_last_error()) })
@@ -1319,6 +1325,7 @@ impl RecipeChatSession {
             prompt_tokens: 0,
             completion_tokens: 0,
             finish_reason: ChatFinishReason::Stop as u32,
+            actual_seed: 0,
         };
         let mut callback_state = ChatStreamCallbackState {
             on_delta: &mut on_delta,
@@ -1362,6 +1369,7 @@ impl RecipeChatSession {
                     .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                actual_seed: native_result.actual_seed,
             })
         } else {
             Err(unsafe { c_string(ms_runtime_last_error()) })
