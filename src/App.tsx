@@ -1133,14 +1133,18 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
-          latestResult = await runGpqaDiamondBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            gpqaShotMode,
-            resolvedGpqaConfig,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runGpqaDiamondBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              gpqaShotMode,
+              resolvedGpqaConfig,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1159,13 +1163,17 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
-          latestResult = await runHumanEvalBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            config,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runHumanEvalBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              config,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1193,13 +1201,17 @@ function App() {
             }
             throw new Error(`Multimodal preflight failed: ${detail}`);
           }
-          latestResult = await runMmmuProBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            config,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runMmmuProBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              config,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1217,13 +1229,17 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
-          latestResult = await runTerminalBenchBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            config,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runTerminalBenchBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              config,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1293,13 +1309,17 @@ function App() {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
       try {
-        const result = await runHumanEvalBenchmark(
-          apiStatus.baseUrl,
-          apiStatus.apiKey,
-          apiStatus.modelId,
-          config,
-        );
-        openEvalResults(result);
+        try {
+          const result = await runHumanEvalBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            config,
+          );
+          openEvalResults(result);
+        } catch {
+          return;
+        }
       } finally {
         await stopModelInspectorApi();
       }
@@ -1363,13 +1383,17 @@ function App() {
         }
         throw new Error(`Multimodal preflight failed: ${detail}`);
       }
-      const result = await runMmmuProBenchmark(
-        apiStatus.baseUrl,
-        apiStatus.apiKey,
-        apiStatus.modelId,
-        config,
-      );
-      openEvalResults(result);
+      try {
+        const result = await runMmmuProBenchmark(
+          apiStatus.baseUrl,
+          apiStatus.apiKey,
+          apiStatus.modelId,
+          config,
+        );
+        openEvalResults(result);
+      } catch {
+        return;
+      }
       setAppError(null);
     } catch (e) {
       const message = errorMessage(e);
@@ -1419,13 +1443,17 @@ function App() {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
       try {
-        const result = await runTerminalBenchBenchmark(
-          apiStatus.baseUrl,
-          apiStatus.apiKey,
-          apiStatus.modelId,
-          config,
-        );
-        openEvalResults(result);
+        try {
+          const result = await runTerminalBenchBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            config,
+          );
+          openEvalResults(result);
+        } catch {
+          return;
+        }
       } finally {
         await stopModelInspectorApi();
       }
