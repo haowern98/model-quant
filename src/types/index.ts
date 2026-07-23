@@ -444,6 +444,7 @@ export interface MmmuProBenchmarkConfig extends GpqaBenchmarkConfig {
 }
 
 export interface TerminalBenchBenchmarkConfigInput {
+  seed: string;
   contextWindow: string;
   samples: string;
   runsPerTask: string;
@@ -459,6 +460,7 @@ export interface TerminalBenchBenchmarkConfigInput {
 }
 
 export interface TerminalBenchBenchmarkConfig {
+  seed?: number;
   contextWindow: number;
   samples?: number;
   runsPerTask: number;

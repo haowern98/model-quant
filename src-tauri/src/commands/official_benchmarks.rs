@@ -237,6 +237,7 @@ pub struct MmmuProRunConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalBenchRunConfig {
+    pub seed: Option<u32>,
     pub context_window: Option<u32>,
     pub samples: Option<u64>,
     pub runs_per_task: Option<u64>,
@@ -286,6 +287,7 @@ struct EffectiveMmmuProRunConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct EffectiveTerminalBenchRunConfig {
+    seed: Option<u32>,
     context_window: u32,
     samples: Option<u64>,
     runs_per_task: u64,
@@ -432,9 +434,7 @@ fn effective_mmmu_pro_run_config(
     })
 }
 
-fn mmmu_pro_subject_groups(
-    subjects: &[MmmuProSubjectRunConfig],
-) -> Vec<(u64, Vec<String>)> {
+fn mmmu_pro_subject_groups(subjects: &[MmmuProSubjectRunConfig]) -> Vec<(u64, Vec<String>)> {
     let mut groups: Vec<(u64, Vec<String>)> = Vec::new();
     for subject in subjects {
         if let Some((_, grouped_subjects)) = groups
@@ -453,6 +453,7 @@ fn effective_terminal_bench_run_config(
     config: Option<TerminalBenchRunConfig>,
 ) -> Result<EffectiveTerminalBenchRunConfig, String> {
     let config = config.unwrap_or(TerminalBenchRunConfig {
+        seed: None,
         context_window: None,
         samples: Some(1),
         runs_per_task: Some(1),
@@ -466,6 +467,9 @@ fn effective_terminal_bench_run_config(
         top_p: None,
         min_p: None,
     });
+    if config.seed == Some(u32::MAX) {
+        return Err("Terminal-Bench seed must be between 0 and 4294967294.".to_string());
+    }
     if matches!(config.context_window, Some(0)) {
         return Err("Terminal-Bench context window must be greater than 0.".to_string());
     }
@@ -516,6 +520,7 @@ fn effective_terminal_bench_run_config(
     }
 
     Ok(EffectiveTerminalBenchRunConfig {
+        seed: config.seed,
         context_window,
         samples: config.samples,
         runs_per_task,
@@ -3746,6 +3751,9 @@ fn terminal_bench_harbor_benchmark_args(
     if let Some(top_p) = config.top_p {
         llm_call_kwargs.insert("top_p".to_string(), json!(top_p));
     }
+    if let Some(seed) = config.seed {
+        llm_call_kwargs.insert("seed".to_string(), json!(seed));
+    }
     if let Some(min_p) = config.min_p {
         extra_body.insert("min_p".to_string(), json!(min_p));
     }
@@ -4653,6 +4661,7 @@ mod tests {
         let task = PathBuf::from(r"C:\tasks\adaptive-rejection-sampler");
         let jobs = PathBuf::from(r"C:\runs\terminal-bench");
         let config = EffectiveTerminalBenchRunConfig {
+            seed: Some(42),
             context_window: 30_000,
             samples: Some(3),
             runs_per_task: 2,
@@ -4687,7 +4696,7 @@ mod tests {
         assert!(args.contains(&"model_info={\"input_cost_per_token\":0,\"max_input_tokens\":30000,\"max_output_tokens\":4096,\"output_cost_per_token\":0}".to_string()));
         assert!(args.contains(&"max_turns=4".to_string()));
         assert!(args.contains(&"temperature=0.25".to_string()));
-        assert!(args.contains(&"llm_call_kwargs={\"extra_body\":{\"min_p\":0.05,\"repeat_penalty\":1.1,\"top_k\":40},\"presence_penalty\":0.2,\"top_p\":0.95}".to_string()));
+        assert!(args.contains(&"llm_call_kwargs={\"extra_body\":{\"min_p\":0.05,\"repeat_penalty\":1.1,\"top_k\":40},\"presence_penalty\":0.2,\"seed\":42,\"top_p\":0.95}".to_string()));
         assert!(!args.iter().any(|arg| arg.contains("local-key")));
         assert!(args.contains(&"--n-attempts".to_string()));
         assert!(args.contains(&"2".to_string()));
@@ -4695,6 +4704,34 @@ mod tests {
         assert!(args.contains(&"--n-tasks".to_string()));
         assert!(args.contains(&"3".to_string()));
         assert!(args.contains(&"--delete".to_string()));
+    }
+
+    #[test]
+    fn omits_terminal_bench_seed_when_not_configured() {
+        let config = EffectiveTerminalBenchRunConfig {
+            seed: None,
+            context_window: 20_000,
+            samples: None,
+            runs_per_task: 1,
+            max_turns: 1,
+            timeout_multiplier: 3,
+            temperature: 0.0,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
+        };
+        let args = terminal_bench_harbor_benchmark_args(
+            Path::new(r"C:\tasks\example"),
+            Path::new(r"C:\runs\example"),
+            "http://127.0.0.1:1234/v1",
+            "demo.gguf",
+            &config,
+            TERMINAL_BENCH_TERMINUS_AGENT_IMPORT_PATH,
+        );
+
+        assert!(!args.iter().any(|arg| arg.contains("seed")));
     }
 
     #[test]

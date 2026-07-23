@@ -1596,7 +1596,7 @@ function TerminalBenchView({
   const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
   const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const updateIntegerField =
-    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns" | "timeoutMultiplier") =>
+    (field: "seed" | "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns" | "timeoutMultiplier") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1778,6 +1778,14 @@ function TerminalBenchView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="Terminal-Bench seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="Terminal-Bench thinking"

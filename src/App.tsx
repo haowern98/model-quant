@@ -212,6 +212,7 @@ const DEFAULT_MMMU_PRO_CONFIG_INPUT: MmmuProBenchmarkConfigInput = {
 };
 
 const DEFAULT_TERMINAL_BENCH_CONFIG_INPUT: TerminalBenchBenchmarkConfigInput = {
+  seed: "",
   contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
   samples: "1",
   runsPerTask: "1",
@@ -382,6 +383,9 @@ function resolveMmmuProConfigInput(
 function resolveTerminalBenchConfigInput(
   input: TerminalBenchBenchmarkConfigInput,
 ): TerminalBenchBenchmarkConfig | string {
+  const seed = parseOptionalIntegerOverride(input.seed, 0, 4_294_967_294, "Terminal-Bench seed");
+  if (typeof seed === "string") return seed;
+
   const contextWindow = parseOptionalIntegerField(
     input.contextWindow,
     GPQA_DEFAULT_CONTEXT_WINDOW,
@@ -459,6 +463,7 @@ function resolveTerminalBenchConfigInput(
   if (typeof minP === "string") return minP;
 
   return {
+    seed,
     contextWindow,
     samples,
     runsPerTask,
