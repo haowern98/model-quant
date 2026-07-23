@@ -207,6 +207,7 @@ impl GpqaShotMode {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GpqaRunConfig {
+    pub seed: Option<u32>,
     pub context_window: Option<u32>,
     pub sample_limit: Option<u64>,
     pub temperature: Option<f64>,
@@ -265,6 +266,7 @@ impl GpqaThinkingMode {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct EffectiveGpqaRunConfig {
+    seed: Option<u32>,
     context_window: u32,
     sample_limit: u64,
     temperature: f64,
@@ -301,6 +303,7 @@ fn effective_gpqa_run_config(
     config: Option<GpqaRunConfig>,
 ) -> Result<EffectiveGpqaRunConfig, String> {
     let config = config.unwrap_or(GpqaRunConfig {
+        seed: None,
         context_window: None,
         sample_limit: None,
         temperature: None,
@@ -312,6 +315,9 @@ fn effective_gpqa_run_config(
         min_p: None,
     });
     let context_window = config.context_window.unwrap_or(GPQA_DEFAULT_CONTEXT_WINDOW);
+    if config.seed == Some(u32::MAX) {
+        return Err("GPQA seed must be between 0 and 4294967294.".to_string());
+    }
     if context_window == 0 {
         return Err(format!("GPQA context window must be greater than 0."));
     }
@@ -355,6 +361,7 @@ fn effective_gpqa_run_config(
     }
 
     Ok(EffectiveGpqaRunConfig {
+        seed: config.seed,
         context_window,
         sample_limit,
         temperature,
@@ -372,6 +379,7 @@ fn effective_mmmu_pro_run_config(
 ) -> Result<EffectiveMmmuProRunConfig, String> {
     let config = config.unwrap_or(MmmuProRunConfig {
         generation: GpqaRunConfig {
+            seed: None,
             context_window: None,
             sample_limit: None,
             temperature: None,
@@ -544,6 +552,9 @@ fn gpqa_generation_config(effective_config: &EffectiveGpqaRunConfig) -> serde_js
     }
     if let Some(min_p) = effective_config.min_p {
         generation_config["min_p"] = json!(min_p);
+    }
+    if let Some(seed) = effective_config.seed {
+        generation_config["seed"] = json!(seed);
     }
     generation_config
 }
@@ -4735,6 +4746,7 @@ mod tests {
     #[test]
     fn defaults_gpqa_run_config_when_values_are_missing() {
         let config = effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: None,
             context_window: None,
             sample_limit: None,
             temperature: None,
@@ -4750,6 +4762,7 @@ mod tests {
         assert_eq!(
             config,
             EffectiveGpqaRunConfig {
+                seed: None,
                 context_window: 20_000,
                 sample_limit: 198,
                 temperature: 0.0,
@@ -4766,6 +4779,7 @@ mod tests {
     #[test]
     fn accepts_gpqa_run_config_within_bounds() {
         let config = effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: Some(42),
             context_window: Some(20_000),
             sample_limit: Some(12),
             temperature: Some(0.2),
@@ -4781,6 +4795,7 @@ mod tests {
         assert_eq!(
             config,
             EffectiveGpqaRunConfig {
+                seed: Some(42),
                 context_window: 20_000,
                 sample_limit: 12,
                 temperature: 0.2,
@@ -4797,6 +4812,20 @@ mod tests {
     #[test]
     fn rejects_gpqa_run_config_outside_bounds() {
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: Some(u32::MAX),
+            context_window: Some(20_000),
+            sample_limit: Some(198),
+            temperature: Some(0.0),
+            thinking: None,
+            top_k: None,
+            repeat_penalty: None,
+            presence_penalty: None,
+            top_p: None,
+            min_p: None,
+        }))
+        .is_err());
+        assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: None,
             context_window: Some(0),
             sample_limit: Some(198),
             temperature: Some(0.0),
@@ -4809,6 +4838,7 @@ mod tests {
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: None,
             sample_limit: Some(199),
             temperature: Some(0.0),
             context_window: Some(20_000),
@@ -4821,6 +4851,7 @@ mod tests {
         }))
         .is_err());
         assert!(effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: None,
             context_window: Some(20_000),
             sample_limit: Some(198),
             temperature: Some(2.1),
@@ -4837,6 +4868,7 @@ mod tests {
     #[test]
     fn evalscope_generation_config_omits_max_tokens_for_until_eos_generation() {
         let config = EffectiveGpqaRunConfig {
+            seed: None,
             context_window: 20_000,
             sample_limit: 10,
             temperature: 0.0,
@@ -4858,11 +4890,13 @@ mod tests {
         );
         assert!(generation_config.get("max_tokens").is_none());
         assert!(generation_config.get("max_completion_tokens").is_none());
+        assert!(generation_config.get("seed").is_none());
     }
 
     #[test]
     fn evalscope_generation_config_includes_sampler_overrides() {
         let config = effective_gpqa_run_config(Some(GpqaRunConfig {
+            seed: Some(42),
             context_window: Some(20_000),
             sample_limit: Some(10),
             temperature: Some(0.0),
@@ -4882,11 +4916,13 @@ mod tests {
         assert_eq!(generation_config["presence_penalty"], 0.2);
         assert_eq!(generation_config["top_p"], 0.95);
         assert_eq!(generation_config["min_p"], 0.05);
+        assert_eq!(generation_config["seed"], json!(42));
     }
 
     #[test]
     fn evalscope_generation_config_can_enable_template_thinking() {
         let config = EffectiveGpqaRunConfig {
+            seed: None,
             context_window: 20_000,
             sample_limit: 10,
             temperature: 0.0,

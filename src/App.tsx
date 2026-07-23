@@ -182,6 +182,7 @@ const MMMU_PRO_SAMPLE_COUNT = 1_730;
 const GPQA_DEFAULT_TEMPERATURE = 0;
 
 const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
+  seed: "",
   contextWindow: "",
   sampleLimit: "",
   temperature: "0",
@@ -276,6 +277,9 @@ function parseOptionalNumberOverride(
 function resolveGpqaConfigInput(
   input: GpqaBenchmarkConfigInput,
 ): GpqaBenchmarkConfig | string {
+  const seed = parseOptionalIntegerOverride(input.seed, 0, 4_294_967_294, "GPQA seed");
+  if (typeof seed === "string") return seed;
+
   const contextWindow = parseOptionalIntegerField(
     input.contextWindow,
     GPQA_DEFAULT_CONTEXT_WINDOW,
@@ -327,6 +331,7 @@ function resolveGpqaConfigInput(
   if (typeof minP === "string") return minP;
 
   return {
+    seed,
     contextWindow,
     sampleLimit,
     temperature,

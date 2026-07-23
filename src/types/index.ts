@@ -364,6 +364,7 @@ export interface GpqaDatasetRow {
 }
 
 export interface GpqaBenchmarkConfigInput {
+  seed: string;
   contextWindow: string;
   sampleLimit: string;
   temperature: string;
@@ -376,6 +377,7 @@ export interface GpqaBenchmarkConfigInput {
 }
 
 export interface GpqaBenchmarkConfig {
+  seed?: number;
   contextWindow: number;
   sampleLimit: number;
   temperature: number;

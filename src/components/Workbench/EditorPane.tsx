@@ -884,7 +884,7 @@ function GpqaBenchmarkView({
   }, [activeTab, status.datasetReady]);
 
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (field: "seed" | "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1055,6 +1055,14 @@ function GpqaBenchmarkView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="GPQA Diamond seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Shots"
                     selectLabel="GPQA Diamond shots"
@@ -1206,7 +1214,7 @@ function HumanEvalBenchmarkView({
   const harnessInstalled =
     viewStatus.statusLabel !== "Needs harness" && Boolean(viewStatus.python && viewStatus.evalscope);
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (field: "seed" | "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1445,6 +1453,14 @@ function HumanEvalBenchmarkView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="HumanEval seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="HumanEval thinking"
@@ -2032,7 +2048,7 @@ function MmmuProBenchmarkView({
   };
 
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (field: "seed" | "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -2217,6 +2233,14 @@ function MmmuProBenchmarkView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="MMMU-Pro seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="MMMU-Pro thinking"
