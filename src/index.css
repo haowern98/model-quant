@@ -1561,6 +1561,33 @@ body.resizing-projector * {
   padding-left: 2px;
 }
 
+.model-load-config-menu {
+  width: 360px;
+  padding: 6px 0;
+}
+
+.model-load-config-fields {
+  padding: 0 18px 10px;
+}
+
+.model-load-config-menu .benchmark-info-row {
+  grid-template-columns: 150px minmax(0, 1fr);
+  border-top: 0;
+}
+
+.model-load-config-menu .benchmark-select-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  height: 30px;
+  padding: 0 7px;
+}
+
+.model-load-config-menu .benchmark-select-menu button {
+  display: flex;
+  height: 28px;
+  padding: 0 10px;
+}
+
 .editor-run-controls select {
   height: 24px;
   border: 1px solid #515151;
@@ -1625,11 +1652,11 @@ body.resizing-projector * {
 }
 
 .run-split-primary .codicon-run-all {
-  transform: translateX(2px);
+  transform: translate(2px, -1px);
 }
 
 .run-split-primary .codicon-arrow-circle-up {
-  transform: translateY(1px);
+  transform: translateY(0px);
 }
 
 .run-split-chevron {
