@@ -19,6 +19,7 @@ import type {
   TensorInfo,
 } from "../../types";
 import { ActivityBar, type ActivityId } from "./ActivityBar";
+import { ChatSidebar } from "./ChatSidebar";
 import { EditorPane } from "./EditorPane";
 import { ExplorerPanel } from "./ExplorerPanel";
 import type { EditorTab } from "./editorTabModel";
@@ -290,7 +291,7 @@ export function WorkbenchShell({
   };
 
   const selectActivity = (activity: ActivityId) => {
-    if (activity !== "gguf" && activity !== "testing") return;
+    if (activity !== "gguf" && activity !== "chat" && activity !== "testing") return;
     if (activity === activeActivity) {
       toggleSidePanel();
       return;
@@ -319,7 +320,9 @@ export function WorkbenchShell({
         panelVisible={sidePanelVisible}
         onSelectActivity={selectActivity}
       />
-      {activeActivity === "testing" ? (
+      {activeActivity === "chat" ? (
+        <ChatSidebar />
+      ) : activeActivity === "testing" ? (
         <TestingPanel
           running={running}
           gpqaStatus={gpqaStatus}

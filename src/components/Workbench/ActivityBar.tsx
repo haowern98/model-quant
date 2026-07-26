@@ -17,8 +17,8 @@ const BOTTOM_ITEMS: ActivityItem[] = [
   { id: "settings", label: "Settings", icon: "settings-gear" },
 ];
 
-function isSelectableActivity(activity: ActivityId): activity is "gguf" | "testing" {
-  return activity === "gguf" || activity === "testing";
+function isSelectableActivity(activity: ActivityId): activity is "gguf" | "chat" | "testing" {
+  return activity === "gguf" || activity === "chat" || activity === "testing";
 }
 
 function ActivityIcon({ icon }: { icon: string }) {
