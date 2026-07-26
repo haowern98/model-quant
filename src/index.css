@@ -1553,6 +1553,10 @@ body.resizing-projector * {
   background: #252526;
 }
 
+.model-load-controls {
+  padding-right: 2px;
+}
+
 .editor-run-controls select {
   height: 24px;
   border: 1px solid #515151;

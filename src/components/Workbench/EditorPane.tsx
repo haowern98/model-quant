@@ -40,6 +40,7 @@ import type {
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
 import { EditorTabs } from "./EditorTabs";
+import { ModelLoadControls } from "./ModelLoadControls";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
 import {
@@ -275,6 +276,7 @@ export function EditorPane({
           onCloseEditor={onCloseEditor}
           onReorderEditor={onReorderEditor}
         />
+        <ModelLoadControls />
         <RunControls
           hasModel={hasModel}
           running={running}
