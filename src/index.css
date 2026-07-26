@@ -1588,6 +1588,47 @@ body.resizing-projector * {
   padding: 0 10px;
 }
 
+.chat-sidebar-search {
+  position: relative;
+  margin: 12px 12px 0;
+}
+
+.chat-sidebar-search .codicon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  z-index: 1;
+  color: #a6a6a6;
+  font-size: 16px;
+  line-height: 16px;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.chat-sidebar-search input {
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid #515151;
+  border-radius: 4px;
+  background: #2d2d2d;
+  color: #cccccc;
+  padding: 0 8px 0 36px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.chat-sidebar-search input::placeholder {
+  color: #9d9d9d;
+  opacity: 1;
+}
+
+.chat-sidebar-search input:focus {
+  border-color: #5a5a5a;
+  background: #333333;
+}
+
 .editor-run-controls select {
   height: 24px;
   border: 1px solid #515151;
