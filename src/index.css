@@ -1557,6 +1557,10 @@ body.resizing-projector * {
   padding-right: 2px;
 }
 
+.model-load-controls + .editor-run-controls {
+  padding-left: 2px;
+}
+
 .editor-run-controls select {
   height: 24px;
   border: 1px solid #515151;

@@ -33,5 +33,5 @@ test("keeps the Load and Run split controls close together", async ({ page }) =>
 
   expect(gap[0]).not.toBeNull();
   expect(gap[1]).not.toBeNull();
-  expect(gap[1]!.x - (gap[0]!.x + gap[0]!.width)).toBeLessThan(20);
+  expect(gap[1]!.x - (gap[0]!.x + gap[0]!.width)).toBeLessThan(10);
 });
