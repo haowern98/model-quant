@@ -1628,6 +1628,10 @@ body.resizing-projector * {
   transform: translateX(2px);
 }
 
+.run-split-primary .codicon-arrow-circle-up {
+  transform: translateY(1px);
+}
+
 .run-split-chevron {
   width: 18px;
   margin-left: 0px;
