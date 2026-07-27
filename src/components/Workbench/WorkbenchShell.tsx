@@ -25,6 +25,7 @@ import { ExplorerPanel } from "./ExplorerPanel";
 import type { EditorTab } from "./editorTabModel";
 import { StatusBar } from "./StatusBar";
 import { TestingPanel } from "./TestingPanel";
+import type { ChatConversation, ChatConversationSummary, ModelLoadConfig } from "./chat/chatTypes";
 
 const EXPLORER_DEFAULT_WIDTH = 365;
 const EXPLORER_MIN_WIDTH = 150;
@@ -79,6 +80,18 @@ interface WorkbenchShellProps {
   onOpenProjectorTensorValues: (tensor: TensorInfo, groupId: string) => void;
   onToggleLayer: (layerIndex: number) => void;
   onNewChat: () => void;
+  chatConversations: Record<string, ChatConversation>;
+  chatSummaries: ChatConversationSummary[];
+  chatSendingConversationId: string | null;
+  chatModelLoading: boolean;
+  chatModelLoaded: boolean;
+  chatError: string | null;
+  modelLoadConfig: ModelLoadConfig;
+  onModelLoadConfigChange: (config: ModelLoadConfig) => void;
+  onOpenChat: (id: string) => void;
+  onLoadChatModel: () => void;
+  onUnloadChatModel: () => void;
+  onSendChatMessage: (id: string, content: string) => void;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
@@ -167,6 +180,18 @@ export function WorkbenchShell({
   onOpenProjectorTensorValues,
   onToggleLayer,
   onNewChat,
+  chatConversations,
+  chatSummaries,
+  chatSendingConversationId,
+  chatModelLoading,
+  chatModelLoaded,
+  chatError,
+  modelLoadConfig,
+  onModelLoadConfigChange,
+  onOpenChat,
+  onLoadChatModel,
+  onUnloadChatModel,
+  onSendChatMessage,
   onSelectEditor,
   onCloseEditor,
   onReorderEditor,
@@ -323,7 +348,7 @@ export function WorkbenchShell({
         onSelectActivity={selectActivity}
       />
       {activeActivity === "chat" ? (
-        <ChatSidebar onNewChat={onNewChat} />
+        <ChatSidebar onNewChat={onNewChat} conversations={chatSummaries} onOpenChat={onOpenChat} />
       ) : activeActivity === "testing" ? (
         <TestingPanel
           running={running}
@@ -415,6 +440,16 @@ export function WorkbenchShell({
         apiOutputLines={apiOutputLines}
         openEditors={openEditors}
         activeEditorId={activeEditorId}
+        chatConversations={chatConversations}
+        chatSendingConversationId={chatSendingConversationId}
+        chatModelLoading={chatModelLoading}
+        chatModelLoaded={chatModelLoaded}
+        chatError={chatError}
+        modelLoadConfig={modelLoadConfig}
+        onModelLoadConfigChange={onModelLoadConfigChange}
+        onLoadChatModel={onLoadChatModel}
+        onUnloadChatModel={onUnloadChatModel}
+        onSendChatMessage={onSendChatMessage}
         tensors={selectedTensors}
         assignments={assignments}
         profile={profile}

@@ -44,6 +44,7 @@ import { EditorTabs } from "./EditorTabs";
 import { ModelLoadControls } from "./ModelLoadControls";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
+import type { ChatConversation, ModelLoadConfig } from "./chat/chatTypes";
 import {
   deleteGpqaDiamondHarness,
   deleteHumanEvalDataset,
@@ -86,6 +87,16 @@ interface EditorPaneProps {
   apiOutputLines: BenchmarkOutputLine[];
   openEditors: EditorTab[];
   activeEditorId: string | null;
+  chatConversations: Record<string, ChatConversation>;
+  chatSendingConversationId: string | null;
+  chatModelLoading: boolean;
+  chatModelLoaded: boolean;
+  chatError: string | null;
+  modelLoadConfig: ModelLoadConfig;
+  onModelLoadConfigChange: (config: ModelLoadConfig) => void;
+  onLoadChatModel: () => void;
+  onUnloadChatModel: () => void;
+  onSendChatMessage: (id: string, content: string) => void;
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
@@ -162,6 +173,16 @@ export function EditorPane({
   apiOutputLines,
   openEditors,
   activeEditorId,
+  chatConversations,
+  chatSendingConversationId,
+  chatModelLoading,
+  chatModelLoaded,
+  chatError,
+  modelLoadConfig,
+  onModelLoadConfigChange,
+  onLoadChatModel,
+  onUnloadChatModel,
+  onSendChatMessage,
   tensors,
   assignments,
   profile,
@@ -228,6 +249,8 @@ export function EditorPane({
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
   const showingMmmuProBenchmark = activeEditor?.kind === "mmmu-pro-details";
   const showingChat = activeEditor?.kind === "chat";
+  const activeChatTab = activeEditor?.kind === "chat" ? activeEditor : null;
+  const activeChat = activeChatTab ? chatConversations[activeChatTab.chatId] : undefined;
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
@@ -278,7 +301,15 @@ export function EditorPane({
           onCloseEditor={onCloseEditor}
           onReorderEditor={onReorderEditor}
         />
-        <ModelLoadControls />
+        <ModelLoadControls
+          config={modelLoadConfig}
+          onConfigChange={onModelLoadConfigChange}
+          hasModel={hasModel}
+          loaded={chatModelLoaded}
+          busy={running || chatModelLoading}
+          onLoad={onLoadChatModel}
+          onUnload={onUnloadChatModel}
+        />
         <RunControls
           hasModel={hasModel}
           running={running}
@@ -395,7 +426,15 @@ export function EditorPane({
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : showingChat ? (
-        <ChatEditor />
+        <ChatEditor
+          messages={activeChat?.messages ?? []}
+          sending={chatSendingConversationId === activeChatTab?.chatId}
+          disabled={running || chatModelLoading || !hasModel || !chatModelLoaded}
+          error={chatError}
+          onSend={(content) => {
+            if (activeChatTab) onSendChatMessage(activeChatTab.chatId, content);
+          }}
+        />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">

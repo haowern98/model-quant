@@ -1,18 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import type { ModelLoadConfig } from "./chat/chatTypes";
 
-const DEFAULT_MODEL_LOAD_CONFIG = {
-  seed: "",
-  thinking: "off",
-  temperature: "0",
-  topK: "40",
-  repeatPenalty: "1.1",
-  presencePenalty: "0",
-  topP: "0.95",
-  minP: "0.05",
-  contextWindow: "20000",
-};
-
-type ModelLoadConfig = typeof DEFAULT_MODEL_LOAD_CONFIG;
 type ConfigField = {
   key: Exclude<keyof ModelLoadConfig, "thinking">;
   label: string;
@@ -32,10 +20,19 @@ const CONFIGURATION_FIELDS: readonly ConfigField[] = [
   { key: "contextWindow", label: "Context Window", inputLabel: "Load model context window", inputMode: "numeric" },
 ];
 
-export function ModelLoadControls() {
+interface ModelLoadControlsProps {
+  config: ModelLoadConfig;
+  onConfigChange: (config: ModelLoadConfig) => void;
+  hasModel: boolean;
+  loaded: boolean;
+  busy: boolean;
+  onLoad: () => void;
+  onUnload: () => void;
+}
+
+export function ModelLoadControls({ config, onConfigChange, hasModel, loaded, busy, onLoad, onUnload }: ModelLoadControlsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
-  const [config, setConfig] = useState<ModelLoadConfig>(DEFAULT_MODEL_LOAD_CONFIG);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -61,7 +58,7 @@ export function ModelLoadControls() {
   }, [menuOpen]);
 
   const updateField = (field: ConfigField, value: string) => {
-    setConfig((current) => ({ ...current, [field.key]: value }));
+    onConfigChange({ ...config, [field.key]: value });
   };
 
   const thinkingLabel = config.thinking === "on" ? "On" : "Off";
@@ -77,11 +74,12 @@ export function ModelLoadControls() {
         <button
           type="button"
           className="run-split-primary"
-          aria-label="Load model"
-          title="Load Model is not available yet"
-          disabled
+          aria-label={loaded ? "Unload model" : "Load model"}
+          title={loaded ? "Unload model from Chat" : "Load model for Chat"}
+          disabled={busy || (!loaded && !hasModel)}
+          onClick={loaded ? onUnload : onLoad}
         >
-          <span className="codicon codicon-arrow-circle-up" aria-hidden="true" />
+          <span className={`codicon ${loaded ? "codicon-arrow-circle-down" : "codicon-arrow-circle-up"}`} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -106,7 +104,7 @@ export function ModelLoadControls() {
                   value={config.seed}
                   placeholder="Random"
                   inputMode="numeric"
-                  onChange={(event) => setConfig((current) => ({ ...current, seed: event.currentTarget.value }))}
+                  onChange={(event) => onConfigChange({ ...config, seed: event.currentTarget.value })}
                 />
               </label>
               <div className="benchmark-info-row">
@@ -137,7 +135,7 @@ export function ModelLoadControls() {
                           aria-selected={config.thinking === option.value}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
-                            setConfig((current) => ({ ...current, thinking: option.value }));
+                            onConfigChange({ ...config, thinking: option.value as ModelLoadConfig["thinking"] });
                             setThinkingMenuOpen(false);
                           }}
                         >

@@ -1,14 +1,6 @@
-export type ChatMessageData = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  reasoning?: string;
-  model?: string;
-  tokensPerSecond?: number;
-  promptTokens?: number;
-  durationSeconds?: number;
-  finishReason?: string;
-};
+import type { ChatMessageData } from "./chat/chatTypes";
+
+export type { ChatMessageData } from "./chat/chatTypes";
 
 export function ChatMessage({ message }: { message: ChatMessageData }) {
   return (

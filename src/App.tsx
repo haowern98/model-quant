@@ -71,6 +71,8 @@ import type {
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 import { projectorGroupLabel } from "./lib/format";
+import { DEFAULT_MODEL_LOAD_CONFIG, type ModelLoadConfig } from "./components/Workbench/chat/chatTypes";
+import { useChatSession } from "./components/Workbench/chat/useChatSession";
 
 const MULTIMODAL_PREFLIGHT_IMAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==";
@@ -525,6 +527,7 @@ function App() {
   const { outputLines, apiOutputLines } = useBenchmarkOutputLog();
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
+  const [modelLoadConfig, setModelLoadConfig] = useState<ModelLoadConfig>(DEFAULT_MODEL_LOAD_CONFIG);
   const [projectorPath, setProjectorPath] = useState<string | null>(null);
   const [projector, setProjector] = useState<ModelInfo | null>(null);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
@@ -569,6 +572,7 @@ function App() {
   );
   const [terminalBenchConfig, setTerminalBenchConfig] =
     useState<TerminalBenchBenchmarkConfigInput>(DEFAULT_TERMINAL_BENCH_CONFIG_INPUT);
+  const chat = useChatSession(modelLoadConfig);
 
   const mmmuProStatus = useMemo<MmmuProStatus>(() => {
     if (!modelPath) {
@@ -838,10 +842,28 @@ function App() {
   }, [layerDisplayLabel]);
 
   const handleNewChat = useCallback(() => {
-    const tab = chatEditorTab();
+    const conversation = chat.createConversation();
+    const tab = chatEditorTab(conversation.id, conversation.title);
     setOpenEditors((current) => [...current, tab]);
     setActiveEditorId(tab.id);
-  }, []);
+  }, [chat]);
+
+  const handleOpenChat = useCallback(async (chatId: string) => {
+    const conversation = await chat.openConversation(chatId);
+    const tab = chatEditorTab(conversation.id, conversation.title);
+    setOpenEditors((current) =>
+      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
+    );
+    setActiveEditorId(tab.id);
+  }, [chat]);
+
+  useEffect(() => {
+    setOpenEditors((current) => current.map((editor) =>
+      editor.kind === "chat" && chat.conversations[editor.chatId]
+        ? { ...editor, title: chat.conversations[editor.chatId].title }
+        : editor,
+    ));
+  }, [chat.conversations]);
 
   const handleToggleLayer = useCallback((layerIndex: number) => {
     setExpandedLayers((current) => {
@@ -1777,6 +1799,18 @@ function App() {
           onOpenProjectorTensorValues={handleOpenProjectorTensorValues}
           onToggleLayer={handleToggleLayer}
           onNewChat={handleNewChat}
+          chatConversations={chat.conversations}
+          chatSummaries={chat.summaries}
+          chatSendingConversationId={chat.sendingConversationId}
+          chatModelLoading={chat.modelLoading}
+          chatModelLoaded={chat.modelLoaded}
+          chatError={chat.error}
+          modelLoadConfig={modelLoadConfig}
+          onModelLoadConfigChange={setModelLoadConfig}
+          onOpenChat={handleOpenChat}
+          onLoadChatModel={chat.loadModel}
+          onUnloadChatModel={chat.unloadModel}
+          onSendChatMessage={chat.sendMessage}
           onSelectEditor={setActiveEditorId}
           onCloseEditor={handleCloseEditor}
           onReorderEditor={handleReorderEditor}

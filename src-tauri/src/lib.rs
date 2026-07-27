@@ -6,6 +6,7 @@ pub mod progress;
 pub mod quant;
 
 use commands::hardware::HardwareMonitor;
+use commands::chat::ChatRuntimeState;
 use commands::model::{ModelState, ProjectorState};
 use commands::modelinspector_api::ModelInspectorApiState;
 use commands::official_benchmarks::OfficialBenchmarkRunner;
@@ -25,6 +26,7 @@ pub fn run() {
         .manage(RecipeStore(Mutex::new(None)))
         .manage(HardwareMonitor::new())
         .manage(ModelInspectorApiState::new())
+        .manage(ChatRuntimeState::new())
         .manage(OfficialBenchmarkRunner::new())
         .invoke_handler(tauri::generate_handler![
             commands::model::open_model,
@@ -45,6 +47,13 @@ pub fn run() {
             commands::modelinspector_api::start_modelinspector_api,
             commands::modelinspector_api::stop_modelinspector_api,
             commands::modelinspector_api::get_modelinspector_api_status,
+            commands::chat::load_chat_model,
+            commands::chat::unload_chat_model,
+            commands::chat::generate_chat_response,
+            commands::chat::generate_chat_title,
+            commands::chat::save_chat_conversation,
+            commands::chat::list_chat_conversations,
+            commands::chat::load_chat_conversation,
             commands::official_benchmarks::get_gpqa_diamond_status,
             commands::official_benchmarks::get_humaneval_status,
             commands::official_benchmarks::get_terminal_bench_status,
