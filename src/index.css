@@ -1599,7 +1599,7 @@ body.resizing-projector * {
   left: 10px;
   z-index: 1;
   color: #a6a6a6;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 16px;
   pointer-events: none;
   transform: translateY(-50%);
@@ -1615,7 +1615,7 @@ body.resizing-projector * {
   color: #cccccc;
   padding: 0 8px 0 36px;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   outline: none;
 }
 
