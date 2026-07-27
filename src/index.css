@@ -76,6 +76,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -94,6 +95,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -111,6 +113,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -129,6 +132,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -146,6 +150,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -163,6 +168,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -177,6 +183,7 @@ button {
   .hardware-panel,
   .tensor-editor-content,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -193,6 +200,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
   .overflow-x-auto
@@ -1961,6 +1969,8 @@ body.resizing-projector * {
   min-height: 0;
   box-sizing: border-box;
   resize: none;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   border: 0;
   outline: 0;
   background: transparent;
