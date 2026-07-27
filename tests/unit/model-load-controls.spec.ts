@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("shows a disabled Load Model split control matching the benchmark control dimensions", async ({ page }) => {
+test("keeps Load Model enabled and explains when no GGUF is open", async ({ page }) => {
   await page.goto("/");
 
   const loadButton = page.getByRole("button", { name: "Load model", exact: true });
@@ -8,8 +8,11 @@ test("shows a disabled Load Model split control matching the benchmark control d
   const runButton = page.getByRole("button", { name: "Run recipe test" });
   const runChevron = page.getByRole("button", { name: "Test run options" });
 
-  await expect(loadButton).toBeDisabled();
+  await expect(loadButton).toBeEnabled();
   await expect(loadChevron).toBeEnabled();
+
+  await loadButton.click();
+  await expect(page.getByRole("alert")).toContainText("Open a GGUF model first.");
 
   const dimensions = await Promise.all(
     [loadButton, loadChevron, runButton, runChevron].map((control) =>

@@ -857,6 +857,36 @@ function App() {
     setActiveEditorId(tab.id);
   }, [chat]);
 
+  const handleLoadChatModel = useCallback(() => {
+    if (running) {
+      setAppError(statusMessage ? "Wait for the current task to finish." : "Cancel or wait for the benchmark to finish.");
+      return;
+    }
+    if (chat.modelLoading) {
+      setAppError("Wait for the model to finish loading.");
+      return;
+    }
+    if (!recipe || !modelPath) {
+      setAppError("Open a GGUF model first.");
+      return;
+    }
+    setAppError(null);
+    void chat.loadModel();
+  }, [chat, modelPath, recipe, running, statusMessage]);
+
+  const handleUnloadChatModel = useCallback(() => {
+    if (running) {
+      setAppError(statusMessage ? "Wait for the current task to finish." : "Cancel or wait for the benchmark to finish.");
+      return;
+    }
+    if (chat.modelLoading) {
+      setAppError("Wait for the model to finish loading.");
+      return;
+    }
+    setAppError(null);
+    void chat.unloadModel();
+  }, [chat, running, statusMessage]);
+
   useEffect(() => {
     setOpenEditors((current) => current.map((editor) =>
       editor.kind === "chat" && chat.conversations[editor.chatId]
@@ -1079,6 +1109,18 @@ function App() {
   }, []);
 
   const handleTest = useCallback(async () => {
+    const hasSelectedBenchmark = selectedRunIds.some(
+      (id) =>
+        id === "ppl_check" ||
+        id === "gpqa_diamond" ||
+        id === "humaneval" ||
+        id === "terminal_bench" ||
+        id === "mmmu_pro",
+    );
+    if (hasSelectedBenchmark && chat.modelLoaded) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       if (
         selectedRunIds.includes("gpqa_diamond") &&
@@ -1305,6 +1347,7 @@ function App() {
     humanevalConfig,
     mmmuProConfig,
     terminalBenchConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1312,6 +1355,10 @@ function App() {
   ]);
 
   const handleRunHumanEvalBenchmark = useCallback(async () => {
+    if (chat.modelLoaded) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       setAppError("Open a GGUF model before running HumanEval.");
       return;
@@ -1370,12 +1417,17 @@ function App() {
     humanevalStatus.ready,
     humanevalStatus.statusLabel,
     humanevalConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
   ]);
 
   const handleRunMmmuProBenchmark = useCallback(async () => {
+    if (chat.modelLoaded) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       setAppError("Open a GGUF model before running MMMU-Pro.");
       return;
@@ -1441,12 +1493,17 @@ function App() {
     modelPath,
     mmmuProStatus,
     mmmuProConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
   ]);
 
   const handleRunTerminalBenchBenchmark = useCallback(async () => {
+    if (chat.modelLoaded) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       setAppError("Open a GGUF model before running Terminal-Bench.");
       return;
@@ -1505,6 +1562,7 @@ function App() {
     terminalBenchStatus.statusLabel,
     terminalBenchDatasetStatus.datasetReady,
     terminalBenchConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1808,8 +1866,8 @@ function App() {
           modelLoadConfig={modelLoadConfig}
           onModelLoadConfigChange={setModelLoadConfig}
           onOpenChat={handleOpenChat}
-          onLoadChatModel={chat.loadModel}
-          onUnloadChatModel={chat.unloadModel}
+          onLoadChatModel={handleLoadChatModel}
+          onUnloadChatModel={handleUnloadChatModel}
           onSendChatMessage={chat.sendMessage}
           onSelectEditor={setActiveEditorId}
           onCloseEditor={handleCloseEditor}

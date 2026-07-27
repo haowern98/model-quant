@@ -30,7 +30,7 @@ interface ModelLoadControlsProps {
   onUnload: () => void;
 }
 
-export function ModelLoadControls({ config, onConfigChange, hasModel, loaded, busy, onLoad, onUnload }: ModelLoadControlsProps) {
+export function ModelLoadControls({ config, onConfigChange, loaded, busy, onLoad, onUnload }: ModelLoadControlsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -70,13 +70,13 @@ export function ModelLoadControls({ config, onConfigChange, hasModel, loaded, bu
         className={`run-split-action ${menuOpen ? "open" : ""}`}
         role="group"
         aria-label="Model load controls"
+        aria-busy={busy || undefined}
       >
         <button
           type="button"
           className="run-split-primary"
           aria-label={loaded ? "Unload model" : "Load model"}
           title={loaded ? "Unload model from Chat" : "Load model for Chat"}
-          disabled={busy || (!loaded && !hasModel)}
           onClick={loaded ? onUnload : onLoad}
         >
           <span className={`codicon ${loaded ? "codicon-arrow-circle-down" : "codicon-arrow-circle-up"}`} aria-hidden="true" />
