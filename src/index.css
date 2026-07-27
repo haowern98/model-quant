@@ -1629,6 +1629,34 @@ body.resizing-projector * {
   background: #333333;
 }
 
+.chat-sidebar-new-chat {
+  width: calc(100% - 24px);
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #dcdcdc;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.chat-sidebar-new-chat .codicon {
+  font-size: 15px;
+  line-height: 16px;
+}
+
+.chat-sidebar-new-chat:hover,
+.chat-sidebar-new-chat:focus-visible {
+  background: #333333;
+}
+
 .editor-run-controls select {
   height: 24px;
   border: 1px solid #515151;

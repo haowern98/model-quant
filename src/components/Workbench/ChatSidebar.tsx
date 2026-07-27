@@ -9,6 +9,10 @@ export function ChatSidebar() {
         <span className="codicon codicon-search" aria-hidden="true" />
         <input type="search" aria-label="Search chats" placeholder="Search chats..." />
       </div>
+      <button type="button" className="chat-sidebar-new-chat">
+        <span className="codicon codicon-edit" aria-hidden="true" />
+        <span>New chat</span>
+      </button>
     </aside>
   );
 }
