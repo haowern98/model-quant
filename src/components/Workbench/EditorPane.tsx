@@ -39,6 +39,7 @@ import type {
 } from "../../types";
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
+import { ChatEditor } from "./ChatEditor";
 import { EditorTabs } from "./EditorTabs";
 import { ModelLoadControls } from "./ModelLoadControls";
 import { RunControls } from "./RunControls";
@@ -394,15 +395,7 @@ export function EditorPane({
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
       ) : showingChat ? (
-        <section className="tensor-editor-surface">
-          <div className="tensor-editor-content">
-            <div className="tensor-editor-title">
-              <div>
-                <h1>{activeTitle}</h1>
-              </div>
-            </div>
-          </div>
-        </section>
+        <ChatEditor />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">

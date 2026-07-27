@@ -1887,6 +1887,79 @@ body.resizing-projector * {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.chat-editor {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: var(--vscode-editor);
+}
+
+.chat-editor-messages {
+  min-height: 0;
+  overflow: auto;
+}
+
+.chat-composer {
+  min-height: 106px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 38px;
+  margin: 0 24px 18px;
+  border: 1px solid #454545;
+  border-radius: 12px;
+  background: #2d2d2d;
+  overflow: hidden;
+}
+
+.chat-composer textarea {
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #dcdcdc;
+  padding: 14px 16px 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.chat-composer textarea::placeholder {
+  color: #8d8d8d;
+  opacity: 1;
+}
+
+.chat-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+}
+
+.chat-composer-action,
+.chat-composer-send {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #9d9d9d;
+  font: inherit;
+}
+
+.chat-composer-send {
+  background: #3c3c3c;
+}
+
+.chat-composer-action:disabled,
+.chat-composer-send:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .eval-results-editor {
   min-width: 0;
   min-height: 0;
