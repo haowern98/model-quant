@@ -1,7 +1,15 @@
-export function ChatEditor() {
+import { type ChatMessageData, ChatMessage } from "./ChatMessage";
+
+interface ChatEditorProps {
+  messages?: ChatMessageData[];
+}
+
+export function ChatEditor({ messages = [] }: ChatEditorProps) {
   return (
     <section className="chat-editor" aria-label="New chat">
-      <div className="chat-editor-messages" />
+      <div className="chat-editor-messages">
+        {messages.map((message) => <ChatMessage key={message.id} message={message} />)}
+      </div>
       <form className="chat-composer" onSubmit={(event) => event.preventDefault()}>
         <textarea aria-label="Message" placeholder="Send a message to the model..." />
         <div className="chat-composer-actions">
