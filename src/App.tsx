@@ -11,6 +11,7 @@ import {
   mmmuProDetailsEditorTab,
   terminalBenchDetailsEditorTab,
   tensorValuesEditorTab,
+  chatEditorTab,
   type EditorTab,
 } from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
@@ -835,6 +836,12 @@ function App() {
       return next;
     });
   }, [layerDisplayLabel]);
+
+  const handleNewChat = useCallback(() => {
+    const tab = chatEditorTab();
+    setOpenEditors((current) => [...current, tab]);
+    setActiveEditorId(tab.id);
+  }, []);
 
   const handleToggleLayer = useCallback((layerIndex: number) => {
     setExpandedLayers((current) => {
@@ -1769,6 +1776,7 @@ function App() {
           onToggleProjectorGroup={handleToggleProjectorGroup}
           onOpenProjectorTensorValues={handleOpenProjectorTensorValues}
           onToggleLayer={handleToggleLayer}
+          onNewChat={handleNewChat}
           onSelectEditor={setActiveEditorId}
           onCloseEditor={handleCloseEditor}
           onReorderEditor={handleReorderEditor}

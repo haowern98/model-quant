@@ -226,6 +226,7 @@ export function EditorPane({
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
   const showingMmmuProBenchmark = activeEditor?.kind === "mmmu-pro-details";
+  const showingChat = activeEditor?.kind === "chat";
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
@@ -315,6 +316,12 @@ export function EditorPane({
             <span>&gt;</span>
             <span>{tensorValuesEditor.tensorName}</span>
           </>
+        ) : showingChat ? (
+          <>
+            <span>Chat</span>
+            <span>&gt;</span>
+            <span>{activeBreadcrumb}</span>
+          </>
         ) : (
           <>
             <span>{showingBenchmark ? "Benchmarks" : basename(modelPath)}</span>
@@ -386,6 +393,16 @@ export function EditorPane({
         />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
+      ) : showingChat ? (
+        <section className="tensor-editor-surface">
+          <div className="tensor-editor-content">
+            <div className="tensor-editor-title">
+              <div>
+                <h1>{activeTitle}</h1>
+              </div>
+            </div>
+          </div>
+        </section>
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">

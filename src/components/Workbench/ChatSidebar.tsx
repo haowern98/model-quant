@@ -1,4 +1,8 @@
-export function ChatSidebar() {
+interface ChatSidebarProps {
+  onNewChat: () => void;
+}
+
+export function ChatSidebar({ onNewChat }: ChatSidebarProps) {
   return (
     <aside className="explorer-panel" aria-label="Chat">
       <div className="explorer-title">
@@ -9,7 +13,7 @@ export function ChatSidebar() {
         <span className="codicon codicon-search" aria-hidden="true" />
         <input type="search" aria-label="Search chats" placeholder="Search chats..." />
       </div>
-      <button type="button" className="chat-sidebar-new-chat">
+      <button type="button" className="chat-sidebar-new-chat" onClick={onNewChat}>
         <span className="codicon codicon-edit" aria-hidden="true" />
         <span>New chat</span>
       </button>

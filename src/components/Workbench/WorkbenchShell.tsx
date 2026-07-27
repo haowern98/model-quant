@@ -78,6 +78,7 @@ interface WorkbenchShellProps {
   onToggleProjectorGroup: (groupId: string) => void;
   onOpenProjectorTensorValues: (tensor: TensorInfo, groupId: string) => void;
   onToggleLayer: (layerIndex: number) => void;
+  onNewChat: () => void;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;
@@ -165,6 +166,7 @@ export function WorkbenchShell({
   onToggleProjectorGroup,
   onOpenProjectorTensorValues,
   onToggleLayer,
+  onNewChat,
   onSelectEditor,
   onCloseEditor,
   onReorderEditor,
@@ -321,7 +323,7 @@ export function WorkbenchShell({
         onSelectActivity={selectActivity}
       />
       {activeActivity === "chat" ? (
-        <ChatSidebar />
+        <ChatSidebar onNewChat={onNewChat} />
       ) : activeActivity === "testing" ? (
         <TestingPanel
           running={running}
