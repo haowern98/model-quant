@@ -1900,7 +1900,7 @@ body.resizing-projector * {
 }
 
 .chat-composer {
-  min-height: 106px;
+  min-height: 72px;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 38px;
   margin: 0 24px 18px;
