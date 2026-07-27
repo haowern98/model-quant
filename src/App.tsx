@@ -1117,7 +1117,7 @@ function App() {
         id === "terminal_bench" ||
         id === "mmmu_pro",
     );
-    if (hasSelectedBenchmark && chat.modelLoaded) {
+    if (hasSelectedBenchmark && (chat.modelLoaded || chat.modelLoading)) {
       setAppError("Unload the Chat model before running a benchmark.");
       return;
     }
@@ -1355,7 +1355,7 @@ function App() {
   ]);
 
   const handleRunHumanEvalBenchmark = useCallback(async () => {
-    if (chat.modelLoaded) {
+    if (chat.modelLoaded || chat.modelLoading) {
       setAppError("Unload the Chat model before running a benchmark.");
       return;
     }
@@ -1424,7 +1424,7 @@ function App() {
   ]);
 
   const handleRunMmmuProBenchmark = useCallback(async () => {
-    if (chat.modelLoaded) {
+    if (chat.modelLoaded || chat.modelLoading) {
       setAppError("Unload the Chat model before running a benchmark.");
       return;
     }
@@ -1500,7 +1500,7 @@ function App() {
   ]);
 
   const handleRunTerminalBenchBenchmark = useCallback(async () => {
-    if (chat.modelLoaded) {
+    if (chat.modelLoaded || chat.modelLoading) {
       setAppError("Unload the Chat model before running a benchmark.");
       return;
     }
