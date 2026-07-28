@@ -2096,6 +2096,9 @@ int32_t emit_chat_stream_delta(
         visible_delta.c_str(),
         reasoning_delta.c_str(),
         user_data);
+    if (status == MS_CHAT_STREAM_STATUS_CANCELLED) {
+        return status;
+    }
     if (status != 0) {
         return fail("chat stream callback aborted");
     }
