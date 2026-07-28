@@ -113,13 +113,32 @@ pub enum ChatFinishReason {
     Eos = 2,
 }
 
+const NATIVE_CHAT_FINISH_REASON_CANCELLED: u32 = 3;
+const NATIVE_CHAT_STREAM_STATUS_CANCELLED: c_int = 2;
+
 impl ChatFinishReason {
     fn from_native(value: u32) -> Result<Self, String> {
         match value {
             0 => Ok(Self::Stop),
             1 => Ok(Self::Length),
             2 => Ok(Self::Eos),
+            NATIVE_CHAT_FINISH_REASON_CANCELLED => Ok(Self::Stop),
             _ => Err(format!("unknown native chat finish reason: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatStreamAction {
+    Continue,
+    Cancel,
+}
+
+impl ChatStreamAction {
+    fn native_status(self) -> c_int {
+        match self {
+            Self::Continue => 0,
+            Self::Cancel => NATIVE_CHAT_STREAM_STATUS_CANCELLED,
         }
     }
 }
@@ -140,6 +159,7 @@ pub struct ChatGenerationOutput {
     pub reasoning_text: Option<String>,
     pub benchmark: MsBaselineBenchmark,
     pub finish_reason: ChatFinishReason,
+    pub cancelled: bool,
     pub actual_seed: u32,
 }
 
@@ -982,7 +1002,7 @@ impl Drop for RecipeChatSession {
 
 struct ChatStreamCallbackState<'a, F>
 where
-    F: FnMut(&str, &str) -> Result<(), String>,
+    F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
 {
     on_delta: &'a mut F,
     text: String,
@@ -996,7 +1016,7 @@ unsafe extern "C" fn recipe_chat_stream_trampoline<F>(
     user_data: *mut c_void,
 ) -> c_int
 where
-    F: FnMut(&str, &str) -> Result<(), String>,
+    F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
 {
     if user_data.is_null() {
         return 1;
@@ -1004,6 +1024,62 @@ where
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+        let text_delta = if text_delta.is_null() {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            unsafe { CStr::from_ptr(text_delta) }.to_string_lossy()
+        };
+        let reasoning_delta = if reasoning_delta.is_null() {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            unsafe { CStr::from_ptr(reasoning_delta) }.to_string_lossy()
+        };
+
+        state.text.push_str(&text_delta);
+        state.reasoning_text.push_str(&reasoning_delta);
+        match (state.on_delta)(&text_delta, &reasoning_delta) {
+            Ok(action) => action.native_status(),
+            Err(error) => {
+                state.error = Some(error);
+                1
+            }
+        }
+    }));
+
+    match result {
+        Ok(status) => status,
+        Err(_) => {
+            let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+            state.error = Some("chat stream callback panicked".to_string());
+            1
+        }
+    }
+}
+
+struct LegacyChatStreamCallbackState<'a, F>
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    on_delta: &'a mut F,
+    text: String,
+    reasoning_text: String,
+    error: Option<String>,
+}
+
+unsafe extern "C" fn legacy_recipe_chat_stream_trampoline<F>(
+    text_delta: *const c_char,
+    reasoning_delta: *const c_char,
+    user_data: *mut c_void,
+) -> c_int
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    if user_data.is_null() {
+        return 1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let state = unsafe { &mut *(user_data as *mut LegacyChatStreamCallbackState<F>) };
         let text_delta = if text_delta.is_null() {
             std::borrow::Cow::Borrowed("")
         } else {
@@ -1027,7 +1103,7 @@ where
     match result {
         Ok(status) => status,
         Err(_) => {
-            let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+            let state = unsafe { &mut *(user_data as *mut LegacyChatStreamCallbackState<F>) };
             state.error = Some("chat stream callback panicked".to_string());
             1
         }
@@ -1133,6 +1209,7 @@ impl RecipeChatSession {
                 reasoning_text: (!reasoning_text.is_empty()).then_some(reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
                 actual_seed: native_result.actual_seed,
             })
         } else {
@@ -1151,6 +1228,50 @@ impl RecipeChatSession {
     ) -> Result<ChatGenerationOutput, String>
     where
         F: FnMut(&str, &str) -> Result<(), String>,
+    {
+        self.generate_chat_streaming_with_action(
+            messages,
+            params,
+            stop_strings,
+            chat_template_kwargs_json,
+            reasoning_format,
+            |text, reasoning| on_delta(text, reasoning).map(|()| ChatStreamAction::Continue),
+        )
+    }
+
+    pub fn generate_chat_streaming_cancellable<F>(
+        &mut self,
+        messages: &[(String, String)],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        on_delta: F,
+    ) -> Result<ChatGenerationOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
+    {
+        self.generate_chat_streaming_with_action(
+            messages,
+            params,
+            stop_strings,
+            chat_template_kwargs_json,
+            reasoning_format,
+            on_delta,
+        )
+    }
+
+    fn generate_chat_streaming_with_action<F>(
+        &mut self,
+        messages: &[(String, String)],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        mut on_delta: F,
+    ) -> Result<ChatGenerationOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
     {
         let c_roles = messages
             .iter()
@@ -1244,6 +1365,7 @@ impl RecipeChatSession {
                     .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
                 actual_seed: native_result.actual_seed,
             })
         } else {
@@ -1327,7 +1449,7 @@ impl RecipeChatSession {
             finish_reason: ChatFinishReason::Stop as u32,
             actual_seed: 0,
         };
-        let mut callback_state = ChatStreamCallbackState {
+        let mut callback_state = LegacyChatStreamCallbackState {
             on_delta: &mut on_delta,
             text: String::new(),
             reasoning_text: String::new(),
@@ -1352,8 +1474,8 @@ impl RecipeChatSession {
                     .as_ref()
                     .map(|value| value.as_ptr())
                     .unwrap_or(std::ptr::null()),
-                Some(recipe_chat_stream_trampoline::<F>),
-                &mut callback_state as *mut ChatStreamCallbackState<F> as *mut c_void,
+                Some(legacy_recipe_chat_stream_trampoline::<F>),
+                &mut callback_state as *mut LegacyChatStreamCallbackState<F> as *mut c_void,
                 &mut native_result,
             )
         };
@@ -1369,6 +1491,7 @@ impl RecipeChatSession {
                     .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
                 actual_seed: native_result.actual_seed,
             })
         } else {
@@ -2081,5 +2204,18 @@ mod tests {
     #[test]
     fn accepts_native_runtime_with_expected_chat_abi_marker() {
         validate_chat_runtime_abi_from_version("model-surgery-runtime/0.2 chat-abi=2").unwrap();
+    }
+
+    #[test]
+    fn recognises_native_cancelled_chat_finish_reason() {
+        assert_eq!(
+            ChatFinishReason::from_native(3),
+            Ok(ChatFinishReason::Stop),
+        );
+    }
+
+    #[test]
+    fn reserves_a_dedicated_stream_status_for_graceful_chat_cancellation() {
+        assert_eq!(ChatStreamAction::Cancel.native_status(), 2);
     }
 }

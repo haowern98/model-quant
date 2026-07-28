@@ -174,6 +174,10 @@ export async function generateChatResponse(
   return invoke<ChatGenerationResponse>("generate_chat_response", { request });
 }
 
+export async function cancelChatGeneration(): Promise<void> {
+  return invoke<void>("cancel_chat_generation");
+}
+
 export async function loadChatModel(config: ChatGenerationConfig): Promise<ChatModelLoadStatus> {
   return invoke<ChatModelLoadStatus>("load_chat_model", { config });
 }

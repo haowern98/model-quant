@@ -1,24 +1,27 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
-    open_recipe_chat_session, ChatFinishReason, ChatGenerationParams, RecipeChatSession,
+    open_recipe_chat_session, ChatFinishReason, ChatGenerationParams, ChatStreamAction, RecipeChatSession,
 };
 use crate::quant::recipe::{QuantType, RecipeState};
 
 const CHAT_STREAM_EVENT: &str = "chat-stream-delta";
 const CHAT_KIND: &str = "model-quant-chat";
 
-pub struct ChatRuntimeState(Mutex<Option<ChatRuntime>>);
+pub struct ChatRuntimeState {
+    runtime: Mutex<Option<ChatRuntime>>,
+    cancel_requested: AtomicBool,
+}
 
 impl ChatRuntimeState {
     pub fn new() -> Self {
-        Self(Mutex::new(None))
+        Self { runtime: Mutex::new(None), cancel_requested: AtomicBool::new(false) }
     }
 }
 
@@ -134,7 +137,7 @@ pub async fn load_chat_model(
         .clone()
         .ok_or("Open a GGUF model before loading it for Chat.")?;
     let targets = recipe_targets(&recipe);
-    let mut runtime = chat_runtime.0.lock().map_err(|error| error.to_string())?;
+    let mut runtime = chat_runtime.runtime.lock().map_err(|error| error.to_string())?;
     let already_loaded = runtime.as_ref().is_some_and(|current| {
         current.base_model == recipe.base_model && current.targets == targets && current.config == config
     });
@@ -154,7 +157,15 @@ pub async fn load_chat_model(
 pub async fn unload_chat_model(
     chat_runtime: State<'_, ChatRuntimeState>,
 ) -> Result<(), String> {
-    *chat_runtime.0.lock().map_err(|error| error.to_string())? = None;
+    *chat_runtime.runtime.lock().map_err(|error| error.to_string())? = None;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cancel_chat_generation(
+    chat_runtime: State<'_, ChatRuntimeState>,
+) -> Result<(), String> {
+    chat_runtime.cancel_requested.store(true, Ordering::Relaxed);
     Ok(())
 }
 
@@ -242,7 +253,8 @@ fn generate(
     max_tokens: Option<u32>,
     title: bool,
 ) -> Result<ChatGenerationResponse, String> {
-    let mut runtime = chat_runtime.0.lock().map_err(|error| error.to_string())?;
+    chat_runtime.cancel_requested.store(false, Ordering::Relaxed);
+    let mut runtime = chat_runtime.runtime.lock().map_err(|error| error.to_string())?;
     let runtime = runtime
         .as_mut()
         .ok_or("Load a GGUF model before chatting.")?;
@@ -270,13 +282,16 @@ fn generate(
     let template_kwargs = serde_json::json!({ "enable_thinking": config.thinking }).to_string();
     let output = if stream {
         let conversation_id = request.conversation_id.clone();
-        runtime.session.generate_chat_streaming(
+        runtime.session.generate_chat_streaming_cancellable(
             &messages,
             &params,
             &[],
             Some(&template_kwargs),
             None,
             |content, reasoning| {
+                if chat_runtime.cancel_requested.load(Ordering::Relaxed) {
+                    return Ok(ChatStreamAction::Cancel);
+                }
                 let app = app.ok_or("Chat streaming requires an app handle.")?;
                 app.emit(
                     CHAT_STREAM_EVENT,
@@ -286,7 +301,8 @@ fn generate(
                         reasoning: reasoning.to_string(),
                     },
                 )
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+                Ok(ChatStreamAction::Continue)
             },
         )?
     } else {
@@ -306,7 +322,7 @@ fn generate(
         tokens_per_second: output.benchmark.token_gen_tps,
         prompt_tokens: output.benchmark.prompt_tokens,
         duration_seconds,
-        finish_reason: finish_reason(output.finish_reason).to_string(),
+        finish_reason: if output.cancelled { "cancelled" } else { finish_reason(output.finish_reason) }.to_string(),
         seed: output.actual_seed,
     })
 }

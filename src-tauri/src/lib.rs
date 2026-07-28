@@ -50,6 +50,7 @@ pub fn run() {
             commands::chat::load_chat_model,
             commands::chat::unload_chat_model,
             commands::chat::generate_chat_response,
+            commands::chat::cancel_chat_generation,
             commands::chat::generate_chat_title,
             commands::chat::save_chat_conversation,
             commands::chat::list_chat_conversations,

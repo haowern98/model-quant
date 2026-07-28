@@ -75,7 +75,12 @@ typedef struct ms_chat_generation_params {
 enum {
     MS_CHAT_FINISH_REASON_STOP = 0,
     MS_CHAT_FINISH_REASON_LENGTH = 1,
-    MS_CHAT_FINISH_REASON_EOS = 2
+    MS_CHAT_FINISH_REASON_EOS = 2,
+    MS_CHAT_FINISH_REASON_CANCELLED = 3
+};
+
+enum {
+    MS_CHAT_STREAM_STATUS_CANCELLED = 2
 };
 
 typedef struct ms_chat_generation_result {

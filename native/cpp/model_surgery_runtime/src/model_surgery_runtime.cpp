@@ -2533,6 +2533,10 @@ int32_t run_session_generate_stream(
             emitted_reasoning_text,
             callback,
             user_data);
+        if (stream_res == MS_CHAT_STREAM_STATUS_CANCELLED) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_CANCELLED;
+            break;
+        }
         if (stream_res != 0) {
             return stream_res;
         }
@@ -2558,7 +2562,7 @@ int32_t run_session_generate_stream(
         emitted_reasoning_text,
         callback,
         user_data);
-    if (final_stream_res != 0) {
+    if (final_stream_res != 0 && final_stream_res != MS_CHAT_STREAM_STATUS_CANCELLED) {
         return final_stream_res;
     }
 
