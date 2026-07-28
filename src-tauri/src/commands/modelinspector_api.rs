@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
 use crate::commands::model::{multimodal_projector_path, ProjectorState};
+use crate::commands::official_benchmarks::OfficialBenchmarkRunner;
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
     ChatFinishReason, ChatGenerationParams, MsBaselineBenchmark, MsRuntimeChatSessionCounters,
@@ -302,6 +303,7 @@ pub async fn start_modelinspector_api(
     api_state: State<'_, ModelInspectorApiState>,
     recipe_state: State<'_, RecipeStore>,
     projector_state: State<'_, ProjectorState>,
+    runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<ModelInspectorApiStatus, String> {
     let recipe = recipe_state
         .0
@@ -330,6 +332,7 @@ pub async fn start_modelinspector_api(
         let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
         guard.begin_start()?
     };
+    runner.begin_benchmark_launch();
     if let Some(mut server) = old_server {
         server.stop();
     }
@@ -340,6 +343,7 @@ pub async fn start_modelinspector_api(
         Err(error) => {
             let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
             guard.finish_start(&startup, None);
+            runner.finish_benchmark_launch();
             return Err(format!("Failed to bind Model Inspector API: {error}"));
         }
     };
@@ -348,6 +352,7 @@ pub async fn start_modelinspector_api(
         Err(error) => {
             let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
             guard.finish_start(&startup, None);
+            runner.finish_benchmark_launch();
             return Err(format!(
                 "Failed to read Model Inspector API address: {error}"
             ));
@@ -360,6 +365,7 @@ pub async fn start_modelinspector_api(
     let output_app = app.clone();
     let context_tokens = context_window.unwrap_or(API_CHAT_CONTEXT_TOKENS);
     if context_tokens == 0 {
+        runner.finish_benchmark_launch();
         return Err("ModelInspector API context window must be greater than 0.".to_string());
     }
     let load_start = Instant::now();
@@ -378,6 +384,7 @@ pub async fn start_modelinspector_api(
                 let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
                 let was_cancelled = startup.cancel_requested();
                 guard.finish_start(&startup, None);
+                runner.finish_benchmark_launch();
                 if was_cancelled || error.to_lowercase().contains("cancel") {
                     return Err("ModelInspector API startup cancelled".to_string());
                 }
@@ -390,6 +397,7 @@ pub async fn start_modelinspector_api(
     if startup.cancel_requested() {
         let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
         guard.finish_start(&startup, None);
+        runner.finish_benchmark_launch();
         return Err("ModelInspector API startup cancelled".to_string());
     }
     let tensor_summary = session
@@ -444,6 +452,7 @@ pub async fn start_modelinspector_api(
         Err(error) => {
             let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
             guard.finish_start(&startup, None);
+            runner.finish_benchmark_launch();
             return Err(format!(
                 "Failed to start Model Inspector API thread: {error}"
             ));
@@ -463,6 +472,7 @@ pub async fn start_modelinspector_api(
     let api_key = server.token.clone();
     let mut guard = api_state.0.lock().map_err(|e| e.to_string())?;
     if !guard.finish_start(&startup, Some(server)) {
+        runner.finish_benchmark_launch();
         return Err("ModelInspector API startup cancelled".to_string());
     }
     if let Some(app) = server_state.app.as_ref() {
@@ -480,6 +490,7 @@ pub async fn start_modelinspector_api(
 #[tauri::command]
 pub async fn stop_modelinspector_api(
     api_state: State<'_, ModelInspectorApiState>,
+    runner: State<'_, OfficialBenchmarkRunner>,
 ) -> Result<ModelInspectorApiStatus, String> {
     crate::ffi::runtime_bindings::cancel_recipe_test();
     let server = {
@@ -489,6 +500,7 @@ pub async fn stop_modelinspector_api(
     if let Some(mut server) = server {
         server.stop();
     }
+    runner.finish_benchmark_launch();
     Ok(ModelInspectorApiStatus {
         running: false,
         base_url: None,
