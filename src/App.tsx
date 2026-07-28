@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MMMU_PRO_SUBJECTS } from "./types";
 import { TitleBar } from "./components/TitleBar";
 import { WorkbenchShell } from "./components/Workbench/WorkbenchShell";
@@ -572,6 +572,7 @@ function App() {
   );
   const [terminalBenchConfig, setTerminalBenchConfig] =
     useState<TerminalBenchBenchmarkConfigInput>(DEFAULT_TERMINAL_BENCH_CONFIG_INPUT);
+  const benchmarkLaunchCancelledRef = useRef(false);
   const chat = useChatSession(modelLoadConfig);
 
   const mmmuProStatus = useMemo<MmmuProStatus>(() => {
@@ -1180,6 +1181,7 @@ function App() {
       return;
     }
 
+    benchmarkLaunchCancelledRef.current = false;
     startOperation();
     try {
       let latestResult: BenchmarkResult | null = null;
@@ -1196,6 +1198,7 @@ function App() {
       }
 
       if (runQueue.includes("gpqa_diamond")) {
+        if (benchmarkLaunchCancelledRef.current) return;
         const resolvedGpqaConfig = resolveGpqaConfigInput(gpqaConfig);
         if (typeof resolvedGpqaConfig === "string") {
           throw new Error(resolvedGpqaConfig);
@@ -1209,6 +1212,7 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
+          if (benchmarkLaunchCancelledRef.current) return;
           try {
             latestResult = await runGpqaDiamondBenchmark(
               apiStatus.baseUrl,
@@ -1227,6 +1231,7 @@ function App() {
       }
 
       if (runQueue.includes("humaneval")) {
+        if (benchmarkLaunchCancelledRef.current) return;
         const config = resolveGpqaConfigInput(humanevalConfig);
         if (typeof config === "string") throw new Error(config.replaceAll("GPQA", "HumanEval"));
         config.sampleLimit = Math.min(config.sampleLimit, HUMANEVAL_SAMPLE_COUNT);
@@ -1239,6 +1244,7 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
+          if (benchmarkLaunchCancelledRef.current) return;
           try {
             latestResult = await runHumanEvalBenchmark(
               apiStatus.baseUrl,
@@ -1256,6 +1262,7 @@ function App() {
       }
 
       if (runQueue.includes("mmmu_pro")) {
+        if (benchmarkLaunchCancelledRef.current) return;
         const config = resolveMmmuProConfigInput(mmmuProConfig);
         if (typeof config === "string") throw new Error(config);
         const apiStatus = await startModelInspectorApi({
@@ -1268,6 +1275,7 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
+          if (benchmarkLaunchCancelledRef.current) return;
           try {
             await runMultimodalPreflight(apiStatus);
           } catch (error) {
@@ -1277,6 +1285,7 @@ function App() {
             }
             throw new Error(`Multimodal preflight failed: ${detail}`);
           }
+          if (benchmarkLaunchCancelledRef.current) return;
           try {
             latestResult = await runMmmuProBenchmark(
               apiStatus.baseUrl,
@@ -1294,6 +1303,7 @@ function App() {
       }
 
       if (runQueue.includes("terminal_bench")) {
+        if (benchmarkLaunchCancelledRef.current) return;
         const config = resolveTerminalBenchConfigInput(terminalBenchConfig);
         if (typeof config === "string") throw new Error(config);
         const apiStatus = await startModelInspectorApi({
@@ -1305,6 +1315,7 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
+          if (benchmarkLaunchCancelledRef.current) return;
           try {
             latestResult = await runTerminalBenchBenchmark(
               apiStatus.baseUrl,
@@ -1379,6 +1390,7 @@ function App() {
     }
     config.sampleLimit = Math.min(config.sampleLimit, HUMANEVAL_SAMPLE_COUNT);
 
+    benchmarkLaunchCancelledRef.current = false;
     startOperation();
     try {
       const apiStatus = await startModelInspectorApi({
@@ -1390,6 +1402,7 @@ function App() {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
       try {
+        if (benchmarkLaunchCancelledRef.current) return;
         try {
           const result = await runHumanEvalBenchmark(
             apiStatus.baseUrl,
@@ -1447,6 +1460,7 @@ function App() {
       return;
     }
 
+    benchmarkLaunchCancelledRef.current = false;
     startOperation();
     let apiStarted = false;
     try {
@@ -1460,6 +1474,7 @@ function App() {
       if (!apiStatus.baseUrl || !apiStatus.apiKey || !apiStatus.modelId) {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
+      if (benchmarkLaunchCancelledRef.current) return;
       try {
         await runMultimodalPreflight(apiStatus);
       } catch (error) {
@@ -1469,6 +1484,7 @@ function App() {
         }
         throw new Error(`Multimodal preflight failed: ${detail}`);
       }
+      if (benchmarkLaunchCancelledRef.current) return;
       try {
         const result = await runMmmuProBenchmark(
           apiStatus.baseUrl,
@@ -1521,6 +1537,7 @@ function App() {
       return;
     }
 
+    benchmarkLaunchCancelledRef.current = false;
     startOperation();
     try {
       const config = resolveTerminalBenchConfigInput(terminalBenchConfig);
@@ -1534,6 +1551,7 @@ function App() {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
       try {
+        if (benchmarkLaunchCancelledRef.current) return;
         try {
           const result = await runTerminalBenchBenchmark(
             apiStatus.baseUrl,
@@ -1681,6 +1699,7 @@ function App() {
 
   const handleCancelTest = useCallback(async () => {
     if (!running || cancelling) return;
+    benchmarkLaunchCancelledRef.current = true;
     requestCancellation();
     try {
       await cancelRecipeTest();
