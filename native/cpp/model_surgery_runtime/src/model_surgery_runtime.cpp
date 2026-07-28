@@ -1956,7 +1956,8 @@ int32_t run_session_generate(
     const std::vector<std::string> & stop_strings,
     std::string & generated_text,
     ms_baseline_benchmark * out_benchmark,
-    uint32_t & out_finish_reason) {
+    uint32_t & out_finish_reason,
+    uint32_t & out_actual_seed) {
     out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
@@ -2017,6 +2018,7 @@ int32_t run_session_generate(
     if (!sampler) {
         return fail("failed to initialize llama.cpp common sampler");
     }
+    out_actual_seed = common_sampler_get_seed(sampler.get());
     for (const llama_token token : prompt_tokens) {
         common_sampler_accept(sampler.get(), token, false);
     }
@@ -2307,7 +2309,8 @@ int32_t run_session_generate_multimodal_stream(
     ms_chat_stream_callback callback,
     void * user_data,
     ms_baseline_benchmark * out_benchmark,
-    uint32_t & out_finish_reason) {
+    uint32_t & out_finish_reason,
+    uint32_t & out_actual_seed) {
     out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     uint32_t max_tokens = 0;
@@ -2334,6 +2337,7 @@ int32_t run_session_generate_multimodal_stream(
     if (!sampler) {
         return fail("failed to initialize llama.cpp common sampler");
     }
+    out_actual_seed = common_sampler_get_seed(sampler.get());
     for (const llama_token token : evaluation.sampler_tokens) {
         common_sampler_accept(sampler.get(), token, false);
     }
@@ -2433,7 +2437,8 @@ int32_t run_session_generate_stream(
     ms_chat_stream_callback callback,
     void * user_data,
     ms_baseline_benchmark * out_benchmark,
-    uint32_t & out_finish_reason) {
+    uint32_t & out_finish_reason,
+    uint32_t & out_actual_seed) {
     out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
@@ -2494,6 +2499,7 @@ int32_t run_session_generate_stream(
     if (!sampler) {
         return fail("failed to initialize llama.cpp common sampler");
     }
+    out_actual_seed = common_sampler_get_seed(sampler.get());
     for (const llama_token token : prompt_tokens) {
         common_sampler_accept(sampler.get(), token, false);
     }
@@ -3042,6 +3048,7 @@ int32_t ms_runtime_generate_recipe(
         const ms_chat_generation_params params = default_chat_generation_params(max_tokens);
         std::string generated_text;
         uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
         const int32_t result = run_session_generate(
             *session,
             prompt,
@@ -3049,7 +3056,8 @@ int32_t ms_runtime_generate_recipe(
             std::vector<std::string>(),
             generated_text,
             out_benchmark,
-            finish_reason);
+            finish_reason,
+            actual_seed);
         if (result != 0) {
             return result;
         }
@@ -3140,6 +3148,7 @@ int32_t ms_runtime_generate_recipe_chat(
         const ms_chat_generation_params params = default_chat_generation_params(max_tokens);
         std::string generated_text;
         uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
         const int32_t result = run_session_generate(
             *session,
             chat_params.prompt.c_str(),
@@ -3147,7 +3156,8 @@ int32_t ms_runtime_generate_recipe_chat(
             chat_params.additional_stops,
             generated_text,
             out_benchmark,
-            finish_reason);
+            finish_reason,
+            actual_seed);
         if (result != 0) {
             return result;
         }
@@ -3376,6 +3386,7 @@ int32_t ms_runtime_generate_recipe_chat_session(
             chat_params.additional_stops);
         std::string generated_text;
         uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
         ms_baseline_benchmark benchmark = {};
         const int32_t result = run_session_generate(
             *session->session,
@@ -3384,7 +3395,8 @@ int32_t ms_runtime_generate_recipe_chat_session(
             all_stops,
             generated_text,
             &benchmark,
-            finish_reason);
+            finish_reason,
+            actual_seed);
         if (result != 0) {
             return result;
         }
@@ -3418,6 +3430,7 @@ int32_t ms_runtime_generate_recipe_chat_session(
         out_result->prompt_tokens = benchmark.prompt_tokens;
         out_result->completion_tokens = benchmark.generated_tokens;
         out_result->finish_reason = finish_reason;
+        out_result->actual_seed = actual_seed;
         session->completion_count += 1;
         return 0;
     } catch (const std::exception & err) {
@@ -3494,6 +3507,7 @@ int32_t ms_runtime_generate_recipe_chat_session_stream(
             request_stops,
             chat_params.additional_stops);
         uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
         ms_baseline_benchmark benchmark = {};
         const int32_t result = run_session_generate_stream(
             *session->session,
@@ -3505,7 +3519,8 @@ int32_t ms_runtime_generate_recipe_chat_session_stream(
             stream_callback,
             stream_user_data,
             &benchmark,
-            finish_reason);
+            finish_reason,
+            actual_seed);
         if (result != 0) {
             return result;
         }
@@ -3520,6 +3535,7 @@ int32_t ms_runtime_generate_recipe_chat_session_stream(
         out_result->prompt_tokens = benchmark.prompt_tokens;
         out_result->completion_tokens = benchmark.generated_tokens;
         out_result->finish_reason = finish_reason;
+        out_result->actual_seed = actual_seed;
         session->completion_count += 1;
         return 0;
     } catch (const std::exception & err) {
@@ -3596,6 +3612,7 @@ int32_t ms_runtime_generate_recipe_chat_session_multimodal_stream(
             chat_params.additional_stops);
 
         uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
         ms_baseline_benchmark benchmark = {};
         const int32_t result = run_session_generate_multimodal_stream(
             *session->session,
@@ -3609,7 +3626,8 @@ int32_t ms_runtime_generate_recipe_chat_session_multimodal_stream(
             stream_callback,
             stream_user_data,
             &benchmark,
-            finish_reason);
+            finish_reason,
+            actual_seed);
         if (result != 0) {
             return result;
         }
@@ -3624,6 +3642,7 @@ int32_t ms_runtime_generate_recipe_chat_session_multimodal_stream(
         out_result->prompt_tokens = benchmark.prompt_tokens;
         out_result->completion_tokens = benchmark.generated_tokens;
         out_result->finish_reason = finish_reason;
+        out_result->actual_seed = actual_seed;
         session->completion_count += 1;
         return 0;
     } catch (const std::exception & err) {

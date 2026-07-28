@@ -364,6 +364,7 @@ export interface GpqaDatasetRow {
 }
 
 export interface GpqaBenchmarkConfigInput {
+  seed: string;
   contextWindow: string;
   sampleLimit: string;
   temperature: string;
@@ -376,6 +377,7 @@ export interface GpqaBenchmarkConfigInput {
 }
 
 export interface GpqaBenchmarkConfig {
+  seed?: number;
   contextWindow: number;
   sampleLimit: number;
   temperature: number;
@@ -442,6 +444,7 @@ export interface MmmuProBenchmarkConfig extends GpqaBenchmarkConfig {
 }
 
 export interface TerminalBenchBenchmarkConfigInput {
+  seed: string;
   contextWindow: string;
   samples: string;
   runsPerTask: string;
@@ -457,6 +460,7 @@ export interface TerminalBenchBenchmarkConfigInput {
 }
 
 export interface TerminalBenchBenchmarkConfig {
+  seed?: number;
   contextWindow: number;
   samples?: number;
   runsPerTask: number;

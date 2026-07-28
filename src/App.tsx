@@ -11,6 +11,7 @@ import {
   mmmuProDetailsEditorTab,
   terminalBenchDetailsEditorTab,
   tensorValuesEditorTab,
+  chatEditorTab,
   type EditorTab,
 } from "./components/Workbench/editorTabModel";
 import { useModel } from "./hooks/useModel";
@@ -70,6 +71,8 @@ import type {
 } from "./types";
 import { setMockInvoke } from "./lib/tauri-bridge";
 import { projectorGroupLabel } from "./lib/format";
+import { DEFAULT_MODEL_LOAD_CONFIG, type ModelLoadConfig } from "./components/Workbench/chat/chatTypes";
+import { useChatSession } from "./components/Workbench/chat/useChatSession";
 
 const MULTIMODAL_PREFLIGHT_IMAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==";
@@ -182,6 +185,7 @@ const MMMU_PRO_SAMPLE_COUNT = 1_730;
 const GPQA_DEFAULT_TEMPERATURE = 0;
 
 const DEFAULT_GPQA_CONFIG_INPUT: GpqaBenchmarkConfigInput = {
+  seed: "",
   contextWindow: "",
   sampleLimit: "",
   temperature: "0",
@@ -211,6 +215,7 @@ const DEFAULT_MMMU_PRO_CONFIG_INPUT: MmmuProBenchmarkConfigInput = {
 };
 
 const DEFAULT_TERMINAL_BENCH_CONFIG_INPUT: TerminalBenchBenchmarkConfigInput = {
+  seed: "",
   contextWindow: String(GPQA_DEFAULT_CONTEXT_WINDOW),
   samples: "1",
   runsPerTask: "1",
@@ -276,6 +281,9 @@ function parseOptionalNumberOverride(
 function resolveGpqaConfigInput(
   input: GpqaBenchmarkConfigInput,
 ): GpqaBenchmarkConfig | string {
+  const seed = parseOptionalIntegerOverride(input.seed, 0, 4_294_967_294, "GPQA seed");
+  if (typeof seed === "string") return seed;
+
   const contextWindow = parseOptionalIntegerField(
     input.contextWindow,
     GPQA_DEFAULT_CONTEXT_WINDOW,
@@ -327,6 +335,7 @@ function resolveGpqaConfigInput(
   if (typeof minP === "string") return minP;
 
   return {
+    seed,
     contextWindow,
     sampleLimit,
     temperature,
@@ -377,6 +386,9 @@ function resolveMmmuProConfigInput(
 function resolveTerminalBenchConfigInput(
   input: TerminalBenchBenchmarkConfigInput,
 ): TerminalBenchBenchmarkConfig | string {
+  const seed = parseOptionalIntegerOverride(input.seed, 0, 4_294_967_294, "Terminal-Bench seed");
+  if (typeof seed === "string") return seed;
+
   const contextWindow = parseOptionalIntegerField(
     input.contextWindow,
     GPQA_DEFAULT_CONTEXT_WINDOW,
@@ -454,6 +466,7 @@ function resolveTerminalBenchConfigInput(
   if (typeof minP === "string") return minP;
 
   return {
+    seed,
     contextWindow,
     samples,
     runsPerTask,
@@ -514,6 +527,7 @@ function App() {
   const { outputLines, apiOutputLines } = useBenchmarkOutputLog();
 
   const [openEditors, setOpenEditors] = useState<EditorTab[]>([]);
+  const [modelLoadConfig, setModelLoadConfig] = useState<ModelLoadConfig>(DEFAULT_MODEL_LOAD_CONFIG);
   const [projectorPath, setProjectorPath] = useState<string | null>(null);
   const [projector, setProjector] = useState<ModelInfo | null>(null);
   const [activeEditorId, setActiveEditorId] = useState<string | null>(null);
@@ -558,6 +572,7 @@ function App() {
   );
   const [terminalBenchConfig, setTerminalBenchConfig] =
     useState<TerminalBenchBenchmarkConfigInput>(DEFAULT_TERMINAL_BENCH_CONFIG_INPUT);
+  const chat = useChatSession(modelLoadConfig);
 
   const mmmuProStatus = useMemo<MmmuProStatus>(() => {
     if (!modelPath) {
@@ -826,6 +841,60 @@ function App() {
     });
   }, [layerDisplayLabel]);
 
+  const handleNewChat = useCallback(() => {
+    const conversation = chat.createConversation();
+    const tab = chatEditorTab(conversation.id, conversation.title);
+    setOpenEditors((current) => [...current, tab]);
+    setActiveEditorId(tab.id);
+  }, [chat]);
+
+  const handleOpenChat = useCallback(async (chatId: string) => {
+    const conversation = await chat.openConversation(chatId);
+    const tab = chatEditorTab(conversation.id, conversation.title);
+    setOpenEditors((current) =>
+      current.some((editor) => editor.id === tab.id) ? current : [...current, tab],
+    );
+    setActiveEditorId(tab.id);
+  }, [chat]);
+
+  const handleLoadChatModel = useCallback(() => {
+    if (running) {
+      setAppError(statusMessage ? "Wait for the current task to finish." : "Cancel or wait for the benchmark to finish.");
+      return;
+    }
+    if (chat.modelLoading) {
+      setAppError("Wait for the model to finish loading.");
+      return;
+    }
+    if (!recipe || !modelPath) {
+      setAppError("Open a GGUF model first.");
+      return;
+    }
+    setAppError(null);
+    void chat.loadModel();
+  }, [chat, modelPath, recipe, running, statusMessage]);
+
+  const handleUnloadChatModel = useCallback(() => {
+    if (running) {
+      setAppError(statusMessage ? "Wait for the current task to finish." : "Cancel or wait for the benchmark to finish.");
+      return;
+    }
+    if (chat.modelLoading) {
+      setAppError("Wait for the model to finish loading.");
+      return;
+    }
+    setAppError(null);
+    void chat.unloadModel();
+  }, [chat, running, statusMessage]);
+
+  useEffect(() => {
+    setOpenEditors((current) => current.map((editor) =>
+      editor.kind === "chat" && chat.conversations[editor.chatId]
+        ? { ...editor, title: chat.conversations[editor.chatId].title }
+        : editor,
+    ));
+  }, [chat.conversations]);
+
   const handleToggleLayer = useCallback((layerIndex: number) => {
     setExpandedLayers((current) => {
       const next = new Set(current);
@@ -1040,6 +1109,18 @@ function App() {
   }, []);
 
   const handleTest = useCallback(async () => {
+    const hasSelectedBenchmark = selectedRunIds.some(
+      (id) =>
+        id === "ppl_check" ||
+        id === "gpqa_diamond" ||
+        id === "humaneval" ||
+        id === "terminal_bench" ||
+        id === "mmmu_pro",
+    );
+    if (hasSelectedBenchmark && (chat.modelLoaded || chat.modelLoading)) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       if (
         selectedRunIds.includes("gpqa_diamond") &&
@@ -1128,14 +1209,18 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
-          latestResult = await runGpqaDiamondBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            gpqaShotMode,
-            resolvedGpqaConfig,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runGpqaDiamondBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              gpqaShotMode,
+              resolvedGpqaConfig,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1154,13 +1239,17 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
-          latestResult = await runHumanEvalBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            config,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runHumanEvalBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              config,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1188,13 +1277,17 @@ function App() {
             }
             throw new Error(`Multimodal preflight failed: ${detail}`);
           }
-          latestResult = await runMmmuProBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            config,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runMmmuProBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              config,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1212,13 +1305,17 @@ function App() {
           throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
         }
         try {
-          latestResult = await runTerminalBenchBenchmark(
-            apiStatus.baseUrl,
-            apiStatus.apiKey,
-            apiStatus.modelId,
-            config,
-          );
-          openEvalResults(latestResult);
+          try {
+            latestResult = await runTerminalBenchBenchmark(
+              apiStatus.baseUrl,
+              apiStatus.apiKey,
+              apiStatus.modelId,
+              config,
+            );
+            openEvalResults(latestResult);
+          } catch {
+            return;
+          }
         } finally {
           await stopModelInspectorApi();
         }
@@ -1250,6 +1347,7 @@ function App() {
     humanevalConfig,
     mmmuProConfig,
     terminalBenchConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1257,6 +1355,10 @@ function App() {
   ]);
 
   const handleRunHumanEvalBenchmark = useCallback(async () => {
+    if (chat.modelLoaded || chat.modelLoading) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       setAppError("Open a GGUF model before running HumanEval.");
       return;
@@ -1288,13 +1390,17 @@ function App() {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
       try {
-        const result = await runHumanEvalBenchmark(
-          apiStatus.baseUrl,
-          apiStatus.apiKey,
-          apiStatus.modelId,
-          config,
-        );
-        openEvalResults(result);
+        try {
+          const result = await runHumanEvalBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            config,
+          );
+          openEvalResults(result);
+        } catch {
+          return;
+        }
       } finally {
         await stopModelInspectorApi();
       }
@@ -1311,12 +1417,17 @@ function App() {
     humanevalStatus.ready,
     humanevalStatus.statusLabel,
     humanevalConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
   ]);
 
   const handleRunMmmuProBenchmark = useCallback(async () => {
+    if (chat.modelLoaded || chat.modelLoading) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       setAppError("Open a GGUF model before running MMMU-Pro.");
       return;
@@ -1358,13 +1469,17 @@ function App() {
         }
         throw new Error(`Multimodal preflight failed: ${detail}`);
       }
-      const result = await runMmmuProBenchmark(
-        apiStatus.baseUrl,
-        apiStatus.apiKey,
-        apiStatus.modelId,
-        config,
-      );
-      openEvalResults(result);
+      try {
+        const result = await runMmmuProBenchmark(
+          apiStatus.baseUrl,
+          apiStatus.apiKey,
+          apiStatus.modelId,
+          config,
+        );
+        openEvalResults(result);
+      } catch {
+        return;
+      }
       setAppError(null);
     } catch (e) {
       const message = errorMessage(e);
@@ -1378,12 +1493,17 @@ function App() {
     modelPath,
     mmmuProStatus,
     mmmuProConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
   ]);
 
   const handleRunTerminalBenchBenchmark = useCallback(async () => {
+    if (chat.modelLoaded || chat.modelLoading) {
+      setAppError("Unload the Chat model before running a benchmark.");
+      return;
+    }
     if (!recipe || !modelPath) {
       setAppError("Open a GGUF model before running Terminal-Bench.");
       return;
@@ -1414,13 +1534,17 @@ function App() {
         throw new Error("ModelInspector API did not return a usable benchmark endpoint.");
       }
       try {
-        const result = await runTerminalBenchBenchmark(
-          apiStatus.baseUrl,
-          apiStatus.apiKey,
-          apiStatus.modelId,
-          config,
-        );
-        openEvalResults(result);
+        try {
+          const result = await runTerminalBenchBenchmark(
+            apiStatus.baseUrl,
+            apiStatus.apiKey,
+            apiStatus.modelId,
+            config,
+          );
+          openEvalResults(result);
+        } catch {
+          return;
+        }
       } finally {
         await stopModelInspectorApi();
       }
@@ -1438,6 +1562,7 @@ function App() {
     terminalBenchStatus.statusLabel,
     terminalBenchDatasetStatus.datasetReady,
     terminalBenchConfig,
+    chat.modelLoaded,
     startOperation,
     endOperation,
     openEvalResults,
@@ -1731,6 +1856,19 @@ function App() {
           onToggleProjectorGroup={handleToggleProjectorGroup}
           onOpenProjectorTensorValues={handleOpenProjectorTensorValues}
           onToggleLayer={handleToggleLayer}
+          onNewChat={handleNewChat}
+          chatConversations={chat.conversations}
+          chatSummaries={chat.summaries}
+          chatSendingConversationId={chat.sendingConversationId}
+          chatModelLoading={chat.modelLoading}
+          chatModelLoaded={chat.modelLoaded}
+          chatError={chat.error}
+          modelLoadConfig={modelLoadConfig}
+          onModelLoadConfigChange={setModelLoadConfig}
+          onOpenChat={handleOpenChat}
+          onLoadChatModel={handleLoadChatModel}
+          onUnloadChatModel={handleUnloadChatModel}
+          onSendChatMessage={chat.sendMessage}
           onSelectEditor={setActiveEditorId}
           onCloseEditor={handleCloseEditor}
           onReorderEditor={handleReorderEditor}

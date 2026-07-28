@@ -1074,7 +1074,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
     }
 
     let completion_count = prospective_completion_count(state);
-    let (mut content, reasoning_content, benchmark, mut finish_reason) = match state
+    let (mut content, reasoning_content, benchmark, mut finish_reason, actual_seed) = match state
         .session
         .as_ref()
     {
@@ -1132,6 +1132,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                     output.reasoning_text,
                     output.benchmark,
                     chat_finish_reason_label(output.finish_reason),
+                    Some(output.actual_seed),
                 ),
                 Err(error) => {
                     return json_response(
@@ -1160,6 +1161,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
                 None,
                 empty_benchmark(),
                 "stop",
+                None,
             )
         }
     };
@@ -1173,6 +1175,7 @@ fn chat_completions(request: &HttpRequest, state: &HttpApiState) -> HttpResponse
         prompt_tokens: benchmark.prompt_tokens,
         completion_tokens: benchmark.generated_tokens,
         total_tokens: benchmark.prompt_tokens + benchmark.generated_tokens,
+        actual_seed,
         visible_content: content.clone(),
         reasoning_content: reasoning_content.clone(),
     };
@@ -1369,6 +1372,7 @@ fn chat_completions_stream(
                     output.reasoning_text,
                     output.benchmark,
                     chat_finish_reason_label(output.finish_reason),
+                    Some(output.actual_seed),
                 )),
                 Err(error) => Err(error),
             }
@@ -1385,12 +1389,12 @@ fn chat_completions_stream(
             );
             let finish_reason = apply_stop_strings(&mut content, &config.stop);
             write_chat_completion_stream_delta(stream, &id, created, &model, &content, "")?;
-            Ok((content, None, empty_benchmark(), finish_reason))
+            Ok((content, None, empty_benchmark(), finish_reason, None))
         }
     };
 
     match final_result {
-        Ok((content, reasoning_content, benchmark, finish_reason)) => {
+        Ok((content, reasoning_content, benchmark, finish_reason, actual_seed)) => {
             record_completion_benchmark(state, &benchmark);
             let diagnostics = ChatCompletionDiagnostics {
                 model: model.clone(),
@@ -1398,6 +1402,7 @@ fn chat_completions_stream(
                 prompt_tokens: benchmark.prompt_tokens,
                 completion_tokens: benchmark.generated_tokens,
                 total_tokens: benchmark.prompt_tokens + benchmark.generated_tokens,
+                actual_seed,
                 visible_content: content,
                 reasoning_content,
             };
@@ -1434,6 +1439,7 @@ struct ChatCompletionDiagnostics {
     prompt_tokens: u32,
     completion_tokens: u32,
     total_tokens: u32,
+    actual_seed: Option<u32>,
     visible_content: String,
     reasoning_content: Option<String>,
 }
@@ -1553,7 +1559,7 @@ fn benchmark_completion_output(
         .unwrap_or_else(|| format!(" {count}"));
     let reasoning = diagnostics.reasoning_content.as_deref().unwrap_or("");
     format!(
-        "{label}: chat completion request{progress} completed model={} finish={} prompt_tokens={} completion_tokens={} total_tokens={}\n\
+        "{label}: chat completion request{progress} completed model={} finish={} prompt_tokens={} completion_tokens={} total_tokens={} generation_seed={}\n\
          {label}: reasoning output ({} chars)\n{}\n\
          {label}: visible output ({} chars)\n{}",
         diagnostics.model,
@@ -1561,6 +1567,7 @@ fn benchmark_completion_output(
         diagnostics.prompt_tokens,
         diagnostics.completion_tokens,
         diagnostics.total_tokens,
+        diagnostics.actual_seed.map(|seed| seed.to_string()).unwrap_or_else(|| "unavailable".to_string()),
         reasoning.chars().count(),
         diagnostic_excerpt(reasoning),
         diagnostics.visible_content.chars().count(),
@@ -1916,6 +1923,27 @@ mod tests {
         assert_eq!(message["role"], "assistant");
         assert_eq!(message["content"], "visible answer");
         assert_eq!(message["reasoning_content"], "hidden chain");
+    }
+
+    #[test]
+    fn reports_actual_generation_seed_in_benchmark_output() {
+        let output = benchmark_completion_output(
+            "EvalScope",
+            1,
+            Some(1),
+            &ChatCompletionDiagnostics {
+                model: "model.gguf".to_string(),
+                finish_reason: "stop",
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                total_tokens: 2,
+                actual_seed: Some(42),
+                visible_content: "answer".to_string(),
+                reasoning_content: None,
+            },
+        );
+
+        assert!(output.contains("generation_seed=42"));
     }
 
     #[test]
@@ -2314,6 +2342,7 @@ mod tests {
             prompt_tokens: 12,
             completion_tokens: 34,
             total_tokens: 46,
+            actual_seed: Some(42),
             visible_content: "ANSWER: C".to_string(),
             reasoning_content: Some("private reasoning".to_string()),
         };

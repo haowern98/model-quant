@@ -26,6 +26,12 @@ import type {
   TerminalBenchStatus,
   TensorValuesPreview,
 } from "../types";
+import type {
+  ChatConversation,
+  ChatConversationSummary,
+  ChatGenerationConfig,
+  ChatMessageData,
+} from "../components/Workbench/chat/chatTypes";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -142,6 +148,58 @@ export async function stopModelInspectorApi(): Promise<ModelInspectorApiStatus> 
 
 export async function getModelInspectorApiStatus(): Promise<ModelInspectorApiStatus> {
   return invoke<ModelInspectorApiStatus>("get_modelinspector_api_status");
+}
+
+type ChatGenerationRequest = {
+  conversationId: string;
+  messages: Pick<ChatMessageData, "role" | "content" | "reasoning">[];
+};
+
+type ChatModelLoadStatus = { model: string };
+
+type ChatGenerationResponse = {
+  model: string;
+  content: string;
+  reasoning?: string;
+  tokensPerSecond: number;
+  promptTokens: number;
+  durationSeconds: number;
+  finishReason: string;
+  seed: number;
+};
+
+export async function generateChatResponse(
+  request: ChatGenerationRequest,
+): Promise<ChatGenerationResponse> {
+  return invoke<ChatGenerationResponse>("generate_chat_response", { request });
+}
+
+export async function loadChatModel(config: ChatGenerationConfig): Promise<ChatModelLoadStatus> {
+  return invoke<ChatModelLoadStatus>("load_chat_model", { config });
+}
+
+export async function unloadChatModel(): Promise<void> {
+  return invoke<void>("unload_chat_model");
+}
+
+export async function generateChatTitle(request: ChatGenerationRequest): Promise<string> {
+  return invoke<string>("generate_chat_title", { request });
+}
+
+export async function saveChatConversation(
+  conversation: ChatConversation,
+): Promise<ChatConversationSummary> {
+  return invoke<ChatConversationSummary>("save_chat_conversation", {
+    conversation: { kind: "model-quant-chat", version: 1, ...conversation },
+  });
+}
+
+export async function listChatConversations(): Promise<ChatConversationSummary[]> {
+  return invoke<ChatConversationSummary[]>("list_chat_conversations");
+}
+
+export async function loadChatConversation(id: string): Promise<ChatConversation> {
+  return invoke<ChatConversation>("load_chat_conversation", { id });
 }
 
 export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {

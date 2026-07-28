@@ -10,6 +10,12 @@ export const MMMU_PRO_DETAILS_TAB_ID = "benchmark:mmmu_pro:details";
 
 export type EditorTab =
   | {
+      id: `chat:${string}`;
+      kind: "chat";
+      chatId: string;
+      title: string;
+    }
+  | {
       id: `layer:${number}` | `mmproj-layer:${string}`;
       kind: "layer";
       source: TensorSource;
@@ -94,6 +100,15 @@ export function tensorValuesEditorTab({
   };
 }
 
+export function chatEditorTab(chatId: string, title = "New chat"): EditorTab {
+  return {
+    id: `chat:${chatId}`,
+    kind: "chat",
+    chatId,
+    title,
+  };
+}
+
 export function gpqaDetailsEditorTab(): EditorTab {
   return {
     id: GPQA_DETAILS_TAB_ID,
@@ -138,6 +153,7 @@ export function evalResultsEditorTab(result: BenchmarkResult): EditorTab {
 }
 
 export function editorTabLabel(tab: EditorTab): string {
+  if (tab.kind === "chat") return tab.title;
   if (tab.kind === "eval-results") return "Eval Results";
   if (tab.kind === "gpqa-details") return "GPQA Diamond";
   if (tab.kind === "gpqa-dataset") return "GPQA Diamond Dataset";

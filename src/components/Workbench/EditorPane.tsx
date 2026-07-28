@@ -39,9 +39,12 @@ import type {
 } from "../../types";
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
+import { ChatEditor } from "./ChatEditor";
 import { EditorTabs } from "./EditorTabs";
+import { ModelLoadControls } from "./ModelLoadControls";
 import { RunControls } from "./RunControls";
 import { editorTabLabel, type EditorTab } from "./editorTabModel";
+import type { ChatConversation, ModelLoadConfig } from "./chat/chatTypes";
 import {
   deleteGpqaDiamondHarness,
   deleteHumanEvalDataset,
@@ -84,6 +87,16 @@ interface EditorPaneProps {
   apiOutputLines: BenchmarkOutputLine[];
   openEditors: EditorTab[];
   activeEditorId: string | null;
+  chatConversations: Record<string, ChatConversation>;
+  chatSendingConversationId: string | null;
+  chatModelLoading: boolean;
+  chatModelLoaded: boolean;
+  chatError: string | null;
+  modelLoadConfig: ModelLoadConfig;
+  onModelLoadConfigChange: (config: ModelLoadConfig) => void;
+  onLoadChatModel: () => void;
+  onUnloadChatModel: () => void;
+  onSendChatMessage: (id: string, content: string) => void;
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
@@ -160,6 +173,16 @@ export function EditorPane({
   apiOutputLines,
   openEditors,
   activeEditorId,
+  chatConversations,
+  chatSendingConversationId,
+  chatModelLoading,
+  chatModelLoaded,
+  chatError,
+  modelLoadConfig,
+  onModelLoadConfigChange,
+  onLoadChatModel,
+  onUnloadChatModel,
+  onSendChatMessage,
   tensors,
   assignments,
   profile,
@@ -214,6 +237,7 @@ export function EditorPane({
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
   const [bottomPanelMaximized, setBottomPanelMaximized] = useState(false);
+  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
@@ -225,6 +249,9 @@ export function EditorPane({
   const showingHumanEvalBenchmark = activeEditor?.kind === "humaneval-details";
   const showingTerminalBenchBenchmark = activeEditor?.kind === "terminal-bench-details";
   const showingMmmuProBenchmark = activeEditor?.kind === "mmmu-pro-details";
+  const showingChat = activeEditor?.kind === "chat";
+  const activeChatTab = activeEditor?.kind === "chat" ? activeEditor : null;
+  const activeChat = activeChatTab ? chatConversations[activeChatTab.chatId] : undefined;
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
@@ -275,6 +302,15 @@ export function EditorPane({
           onCloseEditor={onCloseEditor}
           onReorderEditor={onReorderEditor}
         />
+        <ModelLoadControls
+          config={modelLoadConfig}
+          onConfigChange={onModelLoadConfigChange}
+          hasModel={hasModel}
+          loaded={chatModelLoaded}
+          busy={running || chatModelLoading}
+          onLoad={onLoadChatModel}
+          onUnload={onUnloadChatModel}
+        />
         <RunControls
           hasModel={hasModel}
           running={running}
@@ -312,6 +348,12 @@ export function EditorPane({
             <span>{tensorValuesEditor.layerLabel}</span>
             <span>&gt;</span>
             <span>{tensorValuesEditor.tensorName}</span>
+          </>
+        ) : showingChat ? (
+          <>
+            <span>Chat</span>
+            <span>&gt;</span>
+            <span>{activeBreadcrumb}</span>
           </>
         ) : (
           <>
@@ -384,6 +426,22 @@ export function EditorPane({
         />
       ) : showingTensorValues ? (
         <TensorValuesView editor={activeEditor as Extract<EditorTab, { kind: "tensor-values" }>} />
+      ) : showingChat ? (
+        <ChatEditor
+          messages={activeChat?.messages ?? []}
+          draft={activeChatTab ? (chatDrafts[activeChatTab.chatId] ?? "") : ""}
+          modelReady={chatModelLoaded}
+          sending={chatSendingConversationId === activeChatTab?.chatId}
+          disabled={running || chatModelLoading || !hasModel || !chatModelLoaded}
+          error={chatError}
+          onDraftChange={(draft) => {
+            if (!activeChatTab) return;
+            setChatDrafts((current) => ({ ...current, [activeChatTab.chatId]: draft }));
+          }}
+          onSend={(content) => {
+            if (activeChatTab) onSendChatMessage(activeChatTab.chatId, content);
+          }}
+        />
       ) : (
         <section className="tensor-editor-surface">
           <div className="tensor-editor-content">
@@ -884,7 +942,7 @@ function GpqaBenchmarkView({
   }, [activeTab, status.datasetReady]);
 
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (field: "seed" | "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1055,6 +1113,14 @@ function GpqaBenchmarkView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="GPQA Diamond seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Shots"
                     selectLabel="GPQA Diamond shots"
@@ -1206,7 +1272,7 @@ function HumanEvalBenchmarkView({
   const harnessInstalled =
     viewStatus.statusLabel !== "Needs harness" && Boolean(viewStatus.python && viewStatus.evalscope);
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (field: "seed" | "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1445,6 +1511,14 @@ function HumanEvalBenchmarkView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="HumanEval seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="HumanEval thinking"
@@ -1580,7 +1654,7 @@ function TerminalBenchView({
   const [datasetRowsError, setDatasetRowsError] = useState<string | null>(null);
   const [loadingDatasetRows, setLoadingDatasetRows] = useState(false);
   const updateIntegerField =
-    (field: "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns" | "timeoutMultiplier") =>
+    (field: "seed" | "topK" | "contextWindow" | "samples" | "runsPerTask" | "maxTurns" | "timeoutMultiplier") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -1762,6 +1836,14 @@ function TerminalBenchView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="Terminal-Bench seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="Terminal-Bench thinking"
@@ -2032,7 +2114,7 @@ function MmmuProBenchmarkView({
   };
 
   const updateIntegerField =
-    (field: "contextWindow" | "sampleLimit" | "topK") =>
+    (field: "seed" | "contextWindow" | "sampleLimit" | "topK") =>
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.currentTarget.value;
       if (/^\d*$/.test(value)) onConfigChange({ ...config, [field]: value });
@@ -2217,6 +2299,14 @@ function MmmuProBenchmarkView({
             ) : (
               <div className="benchmark-copy">
                 <BenchmarkInfoSection title="Configuration">
+                  <BenchmarkInputRow
+                    label="Seed"
+                    inputLabel="MMMU-Pro seed"
+                    value={config.seed}
+                    placeholder="Random"
+                    inputMode="numeric"
+                    onChange={updateIntegerField("seed")}
+                  />
                   <BenchmarkSelectRow
                     label="Thinking"
                     selectLabel="MMMU-Pro thinking"

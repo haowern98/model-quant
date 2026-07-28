@@ -83,6 +83,7 @@ typedef struct ms_chat_generation_result {
     uint32_t prompt_tokens;
     uint32_t completion_tokens;
     uint32_t finish_reason;
+    uint32_t actual_seed;
 } ms_chat_generation_result;
 
 typedef struct ms_runtime_chat_session ms_runtime_chat_session;

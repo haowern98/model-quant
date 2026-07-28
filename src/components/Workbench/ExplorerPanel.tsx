@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import {
-  QUANT_TYPES,
-  type AssignPattern,
-  type QuantType,
-  type TensorInfo,
-} from "../../types";
+import { createPortal } from "react-dom";
+import { QUANT_TYPES, type AssignPattern, type QuantType, type TensorInfo } from "../../types";
 import { formatTensorName, projectorGroupLabel } from "../../lib/format";
 import { ExplorerSectionHeader, ExplorerTreeRow } from "./ExplorerTree";
 
 type ExplorerSectionId = "gguf" | "mmproj" | "lora";
 
-const BULK_PATTERNS: { value: AssignPattern; label: string; aria: string }[] = [
-  { value: "all_attn", label: "All Attention", aria: "All Attention target" },
-  { value: "all_ffn", label: "All FFN", aria: "All FFN target" },
-  { value: "all_embeddings", label: "All Embeddings", aria: "All Embeddings target" },
-  { value: "all", label: "Entire Model", aria: "Entire Model target" },
-];
-
 const PROJECTOR_MIN_HEIGHT = 80;
+
+const BULK_ASSIGNMENTS: Array<{ label: string; pattern: AssignPattern }> = [
+  { label: "All Attention", pattern: "all_attn" },
+  { label: "All FFN", pattern: "all_ffn" },
+  { label: "All Embeddings", pattern: "all_embeddings" },
+  { label: "Entire Model", pattern: "all" },
+];
 
 interface ExplorerPanelProps {
   modelPath: string | null;
@@ -81,17 +77,21 @@ export function ExplorerPanel({
   onOpenProjectorTensorValues,
   onToggleLayer,
   onAssignByPattern,
-  onSaveRecipe,
-  onLoadRecipe,
-  onExport,
 }: ExplorerPanelProps) {
   const [sections, setSections] = useState<Record<ExplorerSectionId, boolean>>({
     gguf: true,
     mmproj: false,
     lora: false,
   });
-  const [actionsOpen, setActionsOpen] = useState(false);
+  const [modelActionsOpen, setModelActionsOpen] = useState(false);
+  const [modelActionsAnchor, setModelActionsAnchor] = useState<{ top: number; left: number } | null>(null);
   const [projectorActionsOpen, setProjectorActionsOpen] = useState(false);
+  const [projectorActionsAnchor, setProjectorActionsAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [bulkQuantSelections, setBulkQuantSelections] = useState<Partial<Record<AssignPattern, QuantType>>>({});
+  const modelActionsRef = useRef<HTMLDivElement>(null);
+  const modelActionsMenuRef = useRef<HTMLDivElement>(null);
+  const projectorActionsRef = useRef<HTMLDivElement>(null);
+  const projectorActionsMenuRef = useRef<HTMLDivElement>(null);
   const sectionBodyRef = useRef<HTMLDivElement>(null);
   const layerGroupRefs = useRef(new Map<number, HTMLDivElement>());
   const [stickyLayerIndices, setStickyLayerIndices] = useState<Set<number>>(() => new Set());
@@ -100,6 +100,44 @@ export function ExplorerPanel({
   const projectorGroupRefs = useRef(new Map<string, HTMLDivElement>());
   const [stickyProjectorGroups, setStickyProjectorGroups] = useState<Set<string>>(() => new Set());
   const [projectorHeight, setProjectorHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    setBulkQuantSelections({});
+  }, [modelPath]);
+
+  useEffect(() => {
+    if (!modelActionsOpen && !projectorActionsOpen) return;
+
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !modelActionsRef.current?.contains(target) &&
+        !modelActionsMenuRef.current?.contains(target) &&
+        !projectorActionsRef.current?.contains(target) &&
+        !projectorActionsMenuRef.current?.contains(target)
+      ) {
+        setModelActionsOpen(false);
+        setModelActionsAnchor(null);
+        setProjectorActionsOpen(false);
+        setProjectorActionsAnchor(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setModelActionsOpen(false);
+        setModelActionsAnchor(null);
+        setProjectorActionsOpen(false);
+        setProjectorActionsAnchor(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [modelActionsOpen, projectorActionsOpen]);
 
   const groups = useMemo(() => {
     const next = new Map<number, TensorInfo[]>();
@@ -204,12 +242,6 @@ export function ExplorerPanel({
     };
   }, [expandedProjectorGroups, projectorExpanded, projectorGroups]);
 
-  const handleBulkAssign = (pattern: AssignPattern, value: string) => {
-    if (!value) return;
-    onAssignByPattern(pattern, value as QuantType);
-    setActionsOpen(false);
-  };
-
   const startProjectorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const section = projectorSectionRef.current;
@@ -242,7 +274,8 @@ export function ExplorerPanel({
   };
 
   return (
-    <aside className="explorer-panel" aria-label="Explorer">
+    <>
+      <aside className="explorer-panel" aria-label="Explorer">
       <div className="explorer-title">
         <span>MODEL EXPLORER</span>
         <button type="button" aria-label="Explorer actions">...</button>
@@ -256,59 +289,35 @@ export function ExplorerPanel({
           onClick={() => toggleSection("gguf")}
           action={
             modelPath ? (
-            <button
-              type="button"
-              className="tree-action-button"
-              aria-label="Model actions"
-              onClick={() => setActionsOpen((value) => !value)}
-            >
-              ...
-            </button>
+              <div ref={modelActionsRef} className="model-actions-control">
+                <button
+                  type="button"
+                  className={`tree-action-button ${modelActionsOpen ? "active" : ""}`}
+                  aria-label="Model actions"
+                  aria-expanded={modelActionsOpen}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setProjectorActionsOpen(false);
+                    if (modelActionsOpen) {
+                      setModelActionsOpen(false);
+                      setModelActionsAnchor(null);
+                      return;
+                    }
+
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setModelActionsAnchor({ top: rect.bottom + 4, left: rect.right + 4 });
+                    setModelActionsOpen(true);
+                  }}
+                >
+                  ...
+                </button>
+              </div>
             ) : undefined
           }
         />
 
         {sections.gguf && (
           <div className="explorer-section-body" ref={sectionBodyRef}>
-            {actionsOpen && modelPath && (
-              <div className="model-actions-popover">
-                <div className="model-actions-header">Recipe Actions</div>
-                <div className="model-action-buttons">
-                  <button type="button" onClick={onSaveRecipe} disabled={running}>
-                    Save Recipe
-                  </button>
-                  <button type="button" onClick={onLoadRecipe} disabled={running}>
-                    Load Recipe
-                  </button>
-                  <button type="button" onClick={onExport} disabled={running}>
-                    Export GGUF
-                  </button>
-                </div>
-                <div className="model-actions-header">Bulk Assign</div>
-                {BULK_PATTERNS.map((pattern) => (
-                  <label key={pattern.value} className="bulk-action-row">
-                    <span>{pattern.label}</span>
-                    <select
-                      aria-label={pattern.aria}
-                      disabled={running}
-                      defaultValue=""
-                      onChange={(event) => {
-                        handleBulkAssign(pattern.value, event.target.value);
-                        event.currentTarget.value = "";
-                      }}
-                    >
-                      <option value="">Apply...</option>
-                      {QUANT_TYPES.map((quant) => (
-                        <option key={quant.value} value={quant.value}>
-                          {quant.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            )}
-
             {!modelPath && (
               <div className="future-section-empty">
                 <button type="button" disabled={running} onClick={onOpenModel}>
@@ -384,14 +393,29 @@ export function ExplorerPanel({
             expanded={projectorExpanded}
             onClick={onToggleProjector}
             action={
-              <button
-                type="button"
-                className="tree-action-button"
-                aria-label="Projector actions"
-                onClick={() => setProjectorActionsOpen((current) => !current)}
-              >
-                ...
-              </button>
+              <div ref={projectorActionsRef} className="model-actions-control">
+                <button
+                  type="button"
+                  className={`tree-action-button ${projectorActionsOpen ? "active" : ""}`}
+                  aria-label="Projector actions"
+                  aria-expanded={projectorActionsOpen}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setModelActionsOpen(false);
+                    setModelActionsAnchor(null);
+                    if (projectorActionsOpen) {
+                      setProjectorActionsOpen(false);
+                      setProjectorActionsAnchor(null);
+                      return;
+                    }
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setProjectorActionsAnchor({ top: rect.bottom + 4, left: rect.right + 4 });
+                    setProjectorActionsOpen(true);
+                  }}
+                >
+                  ...
+                </button>
+              </div>
             }
           />
         ) : (
@@ -412,30 +436,6 @@ export function ExplorerPanel({
         ) : null}
         {projectorPath ? (
           <>
-            {projectorExpanded && projectorActionsOpen ? (
-              <div className="model-actions-popover">
-                <div className="model-action-buttons">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProjectorActionsOpen(false);
-                      onOpenProjector();
-                    }}
-                  >
-                    Change Projector
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProjectorActionsOpen(false);
-                      onRemoveProjector();
-                    }}
-                  >
-                    Remove Projector
-                  </button>
-                </div>
-              </div>
-            ) : null}
             {projectorExpanded ? (
               <div className="explorer-section-body projector-tree-body" ref={projectorBodyRef}>
                 {projectorGroups.map(([groupId, groupTensors]) => {
@@ -486,7 +486,85 @@ export function ExplorerPanel({
         onToggle={toggleSection}
         emptyLabel="Add adapter..."
       />
-    </aside>
+      </aside>
+      {modelActionsOpen && modelActionsAnchor
+        ? createPortal(
+            <div
+              ref={modelActionsMenuRef}
+              className="model-bulk-action-menu"
+              aria-label="Bulk assign"
+              style={{
+                position: "fixed",
+                top: modelActionsAnchor.top,
+                left: modelActionsAnchor.left - 30,
+                right: "auto",
+              }}
+            >
+              <div className="model-bulk-action-title">BULK ASSIGN</div>
+              {BULK_ASSIGNMENTS.map(({ label, pattern }) => (
+                <label key={pattern} className="model-bulk-action-row">
+                  <span>{label}</span>
+                  <select
+                    aria-label={`${label} quantization`}
+                    value={bulkQuantSelections[pattern] ?? ""}
+                    onChange={(event) => {
+                      const quantType = event.currentTarget.value as QuantType;
+                      if (!quantType) return;
+                      setBulkQuantSelections((current) => ({ ...current, [pattern]: quantType }));
+                      onAssignByPattern(pattern, quantType);
+                    }}
+                  >
+                    <option value="">Apply...</option>
+                    {QUANT_TYPES.map((quantOption) => (
+                      <option key={quantOption.value} value={quantOption.value}>
+                        {quantOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+      {projectorActionsOpen && projectorActionsAnchor
+        ? createPortal(
+            <div
+              ref={projectorActionsMenuRef}
+              className="projector-action-menu"
+              aria-label="Projector actions"
+              style={{
+                position: "fixed",
+                top: projectorActionsAnchor.top,
+                left: projectorActionsAnchor.left - 30,
+                right: "auto",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setProjectorActionsOpen(false);
+                  setProjectorActionsAnchor(null);
+                  onOpenProjector();
+                }}
+              >
+                Change Projector
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProjectorActionsOpen(false);
+                  setProjectorActionsAnchor(null);
+                  onRemoveProjector();
+                }}
+              >
+                Remove Projector
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
