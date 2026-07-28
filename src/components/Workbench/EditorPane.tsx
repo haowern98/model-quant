@@ -237,6 +237,7 @@ export function EditorPane({
   const editorRef = useRef<HTMLElement>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
   const [bottomPanelMaximized, setBottomPanelMaximized] = useState(false);
+  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
@@ -428,9 +429,14 @@ export function EditorPane({
       ) : showingChat ? (
         <ChatEditor
           messages={activeChat?.messages ?? []}
+          draft={activeChatTab ? (chatDrafts[activeChatTab.chatId] ?? "") : ""}
           sending={chatSendingConversationId === activeChatTab?.chatId}
           disabled={running || chatModelLoading || !hasModel || !chatModelLoaded}
           error={chatError}
+          onDraftChange={(draft) => {
+            if (!activeChatTab) return;
+            setChatDrafts((current) => ({ ...current, [activeChatTab.chatId]: draft }));
+          }}
           onSend={(content) => {
             if (activeChatTab) onSendChatMessage(activeChatTab.chatId, content);
           }}

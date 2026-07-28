@@ -1,17 +1,16 @@
-import { useState } from "react";
 import { type ChatMessageData, ChatMessage } from "./ChatMessage";
 
 interface ChatEditorProps {
   messages: ChatMessageData[];
+  draft: string;
   sending: boolean;
   disabled: boolean;
   error: string | null;
+  onDraftChange: (draft: string) => void;
   onSend: (content: string) => void;
 }
 
-export function ChatEditor({ messages, sending, disabled, error, onSend }: ChatEditorProps) {
-  const [draft, setDraft] = useState("");
-
+export function ChatEditor({ messages, draft, sending, disabled, error, onDraftChange, onSend }: ChatEditorProps) {
   return (
     <section className="chat-editor" aria-label="New chat">
       <div className="chat-editor-messages">
@@ -24,7 +23,7 @@ export function ChatEditor({ messages, sending, disabled, error, onSend }: ChatE
           event.preventDefault();
           if (!draft.trim() || sending || disabled) return;
           onSend(draft);
-          setDraft("");
+          onDraftChange("");
         }}
       >
         <textarea
@@ -32,7 +31,7 @@ export function ChatEditor({ messages, sending, disabled, error, onSend }: ChatE
           placeholder="Send a message to the model..."
           value={draft}
           disabled={disabled || sending}
-          onChange={(event) => setDraft(event.currentTarget.value)}
+          onChange={(event) => onDraftChange(event.currentTarget.value)}
         />
         <div className="chat-composer-actions">
           <button type="button" className="chat-composer-action" disabled aria-label="Attach files">
