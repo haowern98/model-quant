@@ -3,6 +3,7 @@ import { type ChatMessageData, ChatMessage } from "./ChatMessage";
 interface ChatEditorProps {
   messages: ChatMessageData[];
   draft: string;
+  modelReady: boolean;
   sending: boolean;
   disabled: boolean;
   error: string | null;
@@ -10,7 +11,7 @@ interface ChatEditorProps {
   onSend: (content: string) => void;
 }
 
-export function ChatEditor({ messages, draft, sending, disabled, error, onDraftChange, onSend }: ChatEditorProps) {
+export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, onDraftChange, onSend }: ChatEditorProps) {
   return (
     <section className="chat-editor" aria-label="New chat">
       <div className="chat-editor-messages">
@@ -37,7 +38,7 @@ export function ChatEditor({ messages, draft, sending, disabled, error, onDraftC
           <button type="button" className="chat-composer-action" disabled aria-label="Attach files">
             <span className="codicon codicon-add" aria-hidden="true" />
           </button>
-          <button type="submit" className="chat-composer-send" disabled={disabled || sending || !draft.trim()} aria-label="Send message">
+          <button type="submit" className={`chat-composer-send${modelReady ? " chat-composer-send-ready" : ""}`} disabled={disabled || sending || !draft.trim()} aria-label="Send message">
             <span className="codicon codicon-arrow-up" aria-hidden="true" />
           </button>
         </div>

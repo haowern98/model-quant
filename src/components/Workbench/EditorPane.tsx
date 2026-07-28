@@ -430,6 +430,7 @@ export function EditorPane({
         <ChatEditor
           messages={activeChat?.messages ?? []}
           draft={activeChatTab ? (chatDrafts[activeChatTab.chatId] ?? "") : ""}
+          modelReady={chatModelLoaded}
           sending={chatSendingConversationId === activeChatTab?.chatId}
           disabled={running || chatModelLoading || !hasModel || !chatModelLoaded}
           error={chatError}
