@@ -139,6 +139,7 @@ pub async fn load_chat_model(
         current.base_model == recipe.base_model && current.targets == targets && current.config == config
     });
     if !already_loaded {
+        crate::ffi::runtime_bindings::reset_recipe_test_cancel();
         *runtime = Some(ChatRuntime {
             base_model: recipe.base_model.clone(),
             targets: targets.clone(),
