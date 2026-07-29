@@ -1946,6 +1946,19 @@ body.resizing-projector * {
   white-space: pre-wrap;
 }
 
+.chat-message-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-message-user .chat-message-content {
+  width: fit-content;
+  max-width: min(100%, 680px);
+  padding: 10px 16px;
+  border-radius: 20px;
+  background: #2d2d2d;
+}
+
 .chat-editor-error {
   max-width: 920px;
   margin: 20px auto;
