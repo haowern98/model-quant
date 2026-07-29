@@ -1969,6 +1969,7 @@ body.resizing-projector * {
 
 .chat-message-reasoning {
   margin-top: 12px;
+  margin-bottom: 12px;
   border: 1px solid #454545;
   border-radius: 6px;
   color: #bdbdbd;
