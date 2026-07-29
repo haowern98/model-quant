@@ -367,10 +367,15 @@ fn validate_conversation(conversation: &StoredChatConversation) -> Result<(), St
 }
 
 fn chat_directory() -> PathBuf {
-    std::env::var_os("USERPROFILE")
+    chat_directory_from_local_app_data(std::env::var_os("LOCALAPPDATA"))
+}
+
+fn chat_directory_from_local_app_data(local_app_data: Option<std::ffi::OsString>) -> PathBuf {
+    local_app_data
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lmstudio")
+        .join("MI")
+        .join("g")
         .join("conversations")
 }
 
@@ -453,10 +458,23 @@ fn normalise_title(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalise_title;
+    use super::{chat_directory_from_local_app_data, normalise_title};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
 
     #[test]
     fn normalises_generated_chat_titles() {
         assert_eq!(normalise_title("  A  useful\nchat title.  "), "A useful chat title");
+    }
+
+    #[test]
+    fn stores_chat_conversations_in_the_mi_local_app_data_directory() {
+        assert_eq!(
+            chat_directory_from_local_app_data(Some(OsString::from(r"C:\\Users\\tester\\AppData\\Local"))),
+            PathBuf::from(r"C:\\Users\\tester\\AppData\\Local")
+                .join("MI")
+                .join("g")
+                .join("conversations"),
+        );
     }
 }
