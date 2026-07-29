@@ -2058,7 +2058,7 @@ body.resizing-projector * {
 
 .chat-composer-send > .codicon {
   line-height: 14px;
-  transform: translateY(1px);
+  transform: translate(-1px, 1px);
 }
 
 .chat-composer-stop-icon {
