@@ -1976,8 +1976,30 @@ body.resizing-projector * {
 
 .chat-message-reasoning summary {
   padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
   color: #cccccc;
+  list-style: none;
+}
+
+.chat-message-reasoning summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-message-reasoning summary::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  flex: 0 0 8px;
+}
+
+.chat-message-reasoning[open] summary::before {
+  transform: rotate(45deg) translate(-1px, -3px);
 }
 
 .chat-message-reasoning > div {
