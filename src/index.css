@@ -2056,6 +2056,19 @@ body.resizing-projector * {
   opacity: 1;
 }
 
+.chat-composer-send > .codicon {
+  line-height: 14px;
+  transform: translateY(1px);
+}
+
+.chat-composer-stop-icon {
+  width: 10px;
+  height: 10px;
+  display: block;
+  border-radius: 1px;
+  background: currentColor;
+}
+
 .eval-results-editor {
   min-width: 0;
   min-height: 0;

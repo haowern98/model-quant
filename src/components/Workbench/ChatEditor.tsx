@@ -46,7 +46,10 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
             aria-label={sending ? "Cancel generation" : "Send message"}
             onClick={sending ? () => { void cancelChatGeneration(); } : undefined}
           >
-            <span className={`codicon ${sending ? "codicon-debug-stop" : "codicon-arrow-up"}`} aria-hidden="true" />
+            <span
+              className={sending ? "chat-composer-stop-icon" : "codicon codicon-arrow-up"}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </form>
