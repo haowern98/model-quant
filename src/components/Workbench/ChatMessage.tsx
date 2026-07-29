@@ -5,13 +5,13 @@ export type { ChatMessageData } from "./chat/chatTypes";
 export function ChatMessage({ message }: { message: ChatMessageData }) {
   return (
     <article className={`chat-message chat-message-${message.role}`}>
-      <div className="chat-message-content">{message.content}</div>
       {message.reasoning ? (
         <details className="chat-message-reasoning">
           <summary>Thinking</summary>
           <div>{message.reasoning}</div>
         </details>
       ) : null}
+      <div className="chat-message-content">{message.content}</div>
       {message.role === "assistant" && message.model ? (
         <div className="chat-message-metadata">
           <span>{message.model}</span>
