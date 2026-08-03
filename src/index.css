@@ -2170,15 +2170,6 @@ body.resizing-projector * {
   font-size: 12px;
 }
 
-.chat-trace-panel h2 {
-  margin: 0;
-  padding: 14px 16px 10px;
-  border-bottom: 1px solid #353535;
-  color: #dcdcdc;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .chat-trace-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2228,6 +2219,7 @@ body.resizing-projector * {
 
 .chat-trace-tabs {
   height: 36px;
+  border-bottom: 0;
 }
 
 .chat-trace-tabs span,

@@ -90,17 +90,16 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
 function ChatTracePanel() {
   return (
     <aside className="chat-trace-panel" aria-label="Trace & Mechanistic Analysis">
-      <h2>TRACE &amp; MECHANISTIC ANALYSIS</h2>
-      <div className="chat-trace-controls">
-        <TraceControl label="Inspecting position" value="After token #9 (every)" />
-        <TraceControl label="View" value="Logit Lens (Probability)" />
-        <TraceControl label="Candidate tokens" value="Auto (Top 12)" />
-      </div>
       <div className="chat-trace-tabs" aria-label="Trace views">
         <span className="chat-trace-tab-active">Evolution</span>
         <span>Top Predictions</span>
         <span>Residual Stream</span>
         <span>Raw</span>
+      </div>
+      <div className="chat-trace-controls">
+        <TraceControl label="Inspecting position" value="After token #9 (every)" />
+        <TraceControl label="View" value="Logit Lens (Probability)" />
+        <TraceControl label="Candidate tokens" value="Auto (Top 12)" />
       </div>
       <div className="chat-trace-metrics">
         <span>Metric:</span>
