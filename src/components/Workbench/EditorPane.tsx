@@ -238,6 +238,7 @@ export function EditorPane({
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
   const [bottomPanelMaximized, setBottomPanelMaximized] = useState(false);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const [chatTracePanels, setChatTracePanels] = useState<Record<string, boolean>>({});
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
@@ -434,9 +435,14 @@ export function EditorPane({
           sending={chatSendingConversationId === activeChatTab?.chatId}
           disabled={running || chatModelLoading || !hasModel || !chatModelLoaded}
           error={chatError}
+          tracePanelOpen={activeChatTab ? (chatTracePanels[activeChatTab.chatId] ?? false) : false}
           onDraftChange={(draft) => {
             if (!activeChatTab) return;
             setChatDrafts((current) => ({ ...current, [activeChatTab.chatId]: draft }));
+          }}
+          onTracePanelOpenChange={(open) => {
+            if (!activeChatTab) return;
+            setChatTracePanels((current) => ({ ...current, [activeChatTab.chatId]: open }));
           }}
           onSend={(content) => {
             if (activeChatTab) onSendChatMessage(activeChatTab.chatId, content);
