@@ -21,13 +21,14 @@ interface ChatEditorProps {
   sending: boolean;
   disabled: boolean;
   error: string | null;
+  traceArmed: boolean;
   tracePanelOpen: boolean;
   onDraftChange: (draft: string) => void;
-  onTracePanelOpenChange: (open: boolean) => void;
+  onTraceArmedChange: (armed: boolean) => void;
   onSend: (content: string) => void;
 }
 
-export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, tracePanelOpen, onDraftChange, onTracePanelOpenChange, onSend }: ChatEditorProps) {
+export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, onDraftChange, onTraceArmedChange, onSend }: ChatEditorProps) {
   return (
     <section className={`chat-editor${tracePanelOpen ? " chat-editor-trace-open" : ""}`} aria-label="New chat">
       <div className="chat-editor-main">
@@ -59,11 +60,11 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
               <button
                 type="button"
                 className="chat-composer-trace-toggle"
-                aria-label={`Trace: ${tracePanelOpen ? "On" : "Off"}`}
-                aria-pressed={tracePanelOpen}
-                onClick={() => onTracePanelOpenChange(!tracePanelOpen)}
+                aria-label={`Trace: ${traceArmed ? "On" : "Off"}`}
+                aria-pressed={traceArmed}
+                onClick={() => onTraceArmedChange(!traceArmed)}
               >
-                <span>{`Trace: ${tracePanelOpen ? "On" : "Off"}`}</span>
+                <span>{`Trace: ${traceArmed ? "On" : "Off"}`}</span>
                 <span className="codicon codicon-settings-gear" aria-hidden="true" />
               </button>
             </div>

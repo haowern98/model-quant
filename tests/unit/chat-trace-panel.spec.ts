@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("keeps trace-pane visibility independent for each open Chat tab", async ({ page }) => {
+test("arms tracing independently for each Chat tab without opening the trace pane", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
   await page.getByRole("button", { name: "Chat with model" }).click();
@@ -14,7 +14,7 @@ test("keeps trace-pane visibility independent for each open Chat tab", async ({ 
 
   await traceToggle.click();
   await expect(traceToggle).toHaveAccessibleName("Trace: On");
-  await expect(tracePane).toBeVisible();
+  await expect(tracePane).toBeHidden();
 
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await expect(traceToggle).toHaveAccessibleName("Trace: Off");
@@ -22,5 +22,5 @@ test("keeps trace-pane visibility independent for each open Chat tab", async ({ 
 
   await page.getByRole("tab", { name: "New chat" }).first().click();
   await expect(traceToggle).toHaveAccessibleName("Trace: On");
-  await expect(tracePane).toBeVisible();
+  await expect(tracePane).toBeHidden();
 });
