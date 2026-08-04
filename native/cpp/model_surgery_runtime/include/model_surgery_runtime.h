@@ -99,6 +99,29 @@ typedef int32_t (*ms_chat_stream_callback)(
     const char * reasoning_delta,
     void * user_data);
 
+typedef struct ms_chat_trace_candidate {
+    int32_t token_id;
+    float logit;
+    const uint8_t * token_text;
+    uint64_t token_text_size;
+} ms_chat_trace_candidate;
+
+typedef struct ms_chat_trace_token {
+    uint32_t index;
+    int32_t token_id;
+    float logit;
+    uint32_t rank;
+    double logit_normalizer;
+    const uint8_t * token_text;
+    uint64_t token_text_size;
+    const ms_chat_trace_candidate * candidates;
+    uint32_t candidate_count;
+} ms_chat_trace_token;
+
+typedef void (*ms_chat_trace_callback)(
+    const ms_chat_trace_token * token,
+    void * user_data);
+
 typedef struct ms_runtime_chat_session_counters {
     uint64_t model_load_count;
     uint64_t context_reset_count;
@@ -306,6 +329,20 @@ MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session_stream(
     const char * reasoning_format,
     ms_chat_stream_callback stream_callback,
     void * stream_user_data,
+    ms_chat_generation_result * out_result);
+MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session_trace_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
+    ms_chat_trace_callback trace_callback,
+    void * trace_user_data,
     ms_chat_generation_result * out_result);
 MS_RUNTIME_API int32_t ms_runtime_generate_recipe_chat_session_multimodal_stream(
     ms_runtime_chat_session * session,

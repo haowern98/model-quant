@@ -19,6 +19,7 @@ export function ChatMessage({ message }: { message: ChatMessageData }) {
           {message.promptTokens !== undefined ? <span>{message.promptTokens.toLocaleString()} prompt tokens</span> : null}
           {message.durationSeconds !== undefined ? <span>{message.durationSeconds.toFixed(2)} s</span> : null}
           {message.finishReason ? <span>Stop reason: {message.finishReason}</span> : null}
+          {message.trace ? <span>Trace saved</span> : null}
         </div>
       ) : null}
     </article>

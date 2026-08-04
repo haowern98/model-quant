@@ -1,13 +1,21 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::commands::chat_trace::{
+    encode_trace_payload, save_trace_artifact, ChatTraceArtifact, ChatTraceCandidate,
+    ChatTracePayload, ChatTraceToken,
+};
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
-    open_recipe_chat_session, ChatFinishReason, ChatGenerationParams, ChatStreamAction, RecipeChatSession,
+    open_recipe_chat_session, ChatFinishReason, ChatGenerationParams, ChatStreamAction,
+    RecipeChatSession,
 };
 use crate::quant::recipe::{QuantType, RecipeState};
 
@@ -21,7 +29,10 @@ pub struct ChatRuntimeState {
 
 impl ChatRuntimeState {
     pub fn new() -> Self {
-        Self { runtime: Mutex::new(None), cancel_requested: AtomicBool::new(false) }
+        Self {
+            runtime: Mutex::new(None),
+            cancel_requested: AtomicBool::new(false),
+        }
     }
 }
 
@@ -37,6 +48,10 @@ struct ChatRuntime {
 pub struct ChatGenerationRequest {
     conversation_id: String,
     messages: Vec<ChatGenerationMessage>,
+    #[serde(default)]
+    trace_enabled: bool,
+    #[serde(default)]
+    assistant_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +93,16 @@ pub struct ChatGenerationResponse {
     pub duration_seconds: f64,
     pub finish_reason: String,
     pub seed: u32,
+    pub trace: Option<ChatTraceReference>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTraceReference {
+    pub conversation_id: String,
+    pub assistant_message_id: String,
+    pub model_fingerprint: String,
+    pub token_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,6 +138,8 @@ pub struct StoredChatMessage {
     duration_seconds: Option<f64>,
     finish_reason: Option<String>,
     seed: Option<u32>,
+    #[serde(default)]
+    trace: Option<ChatTraceReference>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,9 +164,14 @@ pub async fn load_chat_model(
         .clone()
         .ok_or("Open a GGUF model before loading it for Chat.")?;
     let targets = recipe_targets(&recipe);
-    let mut runtime = chat_runtime.runtime.lock().map_err(|error| error.to_string())?;
+    let mut runtime = chat_runtime
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?;
     let already_loaded = runtime.as_ref().is_some_and(|current| {
-        current.base_model == recipe.base_model && current.targets == targets && current.config == config
+        current.base_model == recipe.base_model
+            && current.targets == targets
+            && current.config == config
     });
     if !already_loaded {
         crate::ffi::runtime_bindings::reset_recipe_test_cancel();
@@ -150,14 +182,17 @@ pub async fn load_chat_model(
             session: open_recipe_chat_session(&recipe.base_model, &targets, config.context_window)?,
         });
     }
-    Ok(ChatModelLoadStatus { model: model_name(&recipe.base_model) })
+    Ok(ChatModelLoadStatus {
+        model: model_name(&recipe.base_model),
+    })
 }
 
 #[tauri::command]
-pub async fn unload_chat_model(
-    chat_runtime: State<'_, ChatRuntimeState>,
-) -> Result<(), String> {
-    *chat_runtime.runtime.lock().map_err(|error| error.to_string())? = None;
+pub async fn unload_chat_model(chat_runtime: State<'_, ChatRuntimeState>) -> Result<(), String> {
+    *chat_runtime
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())? = None;
     Ok(())
 }
 
@@ -188,8 +223,9 @@ pub async fn generate_chat_title(
     let mut title_request = request;
     title_request.messages.push(ChatGenerationMessage {
         role: "user".to_string(),
-        content: "Give this conversation a concise title of at most six words. Return only the title."
-            .to_string(),
+        content:
+            "Give this conversation a concise title of at most six words. Return only the title."
+                .to_string(),
         reasoning: None,
     });
     let output = generate(&title_request, None, &chat_runtime, false, Some(24), true)?;
@@ -217,7 +253,11 @@ pub async fn list_chat_conversations() -> Result<Vec<ChatConversationSummary>, S
     let mut conversations = Vec::new();
     for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
-        if !entry.file_type().map_err(|error| error.to_string())?.is_file() {
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
             continue;
         }
         let Ok(contents) = fs::read(entry.path()) else {
@@ -253,8 +293,13 @@ fn generate(
     max_tokens: Option<u32>,
     title: bool,
 ) -> Result<ChatGenerationResponse, String> {
-    chat_runtime.cancel_requested.store(false, Ordering::Relaxed);
-    let mut runtime = chat_runtime.runtime.lock().map_err(|error| error.to_string())?;
+    chat_runtime
+        .cancel_requested
+        .store(false, Ordering::Relaxed);
+    let mut runtime = chat_runtime
+        .runtime
+        .lock()
+        .map_err(|error| error.to_string())?;
     let runtime = runtime
         .as_mut()
         .ok_or("Load a GGUF model before chatting.")?;
@@ -264,7 +309,11 @@ fn generate(
         .map(|message| (message.role.clone(), message.content.clone()))
         .collect::<Vec<_>>();
     let config = if title {
-        ChatGenerationConfig { seed: None, thinking: false, ..runtime.config.clone() }
+        ChatGenerationConfig {
+            seed: None,
+            thinking: false,
+            ..runtime.config.clone()
+        }
     } else {
         runtime.config.clone()
     };
@@ -280,9 +329,37 @@ fn generate(
         ..ChatGenerationParams::default()
     };
     let template_kwargs = serde_json::json!({ "enable_thinking": config.thinking }).to_string();
-    let output = if stream {
+    let (output, trace_tokens) = if stream && request.trace_enabled {
         let conversation_id = request.conversation_id.clone();
-        runtime.session.generate_chat_streaming_cancellable(
+        let traced = runtime
+            .session
+            .generate_chat_streaming_cancellable_with_trace(
+                &messages,
+                &params,
+                &[],
+                Some(&template_kwargs),
+                None,
+                |content, reasoning| {
+                    if chat_runtime.cancel_requested.load(Ordering::Relaxed) {
+                        return Ok(ChatStreamAction::Cancel);
+                    }
+                    let app = app.ok_or("Chat streaming requires an app handle.")?;
+                    app.emit(
+                        CHAT_STREAM_EVENT,
+                        ChatStreamDelta {
+                            conversation_id: conversation_id.clone(),
+                            content: content.to_string(),
+                            reasoning: reasoning.to_string(),
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+                    Ok(ChatStreamAction::Continue)
+                },
+            )?;
+        (traced.generation, Some(traced.trace.tokens))
+    } else if stream {
+        let conversation_id = request.conversation_id.clone();
+        let output = runtime.session.generate_chat_streaming_cancellable(
             &messages,
             &params,
             &[],
@@ -304,17 +381,23 @@ fn generate(
                 .map_err(|error| error.to_string())?;
                 Ok(ChatStreamAction::Continue)
             },
-        )?
+        )?;
+        (output, None)
     } else {
-        runtime.session.generate_chat(
-            &messages,
-            &params,
-            &[],
-            Some(&template_kwargs),
-            None,
-        )?
+        let output =
+            runtime
+                .session
+                .generate_chat(&messages, &params, &[], Some(&template_kwargs), None)?;
+        (output, None)
     };
     let duration_seconds = output.benchmark.generation_ms / 1000.0;
+    let trace = trace_tokens.and_then(|tokens| match persist_trace(runtime, request, tokens) {
+        Ok(trace) => Some(trace),
+        Err(error) => {
+            eprintln!("Chat trace was not saved: {error}");
+            None
+        }
+    });
     Ok(ChatGenerationResponse {
         model: model_name(&runtime.base_model),
         content: output.text,
@@ -322,8 +405,14 @@ fn generate(
         tokens_per_second: output.benchmark.token_gen_tps,
         prompt_tokens: output.benchmark.prompt_tokens,
         duration_seconds,
-        finish_reason: if output.cancelled { "cancelled" } else { finish_reason(output.finish_reason) }.to_string(),
+        finish_reason: if output.cancelled {
+            "cancelled"
+        } else {
+            finish_reason(output.finish_reason)
+        }
+        .to_string(),
         seed: output.actual_seed,
+        trace,
     })
 }
 
@@ -331,13 +420,92 @@ fn validate_generation_request(request: &ChatGenerationRequest) -> Result<(), St
     if !valid_id(&request.conversation_id) {
         return Err("Chat conversation id is invalid.".to_string());
     }
-    if request.messages.is_empty() || request.messages.last().is_none_or(|message| message.content.trim().is_empty()) {
+    if request.messages.is_empty()
+        || request
+            .messages
+            .last()
+            .is_none_or(|message| message.content.trim().is_empty())
+    {
         return Err("Chat message cannot be empty.".to_string());
     }
-    if request.messages.iter().any(|message| !matches!(message.role.as_str(), "system" | "user" | "assistant")) {
+    if request
+        .messages
+        .iter()
+        .any(|message| !matches!(message.role.as_str(), "system" | "user" | "assistant"))
+    {
         return Err("Chat messages use an unsupported role.".to_string());
     }
+    if request.trace_enabled
+        && request
+            .assistant_message_id
+            .as_deref()
+            .is_none_or(|id| !valid_id(id))
+    {
+        return Err("Chat trace assistant message id is invalid.".to_string());
+    }
     Ok(())
+}
+
+fn persist_trace(
+    runtime: &ChatRuntime,
+    request: &ChatGenerationRequest,
+    tokens: Vec<crate::ffi::runtime_bindings::ChatTraceToken>,
+) -> Result<ChatTraceReference, String> {
+    let assistant_message_id = request
+        .assistant_message_id
+        .as_ref()
+        .ok_or("Chat trace assistant message id is missing.")?;
+    let model_fingerprint = model_fingerprint(runtime);
+    let payload = ChatTracePayload {
+        tokens: tokens
+            .into_iter()
+            .map(|token| ChatTraceToken {
+                index: token.index,
+                token_id: token.token_id,
+                token_text: token.token_text,
+                logit: token.logit,
+                rank: token.rank,
+                logit_normalizer: token.logit_normalizer,
+                candidates: token
+                    .candidates
+                    .into_iter()
+                    .map(|candidate| ChatTraceCandidate {
+                        token_id: candidate.token_id,
+                        logit: candidate.logit,
+                        token_text: candidate.token_text,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    let token_count = u32::try_from(payload.tokens.len()).unwrap_or(u32::MAX);
+    let artifact = ChatTraceArtifact {
+        conversation_id: request.conversation_id.clone(),
+        assistant_message_id: assistant_message_id.clone(),
+        model_fingerprint: model_fingerprint.clone(),
+        payload: encode_trace_payload(&payload)?,
+    };
+    save_trace_artifact(&artifact)?;
+    Ok(ChatTraceReference {
+        conversation_id: request.conversation_id.clone(),
+        assistant_message_id: assistant_message_id.clone(),
+        model_fingerprint,
+        token_count,
+    })
+}
+
+fn model_fingerprint(runtime: &ChatRuntime) -> String {
+    let mut targets = runtime.targets.clone();
+    targets.sort();
+    format!(
+        "{}|{}",
+        runtime.base_model,
+        targets
+            .iter()
+            .map(|(name, quant)| format!("{name}:{quant}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 fn validate_config(config: &ChatGenerationConfig) -> Result<(), String> {
@@ -389,7 +557,9 @@ fn conversation_path(id: &str) -> Result<PathBuf, String> {
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
-        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 fn summary(conversation: &StoredChatConversation) -> ChatConversationSummary {
@@ -404,7 +574,12 @@ fn recipe_targets(recipe: &RecipeState) -> Vec<(String, String)> {
     recipe
         .assignments
         .iter()
-        .map(|assignment| (assignment.tensor_name.clone(), quant_type_name(&assignment.quant_type).to_string()))
+        .map(|assignment| {
+            (
+                assignment.tensor_name.clone(),
+                quant_type_name(&assignment.quant_type).to_string(),
+            )
+        })
         .collect()
 }
 
@@ -464,13 +639,18 @@ mod tests {
 
     #[test]
     fn normalises_generated_chat_titles() {
-        assert_eq!(normalise_title("  A  useful\nchat title.  "), "A useful chat title");
+        assert_eq!(
+            normalise_title("  A  useful\nchat title.  "),
+            "A useful chat title"
+        );
     }
 
     #[test]
     fn stores_chat_conversations_in_the_mi_local_app_data_directory() {
         assert_eq!(
-            chat_directory_from_local_app_data(Some(OsString::from(r"C:\\Users\\tester\\AppData\\Local"))),
+            chat_directory_from_local_app_data(Some(OsString::from(
+                r"C:\\Users\\tester\\AppData\\Local"
+            ))),
             PathBuf::from(r"C:\\Users\\tester\\AppData\\Local")
                 .join("MI")
                 .join("g")

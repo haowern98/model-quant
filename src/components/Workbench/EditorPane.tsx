@@ -96,7 +96,7 @@ interface EditorPaneProps {
   onModelLoadConfigChange: (config: ModelLoadConfig) => void;
   onLoadChatModel: () => void;
   onUnloadChatModel: () => void;
-  onSendChatMessage: (id: string, content: string) => void;
+  onSendChatMessage: (id: string, content: string, traceEnabled: boolean) => void;
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
@@ -446,7 +446,11 @@ export function EditorPane({
             setChatTraceArmed((current) => ({ ...current, [activeChatTab.chatId]: armed }));
           }}
           onSend={(content) => {
-            if (activeChatTab) onSendChatMessage(activeChatTab.chatId, content);
+            if (activeChatTab) onSendChatMessage(
+              activeChatTab.chatId,
+              content,
+              chatTraceArmed[activeChatTab.chatId] ?? false,
+            );
           }}
         />
       ) : (

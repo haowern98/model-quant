@@ -33,6 +33,14 @@ export type ChatMessageData = {
   durationSeconds?: number;
   finishReason?: string;
   seed?: number;
+  trace?: ChatTraceReference;
+};
+
+export type ChatTraceReference = {
+  conversationId: string;
+  assistantMessageId: string;
+  modelFingerprint: string;
+  tokenCount: number;
 };
 
 export type ChatConversation = {

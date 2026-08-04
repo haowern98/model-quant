@@ -31,6 +31,7 @@ import type {
   ChatConversationSummary,
   ChatGenerationConfig,
   ChatMessageData,
+  ChatTraceReference,
 } from "../components/Workbench/chat/chatTypes";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -153,6 +154,8 @@ export async function getModelInspectorApiStatus(): Promise<ModelInspectorApiSta
 type ChatGenerationRequest = {
   conversationId: string;
   messages: Pick<ChatMessageData, "role" | "content" | "reasoning">[];
+  traceEnabled?: boolean;
+  assistantMessageId?: string;
 };
 
 type ChatModelLoadStatus = { model: string };
@@ -166,6 +169,7 @@ type ChatGenerationResponse = {
   durationSeconds: number;
   finishReason: string;
   seed: number;
+  trace?: ChatTraceReference;
 };
 
 export async function generateChatResponse(

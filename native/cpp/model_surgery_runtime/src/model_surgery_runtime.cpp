@@ -2430,6 +2430,89 @@ int32_t run_session_generate_multimodal_stream(
     return 0;
 }
 
+constexpr uint32_t CHAT_TRACE_CANDIDATE_LIMIT = 64;
+
+int32_t emit_chat_trace_token(
+    const llama_vocab * vocab,
+    llama_context * ctx,
+    llama_token token,
+    uint32_t index,
+    ms_chat_trace_callback callback,
+    void * user_data) {
+    if (callback == nullptr) {
+        return 0;
+    }
+
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    const float * logits = llama_get_logits_ith(ctx, -1);
+    if (n_vocab <= 0 || logits == nullptr || token < 0 || token >= n_vocab) {
+        return fail("failed to capture chat trace logits");
+    }
+
+    struct Candidate {
+        int32_t token_id;
+        float logit;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(static_cast<size_t>(n_vocab));
+    double max_logit = -std::numeric_limits<double>::infinity();
+    for (int32_t token_id = 0; token_id < n_vocab; ++token_id) {
+        const float logit = logits[token_id];
+        if (!std::isfinite(logit)) {
+            continue;
+        }
+        candidates.push_back({token_id, logit});
+        max_logit = std::max(max_logit, static_cast<double>(logit));
+    }
+    if (candidates.empty() || !std::isfinite(logits[token])) {
+        return fail("chat trace logits are empty");
+    }
+
+    double exp_sum = 0.0;
+    uint32_t rank = 1;
+    for (const Candidate & candidate : candidates) {
+        exp_sum += std::exp(static_cast<double>(candidate.logit) - max_logit);
+        if (candidate.logit > logits[token]) {
+            ++rank;
+        }
+    }
+    const size_t candidate_count = std::min<size_t>(CHAT_TRACE_CANDIDATE_LIMIT, candidates.size());
+    std::partial_sort(
+        candidates.begin(),
+        candidates.begin() + static_cast<std::ptrdiff_t>(candidate_count),
+        candidates.end(),
+        [](const Candidate & left, const Candidate & right) { return left.logit > right.logit; });
+
+    std::vector<std::string> candidate_texts;
+    std::vector<ms_chat_trace_candidate> trace_candidates;
+    candidate_texts.reserve(candidate_count);
+    trace_candidates.reserve(candidate_count);
+    for (size_t candidate_index = 0; candidate_index < candidate_count; ++candidate_index) {
+        candidate_texts.push_back(token_to_piece(vocab, candidates[candidate_index].token_id));
+        const std::string & candidate_text = candidate_texts.back();
+        trace_candidates.push_back({
+            candidates[candidate_index].token_id,
+            candidates[candidate_index].logit,
+            reinterpret_cast<const uint8_t *>(candidate_text.data()),
+            static_cast<uint64_t>(candidate_text.size()),
+        });
+    }
+    const std::string token_text = token_to_piece(vocab, token);
+    const ms_chat_trace_token trace_token = {
+        index,
+        token,
+        logits[token],
+        rank,
+        max_logit + std::log(exp_sum),
+        reinterpret_cast<const uint8_t *>(token_text.data()),
+        static_cast<uint64_t>(token_text.size()),
+        trace_candidates.data(),
+        static_cast<uint32_t>(candidate_count),
+    };
+    callback(&trace_token, user_data);
+    return 0;
+}
+
 int32_t run_session_generate_stream(
     ModelSession & session,
     const char * prompt,
@@ -2441,7 +2524,9 @@ int32_t run_session_generate_stream(
     void * user_data,
     ms_baseline_benchmark * out_benchmark,
     uint32_t & out_finish_reason,
-    uint32_t & out_actual_seed) {
+    uint32_t & out_actual_seed,
+    ms_chat_trace_callback trace_callback = nullptr,
+    void * trace_user_data = nullptr) {
     out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
@@ -2542,6 +2627,17 @@ int32_t run_session_generate_stream(
         }
         if (stream_res != 0) {
             return stream_res;
+        }
+
+        const int trace_res = emit_chat_trace_token(
+            vocab,
+            session.ctx.get(),
+            token,
+            generated,
+            trace_callback,
+            trace_user_data);
+        if (trace_res != 0) {
+            return trace_res;
         }
 
         if (out_finish_reason == MS_CHAT_FINISH_REASON_STOP) {
@@ -3549,6 +3645,109 @@ int32_t ms_runtime_generate_recipe_chat_session_stream(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native recipe chat session streaming error");
+    }
+}
+
+int32_t ms_runtime_generate_recipe_chat_session_trace_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
+    ms_chat_trace_callback trace_callback,
+    void * trace_user_data,
+    ms_chat_generation_result * out_result) {
+    clear_error();
+
+    if (session == nullptr || session->session == nullptr) {
+        return fail("recipe chat session is null");
+    }
+    if (messages == nullptr || message_count == 0) {
+        return fail("chat message set is empty");
+    }
+    if (params == nullptr) {
+        return fail("chat generation params are null");
+    }
+    if (stop_strings == nullptr && stop_count > 0) {
+        return fail("chat stop string pointer is null");
+    }
+    if (stream_callback == nullptr || trace_callback == nullptr) {
+        return fail("chat trace callback is null");
+    }
+    if (out_result == nullptr) {
+        return fail("chat generation result output pointer is null");
+    }
+
+    try {
+        std::vector<std::string> request_stops = collect_stop_strings(stop_strings, stop_count);
+        const std::map<std::string, std::string> chat_template_kwargs =
+            chat_template_kwargs_from_json(chat_template_kwargs_json);
+        const common_reasoning_format native_reasoning_format =
+            reasoning_format_from_request(reasoning_format);
+        std::vector<std::pair<std::string, std::string>> chat_messages;
+        chat_messages.reserve(static_cast<size_t>(message_count));
+        for (uint64_t i = 0; i < message_count; ++i) {
+            if (messages[i].role == nullptr || messages[i].role[0] == '\0') {
+                return fail("chat message role is empty");
+            }
+            if (messages[i].content == nullptr) {
+                return fail("chat message content is null");
+            }
+            chat_messages.push_back({messages[i].role, messages[i].content});
+        }
+
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->session->chat_templates.get(),
+            chat_messages,
+            params->add_generation_prompt != 0,
+            chat_template_kwargs,
+            native_reasoning_format);
+        const std::vector<std::string> all_stops = merge_stop_strings(
+            request_stops,
+            chat_params.additional_stops);
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
+        ms_baseline_benchmark benchmark = {};
+        const int32_t result = run_session_generate_stream(
+            *session->session,
+            chat_params.prompt.c_str(),
+            *params,
+            all_stops,
+            chat_params,
+            native_reasoning_format,
+            stream_callback,
+            stream_user_data,
+            &benchmark,
+            finish_reason,
+            actual_seed,
+            trace_callback,
+            trace_user_data);
+        if (result != 0) {
+            return result;
+        }
+
+        benchmark.copied_tensor_count = session->session->copied_tensors;
+        benchmark.converted_tensor_count = session->session->converted_tensors;
+        benchmark.converted_bytes_before = session->session->converted_bytes_before;
+        benchmark.converted_bytes_after = session->session->converted_bytes_after;
+        benchmark.requested_target_count = session->session->requested_target_count;
+        benchmark.verified_target_count = session->session->verified_target_count;
+        out_result->benchmark = benchmark;
+        out_result->prompt_tokens = benchmark.prompt_tokens;
+        out_result->completion_tokens = benchmark.generated_tokens;
+        out_result->finish_reason = finish_reason;
+        out_result->actual_seed = actual_seed;
+        session->completion_count += 1;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe chat trace generation error");
     }
 }
 
