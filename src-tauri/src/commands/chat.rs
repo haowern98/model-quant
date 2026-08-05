@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::chat_trace::{
     encode_trace_payload, save_trace_artifact, ChatTraceArtifact, ChatTraceCandidate,
-    ChatTracePayload, ChatTraceToken,
+    ChatTraceLayer, ChatTracePayload, ChatTraceToken,
 };
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
@@ -329,7 +329,7 @@ fn generate(
         ..ChatGenerationParams::default()
     };
     let template_kwargs = serde_json::json!({ "enable_thinking": config.thinking }).to_string();
-    let (output, trace_tokens) = if stream && request.trace_enabled {
+    let (output, trace_payload) = if stream && request.trace_enabled {
         let conversation_id = request.conversation_id.clone();
         let traced = runtime
             .session
@@ -356,7 +356,7 @@ fn generate(
                     Ok(ChatStreamAction::Continue)
                 },
             )?;
-        (traced.generation, Some(traced.trace.tokens))
+        (traced.generation, Some(traced.trace))
     } else if stream {
         let conversation_id = request.conversation_id.clone();
         let output = runtime.session.generate_chat_streaming_cancellable(
@@ -391,7 +391,7 @@ fn generate(
         (output, None)
     };
     let duration_seconds = output.benchmark.generation_ms / 1000.0;
-    let trace = trace_tokens.and_then(|tokens| match persist_trace(runtime, request, tokens) {
+    let trace = trace_payload.and_then(|payload| match persist_trace(runtime, request, payload) {
         Ok(trace) => Some(trace),
         Err(error) => {
             eprintln!("Chat trace was not saved: {error}");
@@ -449,7 +449,7 @@ fn validate_generation_request(request: &ChatGenerationRequest) -> Result<(), St
 fn persist_trace(
     runtime: &ChatRuntime,
     request: &ChatGenerationRequest,
-    tokens: Vec<crate::ffi::runtime_bindings::ChatTraceToken>,
+    trace: crate::ffi::runtime_bindings::ChatGenerationTrace,
 ) -> Result<ChatTraceReference, String> {
     let assistant_message_id = request
         .assistant_message_id
@@ -457,7 +457,9 @@ fn persist_trace(
         .ok_or("Chat trace assistant message id is missing.")?;
     let model_fingerprint = model_fingerprint(runtime);
     let payload = ChatTracePayload {
-        tokens: tokens
+        supported: trace.supported,
+        tokens: trace
+            .tokens
             .into_iter()
             .map(|token| ChatTraceToken {
                 index: token.index,
@@ -473,6 +475,22 @@ fn persist_trace(
                         token_id: candidate.token_id,
                         logit: candidate.logit,
                         token_text: candidate.token_text,
+                    })
+                    .collect(),
+                layers: token
+                    .layers
+                    .into_iter()
+                    .map(|layer| ChatTraceLayer {
+                        layer: layer.layer,
+                        candidates: layer
+                            .candidates
+                            .into_iter()
+                            .map(|candidate| ChatTraceCandidate {
+                                token_id: candidate.token_id,
+                                logit: candidate.logit,
+                                token_text: candidate.token_text,
+                            })
+                            .collect(),
                     })
                     .collect(),
             })

@@ -2431,6 +2431,7 @@ int32_t run_session_generate_multimodal_stream(
 }
 
 constexpr uint32_t CHAT_TRACE_CANDIDATE_LIMIT = 64;
+constexpr int32_t CHAT_TRACE_STATUS_UNAVAILABLE = 1;
 
 int32_t emit_chat_trace_token(
     const llama_vocab * vocab,
@@ -2441,6 +2442,24 @@ int32_t emit_chat_trace_token(
     void * user_data) {
     if (callback == nullptr) {
         return 0;
+    }
+
+    if (!llama_logit_lens_is_supported(ctx)) {
+        const ms_chat_trace_token unavailable = {
+            index,
+            -1,
+            0.0f,
+            0,
+            0.0,
+            nullptr,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            0,
+        };
+        callback(&unavailable, user_data);
+        return CHAT_TRACE_STATUS_UNAVAILABLE;
     }
 
     const int32_t n_vocab = llama_vocab_n_tokens(vocab);
@@ -2497,6 +2516,61 @@ int32_t emit_chat_trace_token(
             static_cast<uint64_t>(candidate_text.size()),
         });
     }
+
+    const int32_t layer_count = llama_get_logit_lens_layer_count(ctx);
+    if (layer_count <= 0) {
+        return fail("Logit Lens did not produce per-layer candidates");
+    }
+
+    std::vector<std::vector<std::string>> layer_candidate_texts;
+    std::vector<std::vector<ms_chat_trace_candidate>> layer_candidates;
+    std::vector<ms_chat_trace_layer> trace_layers;
+    layer_candidate_texts.reserve(static_cast<size_t>(layer_count));
+    layer_candidates.reserve(static_cast<size_t>(layer_count));
+    trace_layers.reserve(static_cast<size_t>(layer_count));
+    for (int32_t layer_index = 0; layer_index < layer_count; ++layer_index) {
+        const llama_logit_lens_layer * layer = llama_get_logit_lens_layer(ctx, layer_index);
+        if (layer == nullptr || layer->token_ids == nullptr || layer->logits == nullptr
+                || layer->candidate_count != CHAT_TRACE_CANDIDATE_LIMIT) {
+            return fail("Logit Lens returned invalid per-layer candidates");
+        }
+
+        std::vector<Candidate> sorted_candidates;
+        sorted_candidates.reserve(layer->candidate_count);
+        for (uint32_t candidate_index = 0; candidate_index < layer->candidate_count; ++candidate_index) {
+            const llama_token candidate_token = layer->token_ids[candidate_index];
+            const float candidate_logit = layer->logits[candidate_index];
+            if (candidate_token < 0 || candidate_token >= n_vocab || !std::isfinite(candidate_logit)) {
+                return fail("Logit Lens returned an invalid candidate");
+            }
+            sorted_candidates.push_back({candidate_token, candidate_logit});
+        }
+        std::sort(sorted_candidates.begin(), sorted_candidates.end(),
+            [](const Candidate & left, const Candidate & right) { return left.logit > right.logit; });
+
+        layer_candidate_texts.emplace_back();
+        layer_candidates.emplace_back();
+        auto & texts = layer_candidate_texts.back();
+        auto & candidates_out = layer_candidates.back();
+        texts.reserve(sorted_candidates.size());
+        candidates_out.reserve(sorted_candidates.size());
+        for (const Candidate & candidate : sorted_candidates) {
+            texts.push_back(token_to_piece(vocab, candidate.token_id));
+            const std::string & text = texts.back();
+            candidates_out.push_back({
+                candidate.token_id,
+                candidate.logit,
+                reinterpret_cast<const uint8_t *>(text.data()),
+                static_cast<uint64_t>(text.size()),
+            });
+        }
+        trace_layers.push_back({
+            layer->layer,
+            candidates_out.data(),
+            static_cast<uint32_t>(candidates_out.size()),
+        });
+    }
+
     const std::string token_text = token_to_piece(vocab, token);
     const ms_chat_trace_token trace_token = {
         index,
@@ -2508,6 +2582,8 @@ int32_t emit_chat_trace_token(
         static_cast<uint64_t>(token_text.size()),
         trace_candidates.data(),
         static_cast<uint32_t>(candidate_count),
+        trace_layers.data(),
+        static_cast<uint32_t>(trace_layers.size()),
     };
     callback(&trace_token, user_data);
     return 0;
@@ -2556,6 +2632,13 @@ int32_t run_session_generate_stream(
     prompt_tokens.resize(static_cast<size_t>(actual_tokens));
 
     reset_session_context(session);
+    struct ScopedLogitLens {
+        llama_context * ctx;
+        ~ScopedLogitLens() {
+            llama_set_logit_lens_enabled(ctx, false);
+        }
+    } logit_lens{session.ctx.get()};
+    llama_set_logit_lens_enabled(session.ctx.get(), trace_callback != nullptr);
 
     const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
     const uint32_t max_tokens = context_generation_room(context_tokens, prompt_tokens.size());
@@ -2593,6 +2676,7 @@ int32_t run_session_generate_stream(
     }
 
     uint32_t generated = 0;
+    bool trace_active = trace_callback != nullptr;
     std::string generated_text;
     std::string emitted_visible_text;
     std::string emitted_reasoning_text;
@@ -2629,15 +2713,19 @@ int32_t run_session_generate_stream(
             return stream_res;
         }
 
-        const int trace_res = emit_chat_trace_token(
-            vocab,
-            session.ctx.get(),
-            token,
-            generated,
-            trace_callback,
-            trace_user_data);
-        if (trace_res != 0) {
-            return trace_res;
+        if (trace_active) {
+            const int trace_res = emit_chat_trace_token(
+                vocab,
+                session.ctx.get(),
+                token,
+                generated,
+                trace_callback,
+                trace_user_data);
+            if (trace_res == CHAT_TRACE_STATUS_UNAVAILABLE) {
+                trace_active = false;
+            } else if (trace_res != 0) {
+                return trace_res;
+            }
         }
 
         if (out_finish_reason == MS_CHAT_FINISH_REASON_STOP) {

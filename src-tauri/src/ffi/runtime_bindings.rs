@@ -171,6 +171,12 @@ pub struct ChatTraceCandidate {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChatTraceLayer {
+    pub layer: i32,
+    pub candidates: Vec<ChatTraceCandidate>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ChatTraceToken {
     pub index: u32,
     pub token_id: i32,
@@ -179,10 +185,12 @@ pub struct ChatTraceToken {
     pub rank: u32,
     pub logit_normalizer: f64,
     pub candidates: Vec<ChatTraceCandidate>,
+    pub layers: Vec<ChatTraceLayer>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ChatGenerationTrace {
+    pub supported: bool,
     pub tokens: Vec<ChatTraceToken>,
 }
 
@@ -210,6 +218,13 @@ struct MsChatTraceCandidate {
 }
 
 #[repr(C)]
+struct MsChatTraceLayer {
+    layer: i32,
+    candidates: *const MsChatTraceCandidate,
+    candidate_count: u32,
+}
+
+#[repr(C)]
 struct MsChatTraceToken {
     index: u32,
     token_id: i32,
@@ -220,6 +235,8 @@ struct MsChatTraceToken {
     token_text_size: u64,
     candidates: *const MsChatTraceCandidate,
     candidate_count: u32,
+    layers: *const MsChatTraceLayer,
+    layer_count: u32,
 }
 
 type MsChatTraceCallback = Option<unsafe extern "C" fn(*const MsChatTraceToken, *mut c_void)>;
@@ -1124,6 +1141,7 @@ where
 }
 
 struct ChatTraceCallbackState {
+    supported: bool,
     tokens: Vec<ChatTraceToken>,
 }
 
@@ -1137,6 +1155,11 @@ unsafe extern "C" fn recipe_chat_trace_trampoline(
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let native = unsafe { &*native_token };
+        let state = unsafe { &mut *(user_data as *mut ChatTraceCallbackState) };
+        if native.token_id < 0 {
+            state.supported = false;
+            return;
+        }
         let Ok(token_text_size) = usize::try_from(native.token_text_size) else {
             return;
         };
@@ -1148,31 +1171,43 @@ unsafe extern "C" fn recipe_chat_trace_trampoline(
             })
             .into_owned()
         };
-        let candidate_count = native.candidate_count as usize;
-        let candidates = if candidate_count == 0 || native.candidates.is_null() {
+        let decode_candidates = |candidates: *const MsChatTraceCandidate, count: u32| {
+            if count == 0 || candidates.is_null() {
+                Vec::new()
+            } else {
+                unsafe { std::slice::from_raw_parts(candidates, count as usize) }
+                    .iter()
+                    .map(|candidate| {
+                        let token_text = match usize::try_from(candidate.token_text_size) {
+                            Ok(size) if !candidate.token_text.is_null() => {
+                                String::from_utf8_lossy(unsafe {
+                                    std::slice::from_raw_parts(candidate.token_text, size)
+                                })
+                                .into_owned()
+                            }
+                            _ => String::new(),
+                        };
+                        ChatTraceCandidate {
+                            token_id: candidate.token_id,
+                            logit: candidate.logit,
+                            token_text,
+                        }
+                    })
+                    .collect()
+            }
+        };
+        let candidates = decode_candidates(native.candidates, native.candidate_count);
+        let layers = if native.layer_count == 0 || native.layers.is_null() {
             Vec::new()
         } else {
-            unsafe { std::slice::from_raw_parts(native.candidates, candidate_count) }
+            unsafe { std::slice::from_raw_parts(native.layers, native.layer_count as usize) }
                 .iter()
-                .map(|candidate| {
-                    let token_text = match usize::try_from(candidate.token_text_size) {
-                        Ok(size) if !candidate.token_text.is_null() => {
-                            String::from_utf8_lossy(unsafe {
-                                std::slice::from_raw_parts(candidate.token_text, size)
-                            })
-                            .into_owned()
-                        }
-                        _ => String::new(),
-                    };
-                    ChatTraceCandidate {
-                        token_id: candidate.token_id,
-                        logit: candidate.logit,
-                        token_text,
-                    }
+                .map(|layer| ChatTraceLayer {
+                    layer: layer.layer,
+                    candidates: decode_candidates(layer.candidates, layer.candidate_count),
                 })
                 .collect()
         };
-        let state = unsafe { &mut *(user_data as *mut ChatTraceCallbackState) };
         state.tokens.push(ChatTraceToken {
             index: native.index,
             token_id: native.token_id,
@@ -1181,6 +1216,7 @@ unsafe extern "C" fn recipe_chat_trace_trampoline(
             rank: native.rank,
             logit_normalizer: native.logit_normalizer,
             candidates,
+            layers,
         });
     }));
 
@@ -1576,7 +1612,10 @@ impl RecipeChatSession {
             reasoning_text: String::new(),
             error: None,
         };
-        let mut trace_state = ChatTraceCallbackState { tokens: Vec::new() };
+        let mut trace_state = ChatTraceCallbackState {
+            supported: true,
+            tokens: Vec::new(),
+        };
 
         let status = unsafe {
             ms_runtime_generate_recipe_chat_session_trace_stream(
@@ -1620,6 +1659,7 @@ impl RecipeChatSession {
                 actual_seed: native_result.actual_seed,
             },
             trace: ChatGenerationTrace {
+                supported: trace_state.supported,
                 tokens: trace_state.tokens,
             },
         })

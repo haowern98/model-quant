@@ -106,6 +106,12 @@ typedef struct ms_chat_trace_candidate {
     uint64_t token_text_size;
 } ms_chat_trace_candidate;
 
+typedef struct ms_chat_trace_layer {
+    int32_t layer;
+    const ms_chat_trace_candidate * candidates;
+    uint32_t candidate_count;
+} ms_chat_trace_layer;
+
 typedef struct ms_chat_trace_token {
     uint32_t index;
     int32_t token_id;
@@ -116,6 +122,8 @@ typedef struct ms_chat_trace_token {
     uint64_t token_text_size;
     const ms_chat_trace_candidate * candidates;
     uint32_t candidate_count;
+    const ms_chat_trace_layer * layers;
+    uint32_t layer_count;
 } ms_chat_trace_token;
 
 typedef void (*ms_chat_trace_callback)(

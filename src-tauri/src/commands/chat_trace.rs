@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 const TRACE_MAGIC: &[u8; 8] = b"MITRACE1";
-const TRACE_VERSION: u32 = 1;
+const TRACE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +25,13 @@ pub struct ChatTraceCandidate {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatTraceLayer {
+    pub layer: i32,
+    pub candidates: Vec<ChatTraceCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatTraceToken {
     pub index: u32,
     pub token_id: i32,
@@ -33,11 +40,13 @@ pub struct ChatTraceToken {
     pub rank: u32,
     pub logit_normalizer: f64,
     pub candidates: Vec<ChatTraceCandidate>,
+    pub layers: Vec<ChatTraceLayer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatTracePayload {
+    pub supported: bool,
     pub tokens: Vec<ChatTraceToken>,
 }
 
@@ -189,7 +198,7 @@ mod tests {
     use super::{
         decode_trace_payload, encode_trace_payload, load_trace_artifact_from,
         save_trace_artifact_in, trace_directory_from_local_app_data, ChatTraceArtifact,
-        ChatTraceCandidate, ChatTracePayload, ChatTraceToken,
+        ChatTraceCandidate, ChatTraceLayer, ChatTracePayload, ChatTraceToken,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -230,6 +239,7 @@ mod tests {
     #[test]
     fn round_trips_generated_token_trace_data() {
         let payload = ChatTracePayload {
+            supported: true,
             tokens: vec![ChatTraceToken {
                 index: 1,
                 token_id: 42,
@@ -241,6 +251,14 @@ mod tests {
                     token_id: 42,
                     logit: 3.0,
                     token_text: "hello".to_string(),
+                }],
+                layers: vec![ChatTraceLayer {
+                    layer: 0,
+                    candidates: vec![ChatTraceCandidate {
+                        token_id: 42,
+                        logit: 3.0,
+                        token_text: "hello".to_string(),
+                    }],
                 }],
             }],
         };
