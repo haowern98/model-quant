@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cstdint>
 #include <exception>
@@ -52,7 +53,11 @@ bool recipe_test_load_progress(float, void *) {
     return !recipe_test_cancel_requested();
 }
 
-void null_log_callback(ggml_log_level, const char *, void *) {
+void diagnostic_log_callback(ggml_log_level, const char * message, void *) {
+    if (message != nullptr) {
+        std::fputs(message, stderr);
+        std::fflush(stderr);
+    }
 }
 
 void clear_error() {
@@ -125,7 +130,7 @@ struct VramTracker {
 
 bool ensure_backend_initialized() {
     static const bool initialized = [] {
-        llama_log_set(null_log_callback, nullptr);
+        llama_log_set(diagnostic_log_callback, nullptr);
         llama_backend_init();
         return true;
     }();
