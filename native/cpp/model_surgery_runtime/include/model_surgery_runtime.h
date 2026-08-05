@@ -102,6 +102,7 @@ typedef int32_t (*ms_chat_stream_callback)(
 typedef struct ms_chat_trace_candidate {
     int32_t token_id;
     float logit;
+    float probability;
     const uint8_t * token_text;
     uint64_t token_text_size;
 } ms_chat_trace_candidate;

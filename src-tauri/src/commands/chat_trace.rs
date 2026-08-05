@@ -20,6 +20,8 @@ pub struct ChatTraceArtifact {
 pub struct ChatTraceCandidate {
     pub token_id: i32,
     pub logit: f32,
+    #[serde(default)]
+    pub probability: Option<f32>,
     pub token_text: String,
 }
 
@@ -259,6 +261,7 @@ mod tests {
                 candidates: vec![ChatTraceCandidate {
                     token_id: 42,
                     logit: 3.0,
+                    probability: Some(0.61),
                     token_text: "hello".to_string(),
                 }],
                 layers: vec![ChatTraceLayer {
@@ -266,6 +269,7 @@ mod tests {
                     candidates: vec![ChatTraceCandidate {
                         token_id: 42,
                         logit: 3.0,
+                        probability: Some(0.61),
                         token_text: "hello".to_string(),
                     }],
                 }],

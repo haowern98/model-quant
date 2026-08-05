@@ -2471,6 +2471,7 @@ int32_t emit_chat_trace_token(
     struct Candidate {
         int32_t token_id;
         float logit;
+        float probability;
     };
     std::vector<Candidate> candidates;
     candidates.reserve(static_cast<size_t>(n_vocab));
@@ -2480,7 +2481,7 @@ int32_t emit_chat_trace_token(
         if (!std::isfinite(logit)) {
             continue;
         }
-        candidates.push_back({token_id, logit});
+        candidates.push_back({token_id, logit, 0.0f});
         max_logit = std::max(max_logit, static_cast<double>(logit));
     }
     if (candidates.empty() || !std::isfinite(logits[token])) {
@@ -2494,6 +2495,10 @@ int32_t emit_chat_trace_token(
         if (candidate.logit > logits[token]) {
             ++rank;
         }
+    }
+    const double logit_normalizer = max_logit + std::log(exp_sum);
+    for (Candidate & candidate : candidates) {
+        candidate.probability = static_cast<float>(std::exp(static_cast<double>(candidate.logit) - logit_normalizer));
     }
     const size_t candidate_count = std::min<size_t>(CHAT_TRACE_CANDIDATE_LIMIT, candidates.size());
     std::partial_sort(
@@ -2512,6 +2517,7 @@ int32_t emit_chat_trace_token(
         trace_candidates.push_back({
             candidates[candidate_index].token_id,
             candidates[candidate_index].logit,
+            candidates[candidate_index].probability,
             reinterpret_cast<const uint8_t *>(candidate_text.data()),
             static_cast<uint64_t>(candidate_text.size()),
         });
@@ -2530,7 +2536,7 @@ int32_t emit_chat_trace_token(
     trace_layers.reserve(static_cast<size_t>(layer_count));
     for (int32_t layer_index = 0; layer_index < layer_count; ++layer_index) {
         const llama_logit_lens_layer * layer = llama_get_logit_lens_layer(ctx, layer_index);
-        if (layer == nullptr || layer->token_ids == nullptr || layer->logits == nullptr
+        if (layer == nullptr || layer->token_ids == nullptr || layer->logits == nullptr || layer->probabilities == nullptr
                 || layer->candidate_count != CHAT_TRACE_CANDIDATE_LIMIT) {
             return fail("Logit Lens returned invalid per-layer candidates");
         }
@@ -2540,10 +2546,12 @@ int32_t emit_chat_trace_token(
         for (uint32_t candidate_index = 0; candidate_index < layer->candidate_count; ++candidate_index) {
             const llama_token candidate_token = layer->token_ids[candidate_index];
             const float candidate_logit = layer->logits[candidate_index];
-            if (candidate_token < 0 || candidate_token >= n_vocab || !std::isfinite(candidate_logit)) {
+            const float candidate_probability = layer->probabilities[candidate_index];
+            if (candidate_token < 0 || candidate_token >= n_vocab || !std::isfinite(candidate_logit)
+                    || !std::isfinite(candidate_probability) || candidate_probability < 0.0f || candidate_probability > 1.0f) {
                 return fail("Logit Lens returned an invalid candidate");
             }
-            sorted_candidates.push_back({candidate_token, candidate_logit});
+            sorted_candidates.push_back({candidate_token, candidate_logit, candidate_probability});
         }
         std::sort(sorted_candidates.begin(), sorted_candidates.end(),
             [](const Candidate & left, const Candidate & right) { return left.logit > right.logit; });
@@ -2560,6 +2568,7 @@ int32_t emit_chat_trace_token(
             candidates_out.push_back({
                 candidate.token_id,
                 candidate.logit,
+                candidate.probability,
                 reinterpret_cast<const uint8_t *>(text.data()),
                 static_cast<uint64_t>(text.size()),
             });
@@ -2577,7 +2586,7 @@ int32_t emit_chat_trace_token(
         token,
         logits[token],
         rank,
-        max_logit + std::log(exp_sum),
+        logit_normalizer,
         reinterpret_cast<const uint8_t *>(token_text.data()),
         static_cast<uint64_t>(token_text.size()),
         trace_candidates.data(),

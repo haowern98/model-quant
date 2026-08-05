@@ -167,6 +167,7 @@ pub struct ChatGenerationOutput {
 pub struct ChatTraceCandidate {
     pub token_id: i32,
     pub logit: f32,
+    pub probability: f32,
     pub token_text: String,
 }
 
@@ -213,6 +214,7 @@ type MsChatStreamCallback =
 struct MsChatTraceCandidate {
     token_id: i32,
     logit: f32,
+    probability: f32,
     token_text: *const u8,
     token_text_size: u64,
 }
@@ -1190,6 +1192,7 @@ unsafe extern "C" fn recipe_chat_trace_trampoline(
                         ChatTraceCandidate {
                             token_id: candidate.token_id,
                             logit: candidate.logit,
+                            probability: candidate.probability,
                             token_text,
                         }
                     })

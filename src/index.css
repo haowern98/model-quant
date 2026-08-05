@@ -2249,6 +2249,12 @@ body.resizing-projector * {
   line-height: 16px;
 }
 
+.chat-trace-title {
+  margin: 0 16px 6px;
+  color: #d6d6d6;
+  font-size: 12px;
+}
+
 .chat-trace-empty {
   display: grid;
   place-items: center;
@@ -2350,7 +2356,7 @@ body.resizing-projector * {
 .chat-trace-table button {
   width: 100%;
   border: 0;
-  padding: 0;
+  padding: 2px 0;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -2359,6 +2365,29 @@ body.resizing-projector * {
 
 .chat-trace-table button:disabled {
   cursor: default;
+}
+
+.chat-trace-cell-token,
+.chat-trace-cell-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-trace-cell-token {
+  color: #e3e3e3;
+}
+
+.chat-trace-cell-value {
+  margin-top: 2px;
+  color: #a6a6a6;
+  font-size: 10px;
+}
+
+.chat-trace-generated-token {
+  outline: 2px solid #0e639c;
+  outline-offset: -1px;
 }
 
 .chat-trace-table td.chat-trace-heat {

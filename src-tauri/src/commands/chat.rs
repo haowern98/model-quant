@@ -474,6 +474,7 @@ fn persist_trace(
                     .map(|candidate| ChatTraceCandidate {
                         token_id: candidate.token_id,
                         logit: candidate.logit,
+                        probability: Some(candidate.probability),
                         token_text: candidate.token_text,
                     })
                     .collect(),
@@ -488,6 +489,7 @@ fn persist_trace(
                             .map(|candidate| ChatTraceCandidate {
                                 token_id: candidate.token_id,
                                 logit: candidate.logit,
+                                probability: Some(candidate.probability),
                                 token_text: candidate.token_text,
                             })
                             .collect(),

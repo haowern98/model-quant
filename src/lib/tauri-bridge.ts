@@ -175,6 +175,7 @@ type ChatGenerationResponse = {
 export type ChatTraceCandidate = {
   tokenId: number;
   logit: number;
+  probability?: number;
   tokenText: string;
 };
 
