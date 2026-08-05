@@ -172,6 +172,33 @@ type ChatGenerationResponse = {
   trace?: ChatTraceReference;
 };
 
+export type ChatTraceCandidate = {
+  tokenId: number;
+  logit: number;
+  tokenText: string;
+};
+
+export type ChatTraceLayer = {
+  layer: number;
+  candidates: ChatTraceCandidate[];
+};
+
+export type ChatTraceToken = {
+  index: number;
+  tokenId: number;
+  tokenText: string;
+  logit: number;
+  rank: number;
+  logitNormalizer: number;
+  candidates: ChatTraceCandidate[];
+  layers: ChatTraceLayer[];
+};
+
+export type ChatTracePayload = {
+  supported: boolean;
+  tokens: ChatTraceToken[];
+};
+
 export async function generateChatResponse(
   request: ChatGenerationRequest,
 ): Promise<ChatGenerationResponse> {
@@ -208,6 +235,13 @@ export async function listChatConversations(): Promise<ChatConversationSummary[]
 
 export async function loadChatConversation(id: string): Promise<ChatConversation> {
   return invoke<ChatConversation>("load_chat_conversation", { id });
+}
+
+export async function loadChatTrace(
+  conversationId: string,
+  assistantMessageId: string,
+): Promise<ChatTracePayload> {
+  return invoke<ChatTracePayload>("load_chat_trace", { conversationId, assistantMessageId });
 }
 
 export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {

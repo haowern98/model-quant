@@ -2041,10 +2041,38 @@ body.resizing-projector * {
   font-size: 12px;
 }
 
-.chat-message-metadata span {
+.chat-message-metadata span,
+.chat-message-metadata button {
   padding: 3px 8px;
   border-radius: 12px;
   background: #2d2d2d;
+}
+
+.chat-message-trace-button {
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-message-trace-button:hover {
+  background: #3a3a3a;
+}
+
+.chat-trace-token {
+  border: 0;
+  border-radius: 2px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  cursor: pointer;
+}
+
+.chat-trace-token:hover,
+.chat-trace-token-selected {
+  background: #264f78;
 }
 
 .chat-composer {
@@ -2190,21 +2218,41 @@ body.resizing-projector * {
   font-size: 11px;
 }
 
-.chat-trace-control strong {
+.chat-trace-control select {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
   box-sizing: border-box;
   border: 1px solid #454545;
   border-radius: 4px;
   padding: 7px 8px;
+  background: #1f1f1f;
   color: #d6d6d6;
-  font-weight: 400;
+  font: inherit;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chat-trace-control select:disabled {
+  color: #d6d6d6;
+  opacity: 1;
+}
+
+.chat-trace-caption,
+.chat-trace-footer,
+.chat-trace-empty {
+  color: #a6a6a6;
+}
+
+.chat-trace-caption {
+  margin: 0 16px 10px;
+  line-height: 16px;
+}
+
+.chat-trace-empty {
+  display: grid;
+  place-items: center;
+  padding: 24px;
 }
 
 .chat-trace-tabs,
@@ -2299,6 +2347,20 @@ body.resizing-projector * {
   color: #c8c8c8;
 }
 
+.chat-trace-table button {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-trace-table button:disabled {
+  cursor: default;
+}
+
 .chat-trace-table td.chat-trace-heat {
   background: linear-gradient(90deg, #35242b, #9c413d);
 }
@@ -2375,6 +2437,11 @@ body.resizing-projector * {
   margin-left: auto;
   color: #a6a6a6;
   white-space: nowrap;
+}
+
+.chat-trace-footer {
+  margin: 12px 16px 16px;
+  font-size: 11px;
 }
 
 .eval-results-editor {

@@ -78,6 +78,15 @@ pub fn decode_trace_payload(payload: &[u8]) -> Result<ChatTracePayload, String> 
     serde_json::from_slice(payload).map_err(|_| "Trace payload is not valid.".to_string())
 }
 
+#[tauri::command]
+pub fn load_chat_trace(
+    conversation_id: String,
+    assistant_message_id: String,
+) -> Result<ChatTracePayload, String> {
+    let artifact = load_trace_artifact(&conversation_id, &assistant_message_id)?;
+    decode_trace_payload(&artifact.payload)
+}
+
 fn save_trace_artifact_in(
     directory: &Path,
     artifact: &ChatTraceArtifact,
