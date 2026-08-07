@@ -2331,6 +2331,32 @@ body.resizing-projector * {
 .chat-trace-table-wrap {
   overflow-x: auto;
   padding: 0 16px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.chat-trace-table-wrap:hover {
+  scrollbar-color: rgba(121, 121, 121, 0.7) transparent;
+}
+
+.chat-trace-table-wrap::-webkit-scrollbar {
+  height: 10px;
+}
+
+.chat-trace-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-trace-table-wrap::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.chat-trace-table-wrap:hover::-webkit-scrollbar-thumb {
+  background: rgba(121, 121, 121, 0.45);
+}
+
+.chat-trace-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(121, 121, 121, 0.7);
 }
 
 .chat-trace-table {
@@ -2351,6 +2377,10 @@ body.resizing-projector * {
 .chat-trace-table th:first-child {
   text-align: left;
   color: #c8c8c8;
+}
+
+.chat-trace-table thead th {
+  white-space: nowrap;
 }
 
 .chat-trace-table button {
