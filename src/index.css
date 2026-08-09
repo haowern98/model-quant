@@ -76,6 +76,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-editor-messages,
   .chat-trace-panel,
   .chat-composer textarea,
@@ -97,6 +98,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-editor-messages,
   .chat-trace-panel,
   .chat-composer textarea,
@@ -117,6 +119,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-editor-messages,
   .chat-trace-panel,
   .chat-composer textarea,
@@ -138,6 +141,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-editor-messages,
   .chat-trace-panel,
   .chat-composer textarea,
@@ -158,6 +162,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-editor-messages,
   .chat-trace-panel,
   .chat-composer textarea,
@@ -178,6 +183,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-editor-messages,
   .chat-trace-panel,
   .chat-composer textarea,
@@ -195,6 +201,7 @@ button {
   .hardware-panel,
   .tensor-editor-content,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -212,6 +219,7 @@ button {
   .tensor-editor-content,
   .tensor-values-grid-scroll,
   .tensor-table-scroll,
+  .chat-sidebar-conversations,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -1678,8 +1686,11 @@ body.resizing-projector * {
 }
 
 .chat-sidebar-conversations {
+  flex: 1 1 auto;
+  min-height: 0;
   margin-top: 10px;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .chat-sidebar-conversation {
