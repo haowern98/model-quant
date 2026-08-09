@@ -2071,6 +2071,7 @@ body.resizing-projector * {
 }
 
 .chat-trace-token {
+  display: inline;
   border: 0;
   border-radius: 2px;
   padding: 0;
@@ -2078,6 +2079,8 @@ body.resizing-projector * {
   color: inherit;
   font: inherit;
   white-space: pre-wrap;
+  text-align: inherit;
+  vertical-align: baseline;
   cursor: pointer;
 }
 

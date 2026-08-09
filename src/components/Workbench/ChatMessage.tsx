@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { ChatMessageData } from "./chat/chatTypes";
 
 export type { ChatMessageData } from "./chat/chatTypes";
@@ -29,16 +30,23 @@ export function ChatMessage({
       ) : null}
       <div className="chat-message-content">
         {tracedContent && traceTokenTexts && onSelectTraceToken
-          ? traceTokenTexts.map((token, index) => (
-            <button
-              type="button"
-              key={`${index}-${token}`}
-              className={`chat-trace-token${index === selectedTraceTokenIndex ? " chat-trace-token-selected" : ""}`}
-              onClick={() => onSelectTraceToken(index)}
-            >
-              {token}
-            </button>
-          ))
+          ? traceTokenTexts.flatMap((token, index) => token
+            .split(/(\s+)/)
+            .filter((part) => part.length > 0)
+            .map((part, partIndex) => (
+              /^\s+$/.test(part)
+                ? <Fragment key={`${index}-${partIndex}`}>{part}</Fragment>
+                : (
+                  <button
+                    type="button"
+                    key={`${index}-${partIndex}`}
+                    className={`chat-trace-token${index === selectedTraceTokenIndex ? " chat-trace-token-selected" : ""}`}
+                    onClick={() => onSelectTraceToken(index)}
+                  >
+                    {part}
+                  </button>
+                )
+            )))
           : message.content}
       </div>
       {message.role === "assistant" && message.model ? (
