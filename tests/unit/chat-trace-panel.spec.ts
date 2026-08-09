@@ -47,6 +47,55 @@ test("opens the inspecting-position control as a stable-gutter trace popover", a
   expect(listboxBox?.y).toBeLessThan(triggerBox!.y + triggerBox!.height + 20);
 });
 
+test("keeps layer headers visible while the Logit Lens table scrolls horizontally", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
+    const host = document.createElement("div");
+    host.style.width = "240px";
+    document.body.append(host);
+    const candidates = Array.from({ length: 12 }, (_, index) => ({
+      tokenId: index,
+      tokenText: `candidate-${index}`,
+      logit: index,
+      probability: 1 / 12,
+    }));
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: {
+        supported: true,
+        tokens: [{
+          index: 1,
+          tokenId: 0,
+          tokenText: "token",
+          logit: 0,
+          rank: 1,
+          logitNormalizer: 0,
+          candidates,
+          layers: Array.from({ length: 6 }, (_, layer) => ({ layer, candidates })),
+        }],
+      },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  const tableWrap = page.locator(".chat-trace-table-wrap").last();
+  await tableWrap.evaluate((element) => { element.scrollLeft = 160; });
+  await expect.poll(() => tableWrap.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+
+  const wrapBox = await tableWrap.boundingBox();
+  const layerHeaderBox = await tableWrap.getByRole("columnheader", { name: "Layer" }).boundingBox();
+  const firstLayerBox = await tableWrap.getByRole("button", { name: "L0" }).boundingBox();
+  expect(layerHeaderBox?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
+  expect(firstLayerBox?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
+});
+
 test("arms tracing independently for each Chat tab without opening the trace pane", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 

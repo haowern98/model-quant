@@ -2481,12 +2481,20 @@ body.resizing-projector * {
 }
 
 .chat-trace-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
   text-align: left;
+  background: #1f1f1f;
   color: #c8c8c8;
 }
 
 .chat-trace-table thead th {
   white-space: nowrap;
+}
+
+.chat-trace-table thead th:first-child {
+  z-index: 2;
 }
 
 .chat-trace-table button {
