@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ChatTraceCandidate, ChatTracePayload } from "../../lib/tauri-bridge";
 
 type ChatTracePanelProps = {
@@ -10,6 +10,81 @@ type ChatTracePanelProps = {
 };
 
 const candidateCounts = [12, 24, 64] as const;
+
+type TraceDropdownOption<T extends string | number> = {
+  value: T;
+  label: string;
+  disabled?: boolean;
+};
+
+function TraceDropdown<T extends string | number>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: TraceDropdownOption<T>[];
+  onChange: (value: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
+  const selected = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="chat-trace-control" ref={containerRef}>
+      <span>{label}</span>
+      <button
+        type="button"
+        className="chat-trace-select-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{selected?.label}</span>
+        <span className="codicon codicon-chevron-down" aria-hidden="true" />
+      </button>
+      {open ? (
+        <div id={listboxId} className="chat-trace-select-menu" role="listbox" aria-label={label}>
+          {options.map((option) => (
+            <button
+              type="button"
+              role="option"
+              key={option.value}
+              aria-selected={option.value === value}
+              disabled={option.disabled}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, loading, error }: ChatTracePanelProps) {
   const [candidateCount, setCandidateCount] = useState<(typeof candidateCounts)[number]>(12);
@@ -42,25 +117,30 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
     <aside className="chat-trace-panel" aria-label="Logit Lens">
       <div className="chat-trace-tabs" aria-label="Trace views"><span className="chat-trace-tab-active">Logit Lens</span></div>
       <div className="chat-trace-controls">
-        <label className="chat-trace-control">
-          <span>Inspecting position</span>
-          <select value={selectedTokenIndex} onChange={(event) => onSelectTokenIndex(Number(event.currentTarget.value))}>
-            {trace.tokens.map((token, index) => <option key={`${token.index}-${token.tokenId}`} value={index}>{`Token #${token.index}: ${displayToken(token.tokenText)}`}</option>)}
-          </select>
-        </label>
-        <label className="chat-trace-control">
-          <span>View</span>
-          <select value={view} onChange={(event) => setView(event.currentTarget.value as typeof view)}>
-            <option value="logit">Logit Lens (Logit)</option>
-            <option value="probability" disabled={!hasProbabilities}>Logit Lens (Probability)</option>
-          </select>
-        </label>
-        <label className="chat-trace-control">
-          <span>Candidate tokens</span>
-          <select value={candidateCount} onChange={(event) => setCandidateCount(Number(event.currentTarget.value) as typeof candidateCount)}>
-            {candidateCounts.map((count) => <option key={count} value={count}>{`Top ${count}`}</option>)}
-          </select>
-        </label>
+        <TraceDropdown
+          label="Inspecting position"
+          value={selectedTokenIndex}
+          options={trace.tokens.map((token, index) => ({
+            value: index,
+            label: `Token #${token.index}: ${displayToken(token.tokenText)}`,
+          }))}
+          onChange={onSelectTokenIndex}
+        />
+        <TraceDropdown
+          label="View"
+          value={view}
+          options={[
+            { value: "logit", label: "Logit Lens (Logit)" },
+            { value: "probability", label: "Logit Lens (Probability)", disabled: !hasProbabilities },
+          ]}
+          onChange={setView}
+        />
+        <TraceDropdown
+          label="Candidate tokens"
+          value={candidateCount}
+          options={candidateCounts.map((count) => ({ value: count, label: `Top ${count}` }))}
+          onChange={setCandidateCount}
+        />
       </div>
       <p className="chat-trace-title">Predictions for token #{selectedToken.index}: “{displayToken(selectedToken.tokenText)}”</p>
       <p className="chat-trace-caption">

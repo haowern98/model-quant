@@ -1,5 +1,52 @@
 import { expect, test } from "@playwright/test";
 
+test("opens the inspecting-position control as a stable-gutter trace popover", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const candidates = Array.from({ length: 12 }, (_, index) => ({
+      tokenId: index,
+      tokenText: `candidate-${index}`,
+      logit: index,
+      probability: 1 / 12,
+    }));
+    const tokens = Array.from({ length: 20 }, (_, index) => ({
+      index: index + 1,
+      tokenId: index,
+      tokenText: `token-${index + 1}`,
+      logit: index,
+      rank: index + 1,
+      logitNormalizer: 0,
+      candidates,
+      layers: [{ layer: 0, candidates }],
+    }));
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: { supported: true, tokens },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  const trigger = page.getByRole("button", { name: "Token #1: token-1" });
+  await trigger.click();
+  const listbox = page.getByRole("listbox", { name: "Inspecting position" });
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole("option")).toHaveCount(20);
+  await expect(listbox).toHaveCSS("scrollbar-gutter", "stable");
+  const triggerBox = await trigger.boundingBox();
+  const listboxBox = await listbox.boundingBox();
+  expect(listboxBox?.y).toBeGreaterThan(triggerBox!.y + triggerBox!.height);
+  expect(listboxBox?.y).toBeLessThan(triggerBox!.y + triggerBox!.height + 20);
+});
+
 test("arms tracing independently for each Chat tab without opening the trace pane", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
