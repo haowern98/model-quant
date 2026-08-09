@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { ChatMessageData } from "./chat/chatTypes";
+import { mapTraceText, type TraceTextPiece } from "./chat/traceText";
 
 export type { ChatMessageData } from "./chat/chatTypes";
 
@@ -18,36 +19,52 @@ export function ChatMessage({
   onOpenTrace,
   onSelectTraceToken,
 }: ChatMessageProps) {
-  const tracedContent = traceTokenTexts?.join("") === message.content;
+  const rawTraceText = traceTokenTexts?.join("");
+  const reasoningStart = message.reasoning && rawTraceText
+    ? rawTraceText.indexOf(message.reasoning)
+    : -1;
+  const reasoningTrace = traceTokenTexts && message.reasoning
+    ? mapTraceText(traceTokenTexts, message.reasoning)
+    : undefined;
+  const contentTrace = traceTokenTexts
+    ? mapTraceText(
+      traceTokenTexts,
+      message.content,
+      reasoningStart >= 0 ? reasoningStart + message.reasoning!.length : 0,
+    )
+    : undefined;
+
+  const traceText = (pieces: TraceTextPiece[] | undefined, fallback: string) => {
+    if (!pieces || !onSelectTraceToken) return fallback;
+    return pieces.flatMap((piece) => piece.text
+      .split(/(\s+)/)
+      .filter((part) => part.length > 0)
+      .map((part, partIndex) => (
+        /^\s+$/.test(part)
+          ? <Fragment key={`${piece.tokenIndex}-${partIndex}`}>{part}</Fragment>
+          : (
+            <button
+              type="button"
+              key={`${piece.tokenIndex}-${partIndex}`}
+              className={`chat-trace-token${piece.tokenIndex === selectedTraceTokenIndex ? " chat-trace-token-selected" : ""}`}
+              onClick={() => onSelectTraceToken(piece.tokenIndex)}
+            >
+              {part}
+            </button>
+          )
+      )));
+  };
 
   return (
     <article className={`chat-message chat-message-${message.role}`}>
       {message.reasoning ? (
         <details className="chat-message-reasoning">
           <summary>Thinking</summary>
-          <div>{message.reasoning}</div>
+          <div>{traceText(reasoningTrace, message.reasoning)}</div>
         </details>
       ) : null}
       <div className="chat-message-content">
-        {tracedContent && traceTokenTexts && onSelectTraceToken
-          ? traceTokenTexts.flatMap((token, index) => token
-            .split(/(\s+)/)
-            .filter((part) => part.length > 0)
-            .map((part, partIndex) => (
-              /^\s+$/.test(part)
-                ? <Fragment key={`${index}-${partIndex}`}>{part}</Fragment>
-                : (
-                  <button
-                    type="button"
-                    key={`${index}-${partIndex}`}
-                    className={`chat-trace-token${index === selectedTraceTokenIndex ? " chat-trace-token-selected" : ""}`}
-                    onClick={() => onSelectTraceToken(index)}
-                  >
-                    {part}
-                  </button>
-                )
-            )))
-          : message.content}
+        {traceText(contentTrace, message.content)}
       </div>
       {message.role === "assistant" && message.model ? (
         <div className="chat-message-metadata">
