@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { ChatTraceCandidate, ChatTracePayload } from "../../lib/tauri-bridge";
 
 type ChatTracePanelProps = {
@@ -113,6 +113,12 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
     return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">This message has no supported trace.</aside>;
   }
 
+  const traceGridStyle: CSSProperties = {
+    gridTemplateColumns: `58px repeat(${candidateCount}, minmax(96px, 1fr))`,
+    gridTemplateRows: `30px repeat(${layers.length}, 56px)`,
+    minWidth: `${58 + candidateCount * 96}px`,
+  };
+
   return (
     <aside className="chat-trace-panel" aria-label="Logit Lens">
       <div className="chat-trace-tabs" aria-label="Trace views"><span className="chat-trace-tab-active">Logit Lens</span></div>
@@ -148,29 +154,31 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
           ? "The outlined token is the actual generated token when it appears in this layer’s displayed top candidates."
           : "This older trace has logits only. Regenerate this reply with Trace On to view exact probabilities."}
       </p>
-      <div className="chat-trace-table-wrap">
-        <table className="chat-trace-table">
-          <thead><tr><th>Layer</th>{Array.from({ length: candidateCount }, (_, index) => <th key={index}>Rank {index + 1}</th>)}</tr></thead>
-          <tbody>
-            {layers.map((layer) => (
-              <tr key={layer.layer} className={layer.layer === selectedLayer ? "chat-trace-selected-row" : ""}>
-                <th><button type="button" onClick={() => setSelectedLayer(layer.layer)}>L{layer.layer}</button></th>
-                {layer.candidates.slice(0, candidateCount).map((candidate) => (
-                  <td key={`${layer.layer}-${candidate.tokenId}`}>
-                    <button
-                      type="button"
-                      className={candidate.tokenId === selectedToken.tokenId ? "chat-trace-generated-token" : ""}
-                      onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); }}
-                    >
-                      <span className="chat-trace-cell-token">{displayToken(candidate.tokenText)}</span>
-                      <span className="chat-trace-cell-value">{metricValue(candidate, view)}</span>
-                    </button>
-                  </td>
-                ))}
-              </tr>
+      <div className="chat-trace-grid-wrap">
+        <div className="chat-trace-grid" role="grid" aria-label="Logit Lens predictions" style={traceGridStyle}>
+          <div className="chat-trace-grid-row chat-trace-grid-header-row" role="row">
+            <div className="chat-trace-grid-layer-cell chat-trace-grid-header-cell" role="columnheader">Layer</div>
+            {Array.from({ length: candidateCount }, (_, index) => (
+              <div className="chat-trace-grid-rank-cell chat-trace-grid-header-cell" role="columnheader" key={index}>Rank {index + 1}</div>
             ))}
-          </tbody>
-        </table>
+          </div>
+          {layers.map((layer) => (
+            <div className={`chat-trace-grid-row${layer.layer === selectedLayer ? " chat-trace-selected-row" : ""}`} role="row" key={layer.layer}>
+              <button type="button" className="chat-trace-grid-layer-cell" onClick={() => setSelectedLayer(layer.layer)}>L{layer.layer}</button>
+              {layer.candidates.slice(0, candidateCount).map((candidate) => (
+                <button
+                  type="button"
+                  className={`chat-trace-grid-rank-cell${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}`}
+                  key={`${layer.layer}-${candidate.tokenId}`}
+                  onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); }}
+                >
+                  <span className="chat-trace-cell-token">{displayToken(candidate.tokenText)}</span>
+                  <span className="chat-trace-cell-value">{metricValue(candidate, view)}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
       <div className="chat-trace-selection">Selected: layer {selectedLayer ?? "—"} × {selectedCandidate ? `‘${displayToken(selectedCandidate.tokenText)}’` : "no candidate"}</div>
       <div className="chat-trace-details">

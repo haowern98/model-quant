@@ -47,7 +47,7 @@ test("opens the inspecting-position control as a stable-gutter trace popover", a
   expect(listboxBox?.y).toBeLessThan(triggerBox!.y + triggerBox!.height + 20);
 });
 
-test("keeps layer headers visible while the Logit Lens table scrolls horizontally", async ({ page }) => {
+test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", async ({ page }) => {
   await page.goto("/");
 
   await page.evaluate(async () => {
@@ -85,15 +85,75 @@ test("keeps layer headers visible while the Logit Lens table scrolls horizontall
     }));
   });
 
-  const tableWrap = page.locator(".chat-trace-table-wrap").last();
-  await tableWrap.evaluate((element) => { element.scrollLeft = 160; });
-  await expect.poll(() => tableWrap.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  const gridWrap = page.locator(".chat-trace-grid-wrap").last();
+  const grid = page.locator(".chat-trace-grid").last();
+  await expect(grid).toBeVisible();
 
-  const wrapBox = await tableWrap.boundingBox();
-  const layerHeaderBox = await tableWrap.getByRole("columnheader", { name: "Layer" }).boundingBox();
-  const firstLayerBox = await tableWrap.getByRole("button", { name: "L0" }).boundingBox();
+  const title = page.locator(".chat-trace-title");
+  const layerHeader = grid.getByRole("columnheader", { name: "Layer" });
+  const firstLayer = grid.getByRole("button", { name: "L0" });
+  const firstRank = grid.getByRole("button", { name: /candidate-0/ }).first();
+  const before = await firstLayer.boundingBox();
+  const firstRankBox = await firstRank.boundingBox();
+  const textLeft = async (locator: typeof title) => locator.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return range.getBoundingClientRect().x;
+  });
+  expect(await textLeft(layerHeader)).toBeCloseTo(await textLeft(title), 1);
+  expect(before?.y).toBeCloseTo(firstRankBox!.y, 1);
+
+  await gridWrap.evaluate((element) => { element.scrollLeft = 160; });
+  await expect.poll(() => gridWrap.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+
+  const wrapBox = await gridWrap.boundingBox();
+  const after = await firstLayer.boundingBox();
+  const layerHeaderBox = await layerHeader.boundingBox();
+  expect(after?.x).toBeCloseTo(before!.x, 1);
   expect(layerHeaderBox?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
-  expect(firstLayerBox?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
+  expect(after?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
+});
+
+test("uses the generated-token outline without outlining the entire selected row", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const candidates = [
+      { tokenId: 0, tokenText: "generated", logit: 1, probability: 0.75 },
+      { tokenId: 1, tokenText: "other", logit: 0, probability: 0.25 },
+    ];
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: {
+        supported: true,
+        tokens: [{
+          index: 1,
+          tokenId: 0,
+          tokenText: "generated",
+          logit: 1,
+          rank: 1,
+          logitNormalizer: 0,
+          candidates,
+          layers: [{ layer: 0, candidates }],
+        }],
+      },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  const selectedRow = page.locator(".chat-trace-selected-row");
+  const otherCandidate = selectedRow.getByRole("button", { name: /other/ });
+  const generatedCandidate = selectedRow.getByRole("button", { name: /generated/ });
+  await expect(otherCandidate).toHaveCSS("box-shadow", "none");
+  await expect(generatedCandidate).toHaveCSS("outline-width", "2px");
 });
 
 test("arms tracing independently for each Chat tab without opening the trace pane", async ({ page }) => {
