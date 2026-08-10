@@ -114,9 +114,9 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
   }
 
   const traceGridStyle: CSSProperties = {
-    gridTemplateColumns: `58px repeat(${candidateCount}, minmax(96px, 1fr))`,
-    gridTemplateRows: `30px repeat(${layers.length}, 56px)`,
-    minWidth: `${58 + candidateCount * 96}px`,
+    gridTemplateColumns: `58px repeat(${candidateCount}, minmax(80px, 1fr))`,
+    gridTemplateRows: `28px repeat(${layers.length}, 44px)`,
+    minWidth: `${58 + candidateCount * 80}px`,
   };
 
   return (

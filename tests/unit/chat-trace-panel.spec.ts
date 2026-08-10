@@ -102,6 +102,8 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
   });
   expect(await textLeft(layerHeader)).toBeCloseTo(await textLeft(title), 1);
   expect(before?.y).toBeCloseTo(firstRankBox!.y, 1);
+  expect(firstRankBox?.width).toBeLessThanOrEqual(80);
+  expect(firstRankBox?.height).toBeLessThanOrEqual(44);
 
   await gridWrap.evaluate((element) => { element.scrollLeft = 160; });
   await expect.poll(() => gridWrap.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
@@ -153,7 +155,12 @@ test("uses the generated-token outline without outlining the entire selected row
   const otherCandidate = selectedRow.getByRole("button", { name: /other/ });
   const generatedCandidate = selectedRow.getByRole("button", { name: /generated/ });
   await expect(otherCandidate).toHaveCSS("box-shadow", "none");
-  await expect(generatedCandidate).toHaveCSS("outline-width", "2px");
+  const generatedHighlight = await generatedCandidate.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { boxShadow: style.boxShadow, outlineStyle: style.outlineStyle };
+  });
+  expect(generatedHighlight.outlineStyle).toBe("none");
+  expect(generatedHighlight.boxShadow).toContain("rgb(14, 99, 156)");
 });
 
 test("arms tracing independently for each Chat tab without opening the trace pane", async ({ page }) => {
