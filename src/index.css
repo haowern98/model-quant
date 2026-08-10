@@ -639,7 +639,8 @@ button {
 
 body.resizing-explorer .explorer-resizer::after,
 body.resizing-bottom-panel .bottom-panel-resizer::after,
-body.resizing-projector .projector-resizer::after {
+body.resizing-projector .projector-resizer::after,
+body.resizing-trace .chat-trace-resizer::after {
   background: var(--vscode-blue);
 }
 
@@ -759,6 +760,12 @@ body.resizing-projector .projector-resizer::after {
 
 body.resizing-explorer,
 body.resizing-explorer * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-trace,
+body.resizing-trace * {
   cursor: col-resize !important;
   user-select: none !important;
 }
@@ -1948,11 +1955,40 @@ body.resizing-projector * {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  position: relative;
   background: var(--vscode-editor);
 }
 
 .chat-editor-trace-open {
   grid-template-columns: minmax(0, 1fr) 520px;
+}
+
+.chat-editor-trace-fullscreen {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-editor-trace-fullscreen .chat-editor-main {
+  display: none;
+}
+
+.chat-trace-resizer {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  transform: translateX(2px);
+  cursor: col-resize;
+}
+
+.chat-trace-resizer::after {
+  inset: 0 1px;
+}
+
+.chat-editor-trace-fullscreen .chat-trace-resizer {
+  left: 0;
+  right: auto !important;
+  transform: none;
 }
 
 .chat-editor-main {

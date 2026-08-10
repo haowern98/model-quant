@@ -294,6 +294,14 @@ export function EditorPane({
       .finally(() => setChatTraceLoading((current) => ({ ...current, [key]: false })));
   };
 
+  const closeChatTrace = () => {
+    if (!activeChatTab) return;
+    setChatTraceViews((current) => {
+      const { [activeChatTab.chatId]: _closedTrace, ...remaining } = current;
+      return remaining;
+    });
+  };
+
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
     return Math.max(BOTTOM_PANEL_MIN_HEIGHT, Math.floor(editorHeight * 0.7));
@@ -484,6 +492,7 @@ export function EditorPane({
             setChatTraceArmed((current) => ({ ...current, [activeChatTab.chatId]: armed }));
           }}
           onOpenTrace={openChatTrace}
+          onCloseTrace={closeChatTrace}
           onTraceTokenChange={(tokenIndex) => {
             if (!activeChatTab || !activeTraceView) return;
             setChatTraceViews((current) => ({

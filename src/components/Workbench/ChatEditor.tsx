@@ -1,6 +1,10 @@
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { type ChatMessageData, ChatMessage } from "./ChatMessage";
 import { cancelChatGeneration, type ChatTracePayload } from "../../lib/tauri-bridge";
 import { ChatTracePanel } from "./ChatTracePanel";
+
+const TRACE_PANEL_MIN_WIDTH = 520;
+const CHAT_MAIN_MIN_WIDTH = 320;
 
 interface ChatEditorProps {
   messages: ChatMessageData[];
@@ -19,13 +23,92 @@ interface ChatEditorProps {
   onDraftChange: (draft: string) => void;
   onTraceArmedChange: (armed: boolean) => void;
   onOpenTrace: (messageId: string) => void;
+  onCloseTrace: () => void;
   onTraceTokenChange: (index: number) => void;
   onSend: (content: string) => void;
 }
 
-export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, traceMessageId, tracePayload, traceTokenIndex, traceLoading, traceError, onDraftChange, onTraceArmedChange, onOpenTrace, onTraceTokenChange, onSend }: ChatEditorProps) {
+export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, traceMessageId, tracePayload, traceTokenIndex, traceLoading, traceError, onDraftChange, onTraceArmedChange, onOpenTrace, onCloseTrace, onTraceTokenChange, onSend }: ChatEditorProps) {
+  const editorRef = useRef<HTMLElement>(null);
+  const [tracePanelWidth, setTracePanelWidth] = useState(TRACE_PANEL_MIN_WIDTH);
+  const [tracePanelFullscreen, setTracePanelFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (tracePanelOpen) return;
+    setTracePanelWidth(TRACE_PANEL_MIN_WIDTH);
+    setTracePanelFullscreen(false);
+  }, [tracePanelOpen]);
+
+  const tracePanelMaxSplitWidth = () => {
+    const editorWidth = editorRef.current?.getBoundingClientRect().width ?? 1280;
+    return Math.max(TRACE_PANEL_MIN_WIDTH, Math.floor(editorWidth - CHAT_MAIN_MIN_WIDTH));
+  };
+
+  const closeTracePanel = () => {
+    setTracePanelFullscreen(false);
+    setTracePanelWidth(TRACE_PANEL_MIN_WIDTH);
+    onCloseTrace();
+  };
+
+  const setTracePanelSplitWidth = (requestedWidth: number) => {
+    if (requestedWidth < TRACE_PANEL_MIN_WIDTH) {
+      closeTracePanel();
+      return;
+    }
+    if (requestedWidth >= tracePanelMaxSplitWidth()) {
+      setTracePanelFullscreen(true);
+      return;
+    }
+    setTracePanelFullscreen(false);
+    setTracePanelWidth(requestedWidth);
+  };
+
+  const startTraceResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = tracePanelFullscreen
+      ? (editorRef.current?.getBoundingClientRect().width ?? tracePanelMaxSplitWidth())
+      : tracePanelWidth;
+    let closed = false;
+    document.body.classList.add("resizing-trace");
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (closed) return;
+      const requestedWidth = startWidth + startX - moveEvent.clientX;
+      if (requestedWidth < TRACE_PANEL_MIN_WIDTH) closed = true;
+      setTracePanelSplitWidth(requestedWidth);
+    };
+    const stopResize = () => {
+      document.body.classList.remove("resizing-trace");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stopResize);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stopResize);
+  };
+
+  const handleTraceResizeKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    if (tracePanelFullscreen && event.key === "ArrowRight") {
+      setTracePanelFullscreen(false);
+      setTracePanelWidth(Math.max(TRACE_PANEL_MIN_WIDTH, tracePanelMaxSplitWidth() - 10));
+      return;
+    }
+    const currentWidth = tracePanelFullscreen
+      ? (editorRef.current?.getBoundingClientRect().width ?? tracePanelMaxSplitWidth())
+      : tracePanelWidth;
+    setTracePanelSplitWidth(currentWidth + (event.key === "ArrowLeft" ? 10 : -10));
+  };
+
   return (
-    <section className={`chat-editor${tracePanelOpen ? " chat-editor-trace-open" : ""}`} aria-label="New chat">
+    <section
+      ref={editorRef}
+      className={`chat-editor${tracePanelOpen ? " chat-editor-trace-open" : ""}${tracePanelFullscreen ? " chat-editor-trace-fullscreen" : ""}`}
+      aria-label="New chat"
+      style={tracePanelOpen && !tracePanelFullscreen ? { gridTemplateColumns: `minmax(0, 1fr) ${tracePanelWidth}px` } : undefined}
+    >
       <div className="chat-editor-main">
         <div className="chat-editor-messages">
           {messages.map((message) => <ChatMessage
@@ -85,7 +168,24 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
           </div>
         </form>
       </div>
-      {tracePanelOpen ? <ChatTracePanel trace={tracePayload} selectedTokenIndex={traceTokenIndex} onSelectTokenIndex={onTraceTokenChange} loading={traceLoading} error={traceError} /> : null}
+      {tracePanelOpen ? (
+        <>
+          <div
+            className="resize-handle chat-trace-resizer"
+            role="separator"
+            aria-label="Resize Logit Lens"
+            aria-orientation="vertical"
+            aria-valuemin={TRACE_PANEL_MIN_WIDTH}
+            aria-valuemax={tracePanelMaxSplitWidth()}
+            aria-valuenow={Math.round(tracePanelFullscreen ? (editorRef.current?.getBoundingClientRect().width ?? tracePanelMaxSplitWidth()) : tracePanelWidth)}
+            tabIndex={0}
+            style={tracePanelFullscreen ? undefined : { right: tracePanelWidth }}
+            onPointerDown={startTraceResize}
+            onKeyDown={handleTraceResizeKey}
+          />
+          <ChatTracePanel trace={tracePayload} selectedTokenIndex={traceTokenIndex} onSelectTokenIndex={onTraceTokenChange} loading={traceLoading} error={traceError} />
+        </>
+      ) : null}
     </section>
   );
 }
