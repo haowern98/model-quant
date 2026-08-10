@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { ChatTraceCandidate, ChatTracePayload } from "../../lib/tauri-bridge";
 
 type ChatTracePanelProps = {
@@ -91,6 +91,9 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
   const [view, setView] = useState<"logit" | "probability">("logit");
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const [gridScrollWidth, setGridScrollWidth] = useState(0);
+  const gridWrapRef = useRef<HTMLDivElement>(null);
+  const gridScrollbarRef = useRef<HTMLDivElement>(null);
   const selectedToken = trace?.tokens[selectedTokenIndex] ?? null;
   const layers = selectedToken?.layers ?? [];
   const selectedLayerData = layers.find((layer) => layer.layer === selectedLayer) ?? layers.at(-1) ?? null;
@@ -106,6 +109,29 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
     setSelectedCandidateId(finalLayer?.candidates[0]?.tokenId ?? null);
     if (!hasProbabilities) setView("logit");
   }, [selectedTokenIndex, trace]);
+
+  useLayoutEffect(() => {
+    const gridWrap = gridWrapRef.current;
+    if (!gridWrap) return undefined;
+
+    const updateScrollWidth = () => setGridScrollWidth(gridWrap.scrollWidth);
+    updateScrollWidth();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateScrollWidth);
+    observer?.observe(gridWrap);
+    window.addEventListener("resize", updateScrollWidth);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateScrollWidth);
+    };
+  }, [candidateCount, selectedTokenIndex, trace]);
+
+  const syncGridScroll = (source: "grid" | "scrollbar") => {
+    const gridWrap = gridWrapRef.current;
+    const scrollbar = gridScrollbarRef.current;
+    if (!gridWrap || !scrollbar) return;
+    if (source === "grid") scrollbar.scrollLeft = gridWrap.scrollLeft;
+    else gridWrap.scrollLeft = scrollbar.scrollLeft;
+  };
 
   if (loading) return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">Loading trace…</aside>;
   if (error) return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">{error}</aside>;
@@ -154,8 +180,12 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
           ? "The outlined token is the actual generated token when it appears in this layer’s displayed top candidates."
           : "This older trace has logits only. Regenerate this reply with Trace On to view exact probabilities."}
       </p>
-      <div className="chat-trace-grid-wrap">
-        <div className="chat-trace-grid" role="grid" aria-label="Logit Lens predictions" style={traceGridStyle}>
+      <div className="chat-trace-grid-region">
+        <div className="chat-trace-grid-scrollbar" ref={gridScrollbarRef} aria-label="Scroll Logit Lens ranks horizontally" onScroll={() => syncGridScroll("scrollbar")}>
+          <div className="chat-trace-grid-scrollbar-spacer" style={{ width: gridScrollWidth }} />
+        </div>
+        <div className="chat-trace-grid-wrap" ref={gridWrapRef} onScroll={() => syncGridScroll("grid")}>
+          <div className="chat-trace-grid" role="grid" aria-label="Logit Lens predictions" style={traceGridStyle}>
           <div className="chat-trace-grid-row chat-trace-grid-header-row" role="row">
             <div className="chat-trace-grid-layer-cell chat-trace-grid-header-cell" role="columnheader">Layer</div>
             {Array.from({ length: candidateCount }, (_, index) => (
@@ -178,6 +208,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
               ))}
             </div>
           ))}
+          </div>
         </div>
       </div>
       <div className="chat-trace-selection">Selected: layer {selectedLayer ?? "—"} × {selectedCandidate ? `‘${displayToken(selectedCandidate.tokenText)}’` : "no candidate"}</div>

@@ -2434,35 +2434,54 @@ body.resizing-projector * {
   background: linear-gradient(90deg, #363bc9, #402b4b 50%, #e33e35);
 }
 
-.chat-trace-grid-wrap {
-  overflow-x: auto;
+.chat-trace-grid-region {
   margin: 0 10px;
+}
+
+.chat-trace-grid-scrollbar {
+  height: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
-.chat-trace-grid-wrap:hover {
+.chat-trace-grid-scrollbar-spacer {
+  height: 1px;
+}
+
+.chat-trace-grid-region:hover .chat-trace-grid-scrollbar {
   scrollbar-color: rgba(121, 121, 121, 0.7) transparent;
 }
 
-.chat-trace-grid-wrap::-webkit-scrollbar {
+.chat-trace-grid-scrollbar::-webkit-scrollbar {
   height: 10px;
 }
 
-.chat-trace-grid-wrap::-webkit-scrollbar-track {
+.chat-trace-grid-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.chat-trace-grid-wrap::-webkit-scrollbar-thumb {
+.chat-trace-grid-scrollbar::-webkit-scrollbar-thumb {
   background: transparent;
 }
 
-.chat-trace-grid-wrap:hover::-webkit-scrollbar-thumb {
+.chat-trace-grid-region:hover .chat-trace-grid-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(121, 121, 121, 0.45);
 }
 
-.chat-trace-grid-wrap::-webkit-scrollbar-thumb:hover {
+.chat-trace-grid-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(121, 121, 121, 0.7);
+}
+
+.chat-trace-grid-wrap {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-trace-grid-wrap::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-trace-grid {

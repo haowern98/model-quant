@@ -87,7 +87,10 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
 
   const gridWrap = page.locator(".chat-trace-grid-wrap").last();
   const grid = page.locator(".chat-trace-grid").last();
+  const tableScrollbar = page.locator(".chat-trace-grid-scrollbar").last();
   await expect(grid).toBeVisible();
+  await expect(tableScrollbar).toBeVisible();
+  await expect(tableScrollbar).toHaveCSS("scrollbar-gutter", "stable");
 
   const title = page.locator(".chat-trace-title");
   const layerHeader = grid.getByRole("columnheader", { name: "Layer" });
@@ -107,6 +110,13 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
 
   await gridWrap.evaluate((element) => { element.scrollLeft = 160; });
   await expect.poll(() => gridWrap.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await expect.poll(() => tableScrollbar.evaluate((element) => element.scrollLeft)).toBe(160);
+
+  await tableScrollbar.evaluate((element) => {
+    element.scrollLeft = 80;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect.poll(() => gridWrap.evaluate((element) => element.scrollLeft)).toBe(80);
 
   const wrapBox = await gridWrap.boundingBox();
   const after = await firstLayer.boundingBox();
