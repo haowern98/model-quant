@@ -310,6 +310,7 @@ test("styles the Logit Lens header like a Bottom Panel tab", async ({ page }) =>
 
   const tab = page.locator(".chat-trace-tab-active");
   await expect(tab).toHaveText("LOGIT LENS");
+  await expect(page.locator(".chat-trace-tabs")).toHaveCSS("height", "32px");
   await expect(tab).toHaveCSS("font-size", "11px");
   await expect(tab).toHaveCSS("border-bottom-width", "1px");
 });
