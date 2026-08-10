@@ -1985,12 +1985,6 @@ body.resizing-projector * {
   inset: 0 1px;
 }
 
-.chat-editor-trace-fullscreen .chat-trace-resizer {
-  left: 0;
-  right: auto !important;
-  transform: none;
-}
-
 .chat-editor-main {
   min-width: 0;
   min-height: 0;
@@ -2416,6 +2410,39 @@ body.resizing-projector * {
 .chat-trace-tabs {
   height: 32px;
   border-bottom: 0;
+}
+
+.chat-trace-tab-actions {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: -14px;
+}
+
+.chat-trace-panel-action {
+  width: 18px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  padding: 0;
+  background: transparent;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+.chat-trace-panel-action:hover {
+  background: #333333;
+}
+
+.chat-trace-panel-action .codicon {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  line-height: 16px;
 }
 
 .chat-trace-tabs span,

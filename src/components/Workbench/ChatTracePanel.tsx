@@ -7,6 +7,9 @@ type ChatTracePanelProps = {
   onSelectTokenIndex: (index: number) => void;
   loading: boolean;
   error: string | null;
+  maximized?: boolean;
+  onToggleMaximized?: () => void;
+  onClose?: () => void;
 };
 
 const candidateCounts = [12, 24, 64] as const;
@@ -86,7 +89,7 @@ function TraceDropdown<T extends string | number>({
   );
 }
 
-export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, loading, error }: ChatTracePanelProps) {
+export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, loading, error, maximized = false, onToggleMaximized, onClose }: ChatTracePanelProps) {
   const [candidateCount, setCandidateCount] = useState<(typeof candidateCounts)[number]>(12);
   const [view, setView] = useState<"logit" | "probability">("logit");
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
@@ -147,7 +150,31 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
 
   return (
     <aside className="chat-trace-panel" aria-label="Logit Lens">
-      <div className="chat-trace-tabs" aria-label="Trace views"><span className="chat-trace-tab-active">LOGIT LENS</span></div>
+      <div className="chat-trace-tabs" aria-label="Trace views">
+        <span className="chat-trace-tab-active">LOGIT LENS</span>
+        {onToggleMaximized && onClose ? (
+          <div className="chat-trace-tab-actions">
+            <button
+              type="button"
+              className="chat-trace-panel-action"
+              aria-label={maximized ? "Restore trace panel" : "Maximize trace panel"}
+              title={maximized ? "Restore trace panel" : "Maximize trace panel"}
+              onClick={onToggleMaximized}
+            >
+              <span className={`codicon codicon-${maximized ? "screen-normal" : "screen-full"}`} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="chat-trace-panel-action"
+              aria-label="Close trace panel"
+              title="Close trace panel"
+              onClick={onClose}
+            >
+              <span className="codicon codicon-close" aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
+      </div>
       <div className="chat-trace-controls">
         <TraceDropdown
           label="Inspecting position"

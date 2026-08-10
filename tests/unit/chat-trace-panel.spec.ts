@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function mountResizableTraceChat(page: Page) {
+async function mountResizableTraceChat(page: Page, withSupportedTrace = false) {
   await page.goto("/");
 
-  await page.evaluate(async () => {
+  await page.evaluate(async (supportedTrace) => {
     const { default: React } = await import("/node_modules/.vite/deps/react.js");
     const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
     const { ChatEditor } = await import("/src/components/Workbench/ChatEditor.tsx");
@@ -36,7 +36,19 @@ async function mountResizableTraceChat(page: Page) {
         traceArmed: false,
         tracePanelOpen: traceOpen,
         traceMessageId: "assistant-1",
-        tracePayload: { supported: false, tokens: [] },
+        tracePayload: supportedTrace ? {
+          supported: true,
+          tokens: [{
+            index: 1,
+            tokenId: 0,
+            tokenText: "token",
+            logit: 0,
+            rank: 1,
+            logitNormalizer: 0,
+            candidates: [{ tokenId: 0, tokenText: "token", logit: 0, probability: 1 }],
+            layers: [{ layer: 0, candidates: [{ tokenId: 0, tokenText: "token", logit: 0, probability: 1 }] }],
+          }],
+        } : { supported: false, tokens: [] },
         traceTokenIndex: 0,
         traceLoading: false,
         traceError: null,
@@ -50,7 +62,7 @@ async function mountResizableTraceChat(page: Page) {
     }
 
     ReactDomClient.createRoot(host).render(React.createElement(Harness));
-  });
+  }, withSupportedTrace);
 }
 
 test("opens the inspecting-position control as a stable-gutter trace popover", async ({ page }) => {
@@ -272,6 +284,41 @@ test("expands Logit Lens to the editor width beyond the split limit", async ({ p
 
   await expect(page.locator(".chat-editor")).toHaveClass(/chat-editor-trace-fullscreen/);
   await expect(page.locator(".chat-editor-main")).toBeHidden();
+});
+
+test("maximizes, restores, and closes Logit Lens from its header actions", async ({ page }) => {
+  await mountResizableTraceChat(page, true);
+
+  const tracePanel = page.getByRole("complementary", { name: "Logit Lens" });
+  const resizer = page.getByRole("separator", { name: "Resize Logit Lens" });
+  const maximize = page.getByRole("button", { name: "Maximize trace panel" });
+  const close = page.getByRole("button", { name: "Close trace panel" });
+  await resizer.scrollIntoViewIfNeeded();
+  const resizerBox = await resizer.boundingBox();
+  await page.mouse.move(resizerBox!.x + 2, resizerBox!.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(resizerBox!.x - 80, resizerBox!.y + 120);
+  await page.mouse.up();
+  const restoredWidth = (await tracePanel.boundingBox())!.width;
+
+  await expect(maximize).toHaveCSS("width", "18px");
+  await expect(maximize).toHaveCSS("height", "24px");
+  await expect(close).toHaveCSS("width", "18px");
+  await expect(close).toHaveCSS("height", "24px");
+  await maximize.click();
+  const restore = page.getByRole("button", { name: "Restore trace panel" });
+  await expect(restore).toBeVisible();
+  await expect(page.locator(".chat-editor-main")).toBeHidden();
+  await expect(resizer).toBeHidden();
+
+  await restore.click();
+  await expect(page.locator(".chat-editor-main")).toBeVisible();
+  expect((await tracePanel.boundingBox())!.width).toBeCloseTo(restoredWidth, 1);
+
+  await close.click();
+  await expect(tracePanel).toBeHidden();
+  await page.getByRole("button", { name: "Trace saved" }).click();
+  await expect(tracePanel).toBeVisible();
 });
 
 test("styles the Logit Lens header like a Bottom Panel tab", async ({ page }) => {

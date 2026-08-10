@@ -50,6 +50,10 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
     onCloseTrace();
   };
 
+  const toggleTracePanelFullscreen = () => {
+    setTracePanelFullscreen((fullscreen) => !fullscreen);
+  };
+
   const setTracePanelSplitWidth = (requestedWidth: number) => {
     if (requestedWidth < TRACE_PANEL_MIN_WIDTH) {
       closeTracePanel();
@@ -93,7 +97,6 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
     event.preventDefault();
     if (tracePanelFullscreen && event.key === "ArrowRight") {
       setTracePanelFullscreen(false);
-      setTracePanelWidth(Math.max(TRACE_PANEL_MIN_WIDTH, tracePanelMaxSplitWidth() - 10));
       return;
     }
     const currentWidth = tracePanelFullscreen
@@ -170,20 +173,31 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
       </div>
       {tracePanelOpen ? (
         <>
-          <div
-            className="resize-handle chat-trace-resizer"
-            role="separator"
-            aria-label="Resize Logit Lens"
-            aria-orientation="vertical"
-            aria-valuemin={TRACE_PANEL_MIN_WIDTH}
-            aria-valuemax={tracePanelMaxSplitWidth()}
-            aria-valuenow={Math.round(tracePanelFullscreen ? (editorRef.current?.getBoundingClientRect().width ?? tracePanelMaxSplitWidth()) : tracePanelWidth)}
-            tabIndex={0}
-            style={tracePanelFullscreen ? undefined : { right: tracePanelWidth }}
-            onPointerDown={startTraceResize}
-            onKeyDown={handleTraceResizeKey}
+          {!tracePanelFullscreen ? (
+            <div
+              className="resize-handle chat-trace-resizer"
+              role="separator"
+              aria-label="Resize Logit Lens"
+              aria-orientation="vertical"
+              aria-valuemin={TRACE_PANEL_MIN_WIDTH}
+              aria-valuemax={tracePanelMaxSplitWidth()}
+              aria-valuenow={Math.round(tracePanelWidth)}
+              tabIndex={0}
+              style={{ right: tracePanelWidth }}
+              onPointerDown={startTraceResize}
+              onKeyDown={handleTraceResizeKey}
+            />
+          ) : null}
+          <ChatTracePanel
+            trace={tracePayload}
+            selectedTokenIndex={traceTokenIndex}
+            onSelectTokenIndex={onTraceTokenChange}
+            loading={traceLoading}
+            error={traceError}
+            maximized={tracePanelFullscreen}
+            onToggleMaximized={toggleTracePanelFullscreen}
+            onClose={closeTracePanel}
           />
-          <ChatTracePanel trace={tracePayload} selectedTokenIndex={traceTokenIndex} onSelectTokenIndex={onTraceTokenChange} loading={traceLoading} error={traceError} />
         </>
       ) : null}
     </section>
