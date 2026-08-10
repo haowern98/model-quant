@@ -274,6 +274,46 @@ test("expands Logit Lens to the editor width beyond the split limit", async ({ p
   await expect(page.locator(".chat-editor-main")).toBeHidden();
 });
 
+test("styles the Logit Lens header like a Bottom Panel tab", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const fresh = `trace-header-test=${Date.now()}`;
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import(`/src/components/Workbench/ChatTracePanel.tsx?${fresh}`);
+    await import(`/src/index.css?${fresh}`);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const candidates = [{ tokenId: 0, tokenText: "token", logit: 0, probability: 1 }];
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: {
+        supported: true,
+        tokens: [{
+          index: 1,
+          tokenId: 0,
+          tokenText: "token",
+          logit: 0,
+          rank: 1,
+          logitNormalizer: 0,
+          candidates,
+          layers: [{ layer: 0, candidates }],
+        }],
+      },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  const tab = page.locator(".chat-trace-tab-active");
+  await expect(tab).toHaveText("LOGIT LENS");
+  await expect(tab).toHaveCSS("font-size", "11px");
+  await expect(tab).toHaveCSS("border-bottom-width", "1px");
+});
+
 test("arms tracing independently for each Chat tab without opening the trace pane", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 

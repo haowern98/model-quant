@@ -147,7 +147,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
 
   return (
     <aside className="chat-trace-panel" aria-label="Logit Lens">
-      <div className="chat-trace-tabs" aria-label="Trace views"><span className="chat-trace-tab-active">Logit Lens</span></div>
+      <div className="chat-trace-tabs" aria-label="Trace views"><span className="chat-trace-tab-active">LOGIT LENS</span></div>
       <div className="chat-trace-controls">
         <TraceDropdown
           label="Inspecting position"

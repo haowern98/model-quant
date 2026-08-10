@@ -2428,7 +2428,9 @@ body.resizing-projector * {
   display: inline-flex;
   align-items: center;
   color: #ffffff;
-  border-bottom: 2px solid #007acc;
+  font-family: inherit;
+  font-size: 11px;
+  border-bottom: 1px solid var(--vscode-blue);
 }
 
 .chat-trace-metrics {
