@@ -181,9 +181,6 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
           : "This older trace has logits only. Regenerate this reply with Trace On to view exact probabilities."}
       </p>
       <div className="chat-trace-grid-region">
-        <div className="chat-trace-grid-scrollbar" ref={gridScrollbarRef} aria-label="Scroll Logit Lens ranks horizontally" onScroll={() => syncGridScroll("scrollbar")}>
-          <div className="chat-trace-grid-scrollbar-spacer" style={{ width: gridScrollWidth }} />
-        </div>
         <div className="chat-trace-grid-wrap" ref={gridWrapRef} onScroll={() => syncGridScroll("grid")}>
           <div className="chat-trace-grid" role="grid" aria-label="Logit Lens predictions" style={traceGridStyle}>
           <div className="chat-trace-grid-row chat-trace-grid-header-row" role="row">
@@ -209,6 +206,9 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
             </div>
           ))}
           </div>
+        </div>
+        <div className="chat-trace-grid-scrollbar" ref={gridScrollbarRef} aria-label="Scroll Logit Lens ranks horizontally" onScroll={() => syncGridScroll("scrollbar")}>
+          <div className="chat-trace-grid-scrollbar-spacer" style={{ width: gridScrollWidth }} />
         </div>
       </div>
       <div className="chat-trace-selection">Selected: layer {selectedLayer ?? "—"} × {selectedCandidate ? `‘${displayToken(selectedCandidate.tokenText)}’` : "no candidate"}</div>

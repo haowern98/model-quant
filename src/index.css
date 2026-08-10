@@ -2439,9 +2439,13 @@ body.resizing-projector * {
 }
 
 .chat-trace-grid-scrollbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   height: 10px;
   overflow-x: auto;
   overflow-y: hidden;
+  background: #1f1f1f;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;

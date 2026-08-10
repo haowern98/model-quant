@@ -56,6 +56,8 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
     const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
     const host = document.createElement("div");
     host.style.width = "240px";
+    host.style.height = "360px";
+    host.style.display = "grid";
     document.body.append(host);
     const candidates = Array.from({ length: 12 }, (_, index) => ({
       tokenId: index,
@@ -88,9 +90,13 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
   const gridWrap = page.locator(".chat-trace-grid-wrap").last();
   const grid = page.locator(".chat-trace-grid").last();
   const tableScrollbar = page.locator(".chat-trace-grid-scrollbar").last();
+  const tracePanel = page.locator(".chat-trace-panel").last();
   await expect(grid).toBeVisible();
   await expect(tableScrollbar).toBeVisible();
   await expect(tableScrollbar).toHaveCSS("scrollbar-gutter", "stable");
+  const scrollbarBox = await tableScrollbar.boundingBox();
+  const panelBox = await tracePanel.boundingBox();
+  expect(scrollbarBox!.y + scrollbarBox!.height).toBeCloseTo(panelBox!.y + panelBox!.height, 1);
 
   const title = page.locator(".chat-trace-title");
   const layerHeader = grid.getByRole("columnheader", { name: "Layer" });
@@ -117,6 +123,12 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
     element.dispatchEvent(new Event("scroll"));
   });
   await expect.poll(() => gridWrap.evaluate((element) => element.scrollLeft)).toBe(80);
+
+  await tracePanel.evaluate((element) => { element.scrollTop = 80; });
+  await expect.poll(() => tracePanel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const scrolledScrollbarBox = await tableScrollbar.boundingBox();
+  const scrolledPanelBox = await tracePanel.boundingBox();
+  expect(scrolledScrollbarBox!.y + scrolledScrollbarBox!.height).toBeCloseTo(scrolledPanelBox!.y + scrolledPanelBox!.height, 1);
 
   const wrapBox = await gridWrap.boundingBox();
   const after = await firstLayer.boundingBox();
