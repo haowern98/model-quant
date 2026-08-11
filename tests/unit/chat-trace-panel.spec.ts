@@ -203,7 +203,7 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
   expect(after?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
 });
 
-test("uses the generated-token outline without outlining the entire selected row", async ({ page }) => {
+test("uses a red selected-cell outline while preserving generated-token blue", async ({ page }) => {
   await page.goto("/");
 
   await page.evaluate(async () => {
@@ -248,6 +248,13 @@ test("uses the generated-token outline without outlining the entire selected row
   });
   expect(generatedHighlight.outlineStyle).toBe("none");
   expect(generatedHighlight.boxShadow).toContain("rgb(14, 99, 156)");
+
+  await generatedCandidate.click();
+  await expect(generatedCandidate).toHaveCSS("box-shadow", "rgb(244, 135, 113) 0px 0px 0px 2px inset");
+
+  await otherCandidate.click();
+  await expect(otherCandidate).toHaveCSS("box-shadow", "rgb(244, 135, 113) 0px 0px 0px 2px inset");
+  await expect(generatedCandidate).toHaveCSS("box-shadow", "rgb(14, 99, 156) 0px 0px 0px 2px inset");
 });
 
 test("closes the trace below its minimum width and reopens it from Trace saved", async ({ page }) => {

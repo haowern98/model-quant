@@ -2638,6 +2638,10 @@ body.resizing-projector * {
   box-shadow: inset 0 0 0 2px #0e639c;
 }
 
+.chat-trace-selected-cell {
+  box-shadow: inset 0 0 0 2px var(--vscode-error);
+}
+
 .chat-trace-selection {
   margin: 14px 16px 0;
   border: 1px solid #353535;

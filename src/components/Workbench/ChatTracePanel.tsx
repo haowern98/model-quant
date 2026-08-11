@@ -94,6 +94,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
   const [view, setView] = useState<"logit" | "probability">("logit");
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const [selectedCell, setSelectedCell] = useState<{ layer: number; tokenId: number } | null>(null);
   const [gridScrollWidth, setGridScrollWidth] = useState(0);
   const gridWrapRef = useRef<HTMLDivElement>(null);
   const gridScrollbarRef = useRef<HTMLDivElement>(null);
@@ -110,6 +111,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
     const finalLayer = layers.at(-1);
     setSelectedLayer(finalLayer?.layer ?? null);
     setSelectedCandidateId(finalLayer?.candidates[0]?.tokenId ?? null);
+    setSelectedCell(null);
     if (!hasProbabilities) setView("logit");
   }, [selectedTokenIndex, trace]);
 
@@ -222,9 +224,9 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
               {layer.candidates.slice(0, candidateCount).map((candidate) => (
                 <button
                   type="button"
-                  className={`chat-trace-grid-rank-cell${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}`}
+                  className={`chat-trace-grid-rank-cell${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}${selectedCell?.layer === layer.layer && selectedCell.tokenId === candidate.tokenId ? " chat-trace-selected-cell" : ""}`}
                   key={`${layer.layer}-${candidate.tokenId}`}
-                  onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); }}
+                  onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); setSelectedCell({ layer: layer.layer, tokenId: candidate.tokenId }); }}
                 >
                   <span className="chat-trace-cell-token">{displayToken(candidate.tokenText)}</span>
                   <span className="chat-trace-cell-value">{metricValue(candidate, view)}</span>
