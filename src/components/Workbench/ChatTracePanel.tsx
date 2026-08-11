@@ -105,6 +105,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
   const selectedRank = selectedCandidate && selectedLayerData
     ? selectedLayerData.candidates.findIndex((candidate) => candidate.tokenId === selectedCandidate.tokenId) + 1
     : null;
+  const detailTokenId = selectedCell ? selectedCandidate?.tokenId : selectedToken?.tokenId;
   const hasProbabilities = layers.every((layer) => layer.candidates.every((candidate) => typeof candidate.probability === "number"));
 
   useEffect(() => {
@@ -242,7 +243,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
       </div>
       <div className="chat-trace-selection">Selected: layer {selectedLayer ?? "—"} × {selectedCandidate ? `‘${displayToken(selectedCandidate.tokenText)}’` : "no candidate"}</div>
       <div className="chat-trace-details">
-        <div><span>Generated token</span><strong>{displayToken(selectedToken.tokenText)}</strong><span>Token ID</span><strong>{selectedToken.tokenId}</strong><span>Position</span><strong>{`After token #${selectedToken.index}`}</strong></div>
+        <div><span>Generated token</span><strong>{displayToken(selectedToken.tokenText)}</strong><span>{selectedCell ? "Selected token ID" : "Token ID"}</span><strong>{detailTokenId ?? "—"}</strong><span>Position</span><strong>{`After token #${selectedToken.index}`}</strong></div>
         <div><span>{view === "logit" ? "Logit Lens" : "Probability"}</span><strong>{selectedCandidate ? metricValue(selectedCandidate, view) : "—"}</strong><span>Top-64 rank</span><strong>{selectedRank ?? "—"}</strong><span>Captured candidates</span><strong>{selectedLayerData?.candidates.length ?? 0}</strong></div>
         <div className="chat-trace-predictions"><span>Top predictions at this layer</span>{selectedLayerData?.candidates.slice(0, 5).map((candidate, index) => <strong key={candidate.tokenId}>{`${index + 1}. ${displayToken(candidate.tokenText)}  ${metricValue(candidate, view)}`}</strong>)}</div>
       </div>

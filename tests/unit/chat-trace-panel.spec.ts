@@ -257,6 +257,50 @@ test("uses a red selected-cell outline while preserving generated-token blue", a
   await expect(generatedCandidate).toHaveCSS("box-shadow", "rgb(14, 99, 156) 0px 0px 0px 2px inset");
 });
 
+test("shows the clicked candidate token ID in the selection details", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const candidates = [
+      { tokenId: 2536, tokenText: "generated", logit: 1, probability: 0.75 },
+      { tokenId: 4242, tokenText: "selected", logit: 0, probability: 0.25 },
+    ];
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: {
+        supported: true,
+        tokens: [{
+          index: 1,
+          tokenId: 2536,
+          tokenText: "generated",
+          logit: 1,
+          rank: 1,
+          logitNormalizer: 0,
+          candidates,
+          layers: [{ layer: 0, candidates }],
+        }],
+      },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  const details = page.locator(".chat-trace-details").last();
+  await expect(details).toContainText("Token ID");
+  await expect(details).toContainText("2536");
+
+  await page.getByRole("button", { name: /selected/ }).click();
+  await expect(details).toContainText("Selected token ID");
+  await expect(details).toContainText("4242");
+});
+
 test("closes the trace below its minimum width and reopens it from Trace saved", async ({ page }) => {
   await mountResizableTraceChat(page);
 
