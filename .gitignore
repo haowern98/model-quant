@@ -55,3 +55,5 @@ AGENTS.md
 tests/unit/mmproj-explorer.spec.ts
 MECH_INTERPRETABILITY_RESEARCH.md
 tests/unit/chat-sidebar.spec.ts
+preflight_changes.md
+LOGIT_LENS_GRAPH_CALLBACK_FINDINGS.md

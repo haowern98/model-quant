@@ -91,7 +91,7 @@ interface WorkbenchShellProps {
   onOpenChat: (id: string) => void;
   onLoadChatModel: () => void;
   onUnloadChatModel: () => void;
-  onSendChatMessage: (id: string, content: string) => void;
+  onSendChatMessage: (id: string, content: string, traceEnabled: boolean) => void;
   onSelectEditor: (editorId: string) => void;
   onCloseEditor: (editorId: string) => void;
   onReorderEditor: (editorId: string, beforeEditorId: string | null) => void;

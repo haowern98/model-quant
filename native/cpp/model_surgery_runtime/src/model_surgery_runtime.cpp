@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cstdint>
 #include <exception>
@@ -52,7 +53,11 @@ bool recipe_test_load_progress(float, void *) {
     return !recipe_test_cancel_requested();
 }
 
-void null_log_callback(ggml_log_level, const char *, void *) {
+void diagnostic_log_callback(ggml_log_level, const char * message, void *) {
+    if (message != nullptr) {
+        std::fputs(message, stderr);
+        std::fflush(stderr);
+    }
 }
 
 void clear_error() {
@@ -125,7 +130,7 @@ struct VramTracker {
 
 bool ensure_backend_initialized() {
     static const bool initialized = [] {
-        llama_log_set(null_log_callback, nullptr);
+        llama_log_set(diagnostic_log_callback, nullptr);
         llama_backend_init();
         return true;
     }();
@@ -2096,6 +2101,9 @@ int32_t emit_chat_stream_delta(
         visible_delta.c_str(),
         reasoning_delta.c_str(),
         user_data);
+    if (status == MS_CHAT_STREAM_STATUS_CANCELLED) {
+        return status;
+    }
     if (status != 0) {
         return fail("chat stream callback aborted");
     }
@@ -2427,6 +2435,174 @@ int32_t run_session_generate_multimodal_stream(
     return 0;
 }
 
+constexpr uint32_t CHAT_TRACE_CANDIDATE_LIMIT = 64;
+constexpr int32_t CHAT_TRACE_STATUS_UNAVAILABLE = 1;
+
+int32_t emit_chat_trace_token(
+    const llama_vocab * vocab,
+    llama_context * ctx,
+    llama_token token,
+    uint32_t index,
+    ms_chat_trace_callback callback,
+    void * user_data) {
+    if (callback == nullptr) {
+        return 0;
+    }
+
+    if (!llama_logit_lens_is_supported(ctx)) {
+        const ms_chat_trace_token unavailable = {
+            index,
+            -1,
+            0.0f,
+            0,
+            0.0,
+            nullptr,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            0,
+        };
+        callback(&unavailable, user_data);
+        return CHAT_TRACE_STATUS_UNAVAILABLE;
+    }
+
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    const float * logits = llama_get_logits_ith(ctx, -1);
+    if (n_vocab <= 0 || logits == nullptr || token < 0 || token >= n_vocab) {
+        return fail("failed to capture chat trace logits");
+    }
+
+    struct Candidate {
+        int32_t token_id;
+        float logit;
+        float probability;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(static_cast<size_t>(n_vocab));
+    double max_logit = -std::numeric_limits<double>::infinity();
+    for (int32_t token_id = 0; token_id < n_vocab; ++token_id) {
+        const float logit = logits[token_id];
+        if (!std::isfinite(logit)) {
+            continue;
+        }
+        candidates.push_back({token_id, logit, 0.0f});
+        max_logit = std::max(max_logit, static_cast<double>(logit));
+    }
+    if (candidates.empty() || !std::isfinite(logits[token])) {
+        return fail("chat trace logits are empty");
+    }
+
+    double exp_sum = 0.0;
+    uint32_t rank = 1;
+    for (const Candidate & candidate : candidates) {
+        exp_sum += std::exp(static_cast<double>(candidate.logit) - max_logit);
+        if (candidate.logit > logits[token]) {
+            ++rank;
+        }
+    }
+    const double logit_normalizer = max_logit + std::log(exp_sum);
+    for (Candidate & candidate : candidates) {
+        candidate.probability = static_cast<float>(std::exp(static_cast<double>(candidate.logit) - logit_normalizer));
+    }
+    const size_t candidate_count = std::min<size_t>(CHAT_TRACE_CANDIDATE_LIMIT, candidates.size());
+    std::partial_sort(
+        candidates.begin(),
+        candidates.begin() + static_cast<std::ptrdiff_t>(candidate_count),
+        candidates.end(),
+        [](const Candidate & left, const Candidate & right) { return left.logit > right.logit; });
+
+    std::vector<std::string> candidate_texts;
+    std::vector<ms_chat_trace_candidate> trace_candidates;
+    candidate_texts.reserve(candidate_count);
+    trace_candidates.reserve(candidate_count);
+    for (size_t candidate_index = 0; candidate_index < candidate_count; ++candidate_index) {
+        candidate_texts.push_back(token_to_piece(vocab, candidates[candidate_index].token_id));
+        const std::string & candidate_text = candidate_texts.back();
+        trace_candidates.push_back({
+            candidates[candidate_index].token_id,
+            candidates[candidate_index].logit,
+            candidates[candidate_index].probability,
+            reinterpret_cast<const uint8_t *>(candidate_text.data()),
+            static_cast<uint64_t>(candidate_text.size()),
+        });
+    }
+
+    const int32_t layer_count = llama_get_logit_lens_layer_count(ctx);
+    if (layer_count <= 0) {
+        return fail("Logit Lens did not produce per-layer candidates");
+    }
+
+    std::vector<std::vector<std::string>> layer_candidate_texts;
+    std::vector<std::vector<ms_chat_trace_candidate>> layer_candidates;
+    std::vector<ms_chat_trace_layer> trace_layers;
+    layer_candidate_texts.reserve(static_cast<size_t>(layer_count));
+    layer_candidates.reserve(static_cast<size_t>(layer_count));
+    trace_layers.reserve(static_cast<size_t>(layer_count));
+    for (int32_t layer_index = 0; layer_index < layer_count; ++layer_index) {
+        const llama_logit_lens_layer * layer = llama_get_logit_lens_layer(ctx, layer_index);
+        if (layer == nullptr || layer->token_ids == nullptr || layer->logits == nullptr || layer->probabilities == nullptr
+                || layer->candidate_count != CHAT_TRACE_CANDIDATE_LIMIT) {
+            return fail("Logit Lens returned invalid per-layer candidates");
+        }
+
+        std::vector<Candidate> sorted_candidates;
+        sorted_candidates.reserve(layer->candidate_count);
+        for (uint32_t candidate_index = 0; candidate_index < layer->candidate_count; ++candidate_index) {
+            const llama_token candidate_token = layer->token_ids[candidate_index];
+            const float candidate_logit = layer->logits[candidate_index];
+            const float candidate_probability = layer->probabilities[candidate_index];
+            if (candidate_token < 0 || candidate_token >= n_vocab || !std::isfinite(candidate_logit)
+                    || !std::isfinite(candidate_probability) || candidate_probability < 0.0f || candidate_probability > 1.0f) {
+                return fail("Logit Lens returned an invalid candidate");
+            }
+            sorted_candidates.push_back({candidate_token, candidate_logit, candidate_probability});
+        }
+        std::sort(sorted_candidates.begin(), sorted_candidates.end(),
+            [](const Candidate & left, const Candidate & right) { return left.logit > right.logit; });
+
+        layer_candidate_texts.emplace_back();
+        layer_candidates.emplace_back();
+        auto & texts = layer_candidate_texts.back();
+        auto & candidates_out = layer_candidates.back();
+        texts.reserve(sorted_candidates.size());
+        candidates_out.reserve(sorted_candidates.size());
+        for (const Candidate & candidate : sorted_candidates) {
+            texts.push_back(token_to_piece(vocab, candidate.token_id));
+            const std::string & text = texts.back();
+            candidates_out.push_back({
+                candidate.token_id,
+                candidate.logit,
+                candidate.probability,
+                reinterpret_cast<const uint8_t *>(text.data()),
+                static_cast<uint64_t>(text.size()),
+            });
+        }
+        trace_layers.push_back({
+            layer->layer,
+            candidates_out.data(),
+            static_cast<uint32_t>(candidates_out.size()),
+        });
+    }
+
+    const std::string token_text = token_to_piece(vocab, token);
+    const ms_chat_trace_token trace_token = {
+        index,
+        token,
+        logits[token],
+        rank,
+        logit_normalizer,
+        reinterpret_cast<const uint8_t *>(token_text.data()),
+        static_cast<uint64_t>(token_text.size()),
+        trace_candidates.data(),
+        static_cast<uint32_t>(candidate_count),
+        trace_layers.data(),
+        static_cast<uint32_t>(trace_layers.size()),
+    };
+    callback(&trace_token, user_data);
+    return 0;
+}
+
 int32_t run_session_generate_stream(
     ModelSession & session,
     const char * prompt,
@@ -2438,7 +2614,9 @@ int32_t run_session_generate_stream(
     void * user_data,
     ms_baseline_benchmark * out_benchmark,
     uint32_t & out_finish_reason,
-    uint32_t & out_actual_seed) {
+    uint32_t & out_actual_seed,
+    ms_chat_trace_callback trace_callback = nullptr,
+    void * trace_user_data = nullptr) {
     out_finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
     const llama_vocab * vocab = llama_model_get_vocab(session.model.get());
     const int32_t prompt_len = static_cast<int32_t>(std::string(prompt).size());
@@ -2468,6 +2646,13 @@ int32_t run_session_generate_stream(
     prompt_tokens.resize(static_cast<size_t>(actual_tokens));
 
     reset_session_context(session);
+    struct ScopedLogitLens {
+        llama_context * ctx;
+        ~ScopedLogitLens() {
+            llama_set_logit_lens_enabled(ctx, false);
+        }
+    } logit_lens{session.ctx.get()};
+    llama_set_logit_lens_enabled(session.ctx.get(), trace_callback != nullptr);
 
     const uint32_t context_tokens = llama_n_ctx(session.ctx.get());
     const uint32_t max_tokens = context_generation_room(context_tokens, prompt_tokens.size());
@@ -2505,6 +2690,7 @@ int32_t run_session_generate_stream(
     }
 
     uint32_t generated = 0;
+    bool trace_active = trace_callback != nullptr;
     std::string generated_text;
     std::string emitted_visible_text;
     std::string emitted_reasoning_text;
@@ -2533,8 +2719,27 @@ int32_t run_session_generate_stream(
             emitted_reasoning_text,
             callback,
             user_data);
+        if (stream_res == MS_CHAT_STREAM_STATUS_CANCELLED) {
+            out_finish_reason = MS_CHAT_FINISH_REASON_CANCELLED;
+            break;
+        }
         if (stream_res != 0) {
             return stream_res;
+        }
+
+        if (trace_active) {
+            const int trace_res = emit_chat_trace_token(
+                vocab,
+                session.ctx.get(),
+                token,
+                generated,
+                trace_callback,
+                trace_user_data);
+            if (trace_res == CHAT_TRACE_STATUS_UNAVAILABLE) {
+                trace_active = false;
+            } else if (trace_res != 0) {
+                return trace_res;
+            }
         }
 
         if (out_finish_reason == MS_CHAT_FINISH_REASON_STOP) {
@@ -2558,7 +2763,7 @@ int32_t run_session_generate_stream(
         emitted_reasoning_text,
         callback,
         user_data);
-    if (final_stream_res != 0) {
+    if (final_stream_res != 0 && final_stream_res != MS_CHAT_STREAM_STATUS_CANCELLED) {
         return final_stream_res;
     }
 
@@ -3542,6 +3747,109 @@ int32_t ms_runtime_generate_recipe_chat_session_stream(
         return fail(err.what());
     } catch (...) {
         return fail("unknown native recipe chat session streaming error");
+    }
+}
+
+int32_t ms_runtime_generate_recipe_chat_session_trace_stream(
+    ms_runtime_chat_session * session,
+    const ms_chat_message * messages,
+    uint64_t message_count,
+    const ms_chat_generation_params * params,
+    const char * const * stop_strings,
+    uint64_t stop_count,
+    const char * chat_template_kwargs_json,
+    const char * reasoning_format,
+    ms_chat_stream_callback stream_callback,
+    void * stream_user_data,
+    ms_chat_trace_callback trace_callback,
+    void * trace_user_data,
+    ms_chat_generation_result * out_result) {
+    clear_error();
+
+    if (session == nullptr || session->session == nullptr) {
+        return fail("recipe chat session is null");
+    }
+    if (messages == nullptr || message_count == 0) {
+        return fail("chat message set is empty");
+    }
+    if (params == nullptr) {
+        return fail("chat generation params are null");
+    }
+    if (stop_strings == nullptr && stop_count > 0) {
+        return fail("chat stop string pointer is null");
+    }
+    if (stream_callback == nullptr || trace_callback == nullptr) {
+        return fail("chat trace callback is null");
+    }
+    if (out_result == nullptr) {
+        return fail("chat generation result output pointer is null");
+    }
+
+    try {
+        std::vector<std::string> request_stops = collect_stop_strings(stop_strings, stop_count);
+        const std::map<std::string, std::string> chat_template_kwargs =
+            chat_template_kwargs_from_json(chat_template_kwargs_json);
+        const common_reasoning_format native_reasoning_format =
+            reasoning_format_from_request(reasoning_format);
+        std::vector<std::pair<std::string, std::string>> chat_messages;
+        chat_messages.reserve(static_cast<size_t>(message_count));
+        for (uint64_t i = 0; i < message_count; ++i) {
+            if (messages[i].role == nullptr || messages[i].role[0] == '\0') {
+                return fail("chat message role is empty");
+            }
+            if (messages[i].content == nullptr) {
+                return fail("chat message content is null");
+            }
+            chat_messages.push_back({messages[i].role, messages[i].content});
+        }
+
+        const common_chat_params chat_params = format_chat_prompt_with_template(
+            session->session->chat_templates.get(),
+            chat_messages,
+            params->add_generation_prompt != 0,
+            chat_template_kwargs,
+            native_reasoning_format);
+        const std::vector<std::string> all_stops = merge_stop_strings(
+            request_stops,
+            chat_params.additional_stops);
+        uint32_t finish_reason = MS_CHAT_FINISH_REASON_LENGTH;
+        uint32_t actual_seed = LLAMA_DEFAULT_SEED;
+        ms_baseline_benchmark benchmark = {};
+        const int32_t result = run_session_generate_stream(
+            *session->session,
+            chat_params.prompt.c_str(),
+            *params,
+            all_stops,
+            chat_params,
+            native_reasoning_format,
+            stream_callback,
+            stream_user_data,
+            &benchmark,
+            finish_reason,
+            actual_seed,
+            trace_callback,
+            trace_user_data);
+        if (result != 0) {
+            return result;
+        }
+
+        benchmark.copied_tensor_count = session->session->copied_tensors;
+        benchmark.converted_tensor_count = session->session->converted_tensors;
+        benchmark.converted_bytes_before = session->session->converted_bytes_before;
+        benchmark.converted_bytes_after = session->session->converted_bytes_after;
+        benchmark.requested_target_count = session->session->requested_target_count;
+        benchmark.verified_target_count = session->session->verified_target_count;
+        out_result->benchmark = benchmark;
+        out_result->prompt_tokens = benchmark.prompt_tokens;
+        out_result->completion_tokens = benchmark.generated_tokens;
+        out_result->finish_reason = finish_reason;
+        out_result->actual_seed = actual_seed;
+        session->completion_count += 1;
+        return 0;
+    } catch (const std::exception & err) {
+        return fail(err.what());
+    } catch (...) {
+        return fail("unknown native recipe chat trace generation error");
     }
 }
 

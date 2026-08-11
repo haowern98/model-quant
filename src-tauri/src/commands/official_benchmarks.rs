@@ -567,13 +567,57 @@ fn gpqa_generation_config(effective_config: &EffectiveGpqaRunConfig) -> serde_js
 #[derive(Clone)]
 pub struct OfficialBenchmarkRunner {
     child: Arc<Mutex<Option<Child>>>,
+    launch: Arc<Mutex<OfficialBenchmarkLaunch>>,
+}
+
+#[derive(Default)]
+struct OfficialBenchmarkLaunch {
+    active: bool,
+    cancelled: bool,
 }
 
 impl OfficialBenchmarkRunner {
     pub fn new() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
+            launch: Arc::new(Mutex::new(OfficialBenchmarkLaunch::default())),
         }
+    }
+
+    pub(crate) fn begin_benchmark_launch(&self) {
+        if let Ok(mut launch) = self.launch.lock() {
+            launch.active = true;
+            launch.cancelled = false;
+        }
+    }
+
+    pub(crate) fn finish_benchmark_launch(&self) {
+        if let Ok(mut launch) = self.launch.lock() {
+            launch.active = false;
+        }
+    }
+
+    fn cancel_benchmark_launch(&self) -> bool {
+        let Ok(mut launch) = self.launch.lock() else {
+            return false;
+        };
+        if launch.active {
+            launch.cancelled = true;
+        }
+        launch.active
+    }
+
+    #[cfg(test)]
+    fn benchmark_launch_active(&self) -> bool {
+        self.launch.lock().map(|launch| launch.active).unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    fn benchmark_launch_cancelled(&self) -> bool {
+        self.launch
+            .lock()
+            .map(|launch| launch.cancelled)
+            .unwrap_or(false)
     }
 }
 
@@ -952,6 +996,7 @@ pub async fn run_gpqa_diamond_benchmark(
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
     let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
     let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let runner = runner.inner().clone();
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run_gpqa_diamond_blocking(
@@ -965,6 +1010,7 @@ pub async fn run_gpqa_diamond_benchmark(
             runtime_totals,
             app,
             child,
+            runner,
         )
     })
     .await
@@ -984,6 +1030,7 @@ pub async fn run_humaneval_benchmark(
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
     let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
     let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let runner = runner.inner().clone();
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run_humaneval_blocking(
@@ -996,6 +1043,7 @@ pub async fn run_humaneval_benchmark(
             runtime_totals,
             app,
             child,
+            runner,
         )
     })
     .await
@@ -1015,6 +1063,7 @@ pub async fn run_mmmu_pro_benchmark(
     let tensor_summary = modelinspector_api_tensor_summary(&api_state, &base_url, &model_id)?;
     let model_summary = modelinspector_api_model_summary(&api_state, &base_url, &model_id)?;
     let runtime_totals = modelinspector_api_runtime_totals(&api_state, &base_url, &model_id)?;
+    let runner = runner.inner().clone();
     let child = runner.child.clone();
     tauri::async_runtime::spawn_blocking(move || {
         run_mmmu_pro_blocking(
@@ -1027,6 +1076,7 @@ pub async fn run_mmmu_pro_benchmark(
             runtime_totals,
             app,
             child,
+            runner,
         )
     })
     .await
@@ -1054,6 +1104,7 @@ pub async fn run_terminal_bench_benchmark(
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+    let runner = runner.inner().clone();
     let child = runner.child.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -1068,6 +1119,7 @@ pub async fn run_terminal_bench_benchmark(
             runtime_totals,
             app,
             child,
+            runner,
         )
     })
     .await
@@ -1076,11 +1128,37 @@ pub async fn run_terminal_bench_benchmark(
 
 #[tauri::command]
 pub fn cancel_official_benchmark(runner: State<'_, OfficialBenchmarkRunner>) {
+    let benchmark_launch_active = runner.cancel_benchmark_launch();
     if let Ok(mut guard) = runner.child.lock() {
         if let Some(child) = guard.as_mut() {
-            let _ = child.kill();
+            if benchmark_launch_active {
+                terminate_child_tree(child);
+            } else {
+                let _ = child.kill();
+            }
         }
     }
+}
+
+fn spawn_active_benchmark_child(
+    command: &mut Command,
+    runner: &OfficialBenchmarkRunner,
+    failure_message: &str,
+) -> Result<(), String> {
+    let launch = runner.launch.lock().map_err(|e| e.to_string())?;
+    if !launch.active || launch.cancelled {
+        return Err("Official benchmark launch cancelled".to_string());
+    }
+
+    let mut child_slot = runner.child.lock().map_err(|e| e.to_string())?;
+    if child_slot.is_some() {
+        return Err("An official benchmark is already running.".to_string());
+    }
+    let child = command
+        .spawn()
+        .map_err(|e| format!("{failure_message}: {e}"))?;
+    *child_slot = Some(child);
+    Ok(())
 }
 
 fn ensure_official_benchmark_idle(child_slot: &Arc<Mutex<Option<Child>>>) -> Result<(), String> {
@@ -1680,6 +1758,7 @@ fn run_gpqa_diamond_blocking(
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
+    runner: OfficialBenchmarkRunner,
 ) -> Result<BenchmarkResult, String> {
     let effective_config = effective_gpqa_run_config(config)?;
     let app_data_dir = app
@@ -1784,20 +1863,18 @@ fn run_gpqa_diamond_blocking(
     );
 
     let start = Instant::now();
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Failed to start GPQA Diamond harness: {e}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    {
+    spawn_active_benchmark_child(
+        &mut command,
+        &runner,
+        "Failed to start GPQA Diamond harness",
+    )?;
+    let (stdout, stderr) = {
         let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            let _ = child.kill();
-            return Err("An official benchmark is already running.".to_string());
-        }
-        *guard = Some(child);
-    }
+        let child = guard
+            .as_mut()
+            .ok_or("Official benchmark process was not available.")?;
+        (child.stdout.take(), child.stderr.take())
+    };
 
     let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("EvalScope stdout"));
     let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("EvalScope stderr"));
@@ -1875,6 +1952,7 @@ fn run_humaneval_blocking(
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
+    runner: OfficialBenchmarkRunner,
 ) -> Result<BenchmarkResult, String> {
     let mut effective_config = effective_gpqa_run_config(config)?;
     if effective_config.sample_limit > HUMANEVAL_SAMPLE_COUNT {
@@ -1963,20 +2041,18 @@ fn run_humaneval_blocking(
 
     let start = Instant::now();
     let sandbox_containers_before = sandbox_container_ids()?;
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Failed to start HumanEval harness: {e}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    {
+    spawn_active_benchmark_child(
+        &mut command,
+        &runner,
+        "Failed to start HumanEval harness",
+    )?;
+    let (stdout, stderr) = {
         let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            let _ = child.kill();
-            return Err("An official benchmark is already running.".to_string());
-        }
-        *guard = Some(child);
-    }
+        let child = guard
+            .as_mut()
+            .ok_or("Official benchmark process was not available.")?;
+        (child.stdout.take(), child.stderr.take())
+    };
 
     let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("EvalScope stdout"));
     let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("EvalScope stderr"));
@@ -2071,6 +2147,7 @@ fn run_mmmu_pro_blocking(
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
+    runner: OfficialBenchmarkRunner,
 ) -> Result<BenchmarkResult, String> {
     let effective_config = effective_mmmu_pro_run_config(config)?;
 
@@ -2134,6 +2211,7 @@ fn run_mmmu_pro_blocking(
             &group_dir,
             &app,
             &child_slot,
+            &runner,
         )?;
         reports.push((subjects.clone(), report_path));
     }
@@ -2175,6 +2253,7 @@ fn run_mmmu_pro_evalscope_group(
     run_dir: &Path,
     app: &tauri::AppHandle,
     child_slot: &Arc<Mutex<Option<Child>>>,
+    runner: &OfficialBenchmarkRunner,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(run_dir).map_err(|e| e.to_string())?;
     let mut command = if evalscope_cli.exists() {
@@ -2233,20 +2312,18 @@ fn run_mmmu_pro_evalscope_group(
         ),
     );
 
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Failed to start MMMU-Pro harness: {e}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    {
+    spawn_active_benchmark_child(
+        &mut command,
+        runner,
+        "Failed to start MMMU-Pro harness",
+    )?;
+    let (stdout, stderr) = {
         let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            let _ = child.kill();
-            return Err("An official benchmark is already running.".to_string());
-        }
-        *guard = Some(child);
-    }
+        let child = guard
+            .as_mut()
+            .ok_or("Official benchmark process was not available.")?;
+        (child.stdout.take(), child.stderr.take())
+    };
 
     let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("EvalScope stdout"));
     let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("EvalScope stderr"));
@@ -3482,6 +3559,7 @@ fn run_terminal_bench_benchmark_blocking(
     runtime_totals: Arc<Mutex<ModelInspectorApiRuntimeTotals>>,
     app: tauri::AppHandle,
     child_slot: Arc<Mutex<Option<Child>>>,
+    runner: OfficialBenchmarkRunner,
 ) -> Result<BenchmarkResult, String> {
     let status = detect_terminal_bench_status();
     if !status.ready {
@@ -3532,31 +3610,22 @@ fn run_terminal_bench_benchmark_blocking(
         "Terminal-Bench running",
     );
 
-    {
-        let guard = child_slot.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            return Err("An official benchmark is already running.".to_string());
-        }
-    }
-
     let start = Instant::now();
     let terminal_bench_task_images = terminal_bench_task_images(&task_dir)?;
     let terminal_bench_harbor_processes_before = terminal_bench_harbor_process_ids();
     let terminal_bench_containers_before = docker_container_images()?;
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Failed to start Terminal-Bench Harbor run: {e}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    {
+    spawn_active_benchmark_child(
+        &mut command,
+        &runner,
+        "Failed to start Terminal-Bench Harbor run",
+    )?;
+    let (stdout, stderr) = {
         let mut guard = child_slot.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            let _ = child.kill();
-            return Err("An official benchmark is already running.".to_string());
-        }
-        *guard = Some(child);
-    }
+        let child = guard
+            .as_mut()
+            .ok_or("Official benchmark process was not available.")?;
+        (child.stdout.take(), child.stderr.take())
+    };
 
     let stdout_handle = read_pipe_streaming(stdout, app.clone(), Some("Harbor stdout"));
     let stderr_handle = read_pipe_streaming(stderr, app.clone(), Some("Harbor stderr"));
@@ -4411,6 +4480,22 @@ fn unix_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn benchmark_launch_cancellation_persists_until_the_next_launch() {
+        let runner = OfficialBenchmarkRunner::new();
+
+        runner.begin_benchmark_launch();
+        assert!(runner.benchmark_launch_active());
+        assert!(!runner.benchmark_launch_cancelled());
+
+        runner.cancel_benchmark_launch();
+        runner.finish_benchmark_launch();
+        assert!(runner.benchmark_launch_cancelled());
+
+        runner.begin_benchmark_launch();
+        assert!(!runner.benchmark_launch_cancelled());
+    }
 
     #[test]
     fn classifies_gpqa_ready_when_required_packages_are_importable() {

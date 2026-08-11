@@ -156,3 +156,17 @@ test("resizes the bottom panel vertically", async ({ page }) => {
   expect(after).not.toBeNull();
   expect(after!.height).toBeGreaterThan(before!.height);
 });
+
+test("clips the active chat while the bottom panel is maximized", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Chat with model" }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+
+  const chatEditor = page.locator(".chat-editor");
+  await expect(page.locator(".chat-composer")).toBeVisible();
+  await page.getByRole("button", { name: "Maximize bottom panel" }).click();
+
+  await expect(page.locator(".editor-pane")).toHaveClass(/bottom-panel-maximized/);
+  await expect(chatEditor).toHaveCSS("overflow", "hidden");
+});

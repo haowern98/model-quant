@@ -31,6 +31,7 @@ import type {
   ChatConversationSummary,
   ChatGenerationConfig,
   ChatMessageData,
+  ChatTraceReference,
 } from "../components/Workbench/chat/chatTypes";
 
 let invokeFn: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -153,6 +154,8 @@ export async function getModelInspectorApiStatus(): Promise<ModelInspectorApiSta
 type ChatGenerationRequest = {
   conversationId: string;
   messages: Pick<ChatMessageData, "role" | "content" | "reasoning">[];
+  traceEnabled?: boolean;
+  assistantMessageId?: string;
 };
 
 type ChatModelLoadStatus = { model: string };
@@ -166,12 +169,45 @@ type ChatGenerationResponse = {
   durationSeconds: number;
   finishReason: string;
   seed: number;
+  trace?: ChatTraceReference;
+};
+
+export type ChatTraceCandidate = {
+  tokenId: number;
+  logit: number;
+  probability?: number;
+  tokenText: string;
+};
+
+export type ChatTraceLayer = {
+  layer: number;
+  candidates: ChatTraceCandidate[];
+};
+
+export type ChatTraceToken = {
+  index: number;
+  tokenId: number;
+  tokenText: string;
+  logit: number;
+  rank: number;
+  logitNormalizer: number;
+  candidates: ChatTraceCandidate[];
+  layers: ChatTraceLayer[];
+};
+
+export type ChatTracePayload = {
+  supported: boolean;
+  tokens: ChatTraceToken[];
 };
 
 export async function generateChatResponse(
   request: ChatGenerationRequest,
 ): Promise<ChatGenerationResponse> {
   return invoke<ChatGenerationResponse>("generate_chat_response", { request });
+}
+
+export async function cancelChatGeneration(): Promise<void> {
+  return invoke<void>("cancel_chat_generation");
 }
 
 export async function loadChatModel(config: ChatGenerationConfig): Promise<ChatModelLoadStatus> {
@@ -200,6 +236,13 @@ export async function listChatConversations(): Promise<ChatConversationSummary[]
 
 export async function loadChatConversation(id: string): Promise<ChatConversation> {
   return invoke<ChatConversation>("load_chat_conversation", { id });
+}
+
+export async function loadChatTrace(
+  conversationId: string,
+  assistantMessageId: string,
+): Promise<ChatTracePayload> {
+  return invoke<ChatTracePayload>("load_chat_trace", { conversationId, assistantMessageId });
 }
 
 export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {

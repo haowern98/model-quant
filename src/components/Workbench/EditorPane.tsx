@@ -63,6 +63,8 @@ import {
   getTensorValues,
   installGpqaDiamondHarness,
   installHumanEvalHarness,
+  loadChatTrace,
+  type ChatTracePayload,
 } from "../../lib/tauri-bridge";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
@@ -71,6 +73,7 @@ type GpqaBenchmarkTab = "details" | "dataset" | "configuration";
 type HumanEvalBenchmarkTab = "details" | "dataset" | "configuration";
 type TerminalBenchTab = "details" | "dataset" | "configuration";
 type MmmuProTab = "details" | "dataset" | "configuration";
+type ChatTraceView = { messageId: string; tokenIndex: number };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -96,7 +99,7 @@ interface EditorPaneProps {
   onModelLoadConfigChange: (config: ModelLoadConfig) => void;
   onLoadChatModel: () => void;
   onUnloadChatModel: () => void;
-  onSendChatMessage: (id: string, content: string) => void;
+  onSendChatMessage: (id: string, content: string, traceEnabled: boolean) => void;
   tensors: TensorInfo[];
   assignments: Record<string, QuantType>;
   profile: RecipeProfile | null;
@@ -238,6 +241,11 @@ export function EditorPane({
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT_HEIGHT);
   const [bottomPanelMaximized, setBottomPanelMaximized] = useState(false);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const [chatTraceArmed, setChatTraceArmed] = useState<Record<string, boolean>>({});
+  const [chatTraceViews, setChatTraceViews] = useState<Record<string, ChatTraceView>>({});
+  const [chatTracePayloads, setChatTracePayloads] = useState<Record<string, ChatTracePayload>>({});
+  const [chatTraceLoading, setChatTraceLoading] = useState<Record<string, boolean>>({});
+  const [chatTraceErrors, setChatTraceErrors] = useState<Record<string, string>>({});
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
@@ -252,6 +260,11 @@ export function EditorPane({
   const showingChat = activeEditor?.kind === "chat";
   const activeChatTab = activeEditor?.kind === "chat" ? activeEditor : null;
   const activeChat = activeChatTab ? chatConversations[activeChatTab.chatId] : undefined;
+  const activeTraceView = activeChatTab ? chatTraceViews[activeChatTab.chatId] : undefined;
+  const activeTraceMessage = activeChat?.messages.find((message) => message.id === activeTraceView?.messageId);
+  const activeTraceKey = activeTraceMessage?.trace
+    ? `${activeTraceMessage.trace.conversationId}:${activeTraceMessage.trace.assistantMessageId}`
+    : null;
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
@@ -259,6 +272,35 @@ export function EditorPane({
   const showingBenchmark =
     showingGpqaBenchmark || showingHumanEvalBenchmark || showingTerminalBenchBenchmark || showingMmmuProBenchmark;
   const activeResultBenchmark = activeResult ? benchmarkResultLabel(activeResult) : null;
+
+  const openChatTrace = (messageId: string) => {
+    if (!activeChatTab || !activeChat) return;
+    const message = activeChat.messages.find((item) => item.id === messageId);
+    if (!message?.trace) return;
+    const key = `${message.trace.conversationId}:${message.trace.assistantMessageId}`;
+    setChatTraceViews((current) => ({
+      ...current,
+      [activeChatTab.chatId]: { messageId, tokenIndex: 0 },
+    }));
+    if (chatTracePayloads[key] || chatTraceLoading[key]) return;
+    setChatTraceLoading((current) => ({ ...current, [key]: true }));
+    setChatTraceErrors((current) => ({ ...current, [key]: "" }));
+    void loadChatTrace(message.trace.conversationId, message.trace.assistantMessageId)
+      .then((payload) => setChatTracePayloads((current) => ({ ...current, [key]: payload })))
+      .catch((error: unknown) => setChatTraceErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "Could not load this trace.",
+      })))
+      .finally(() => setChatTraceLoading((current) => ({ ...current, [key]: false })));
+  };
+
+  const closeChatTrace = () => {
+    if (!activeChatTab) return;
+    setChatTraceViews((current) => {
+      const { [activeChatTab.chatId]: _closedTrace, ...remaining } = current;
+      return remaining;
+    });
+  };
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -434,12 +476,36 @@ export function EditorPane({
           sending={chatSendingConversationId === activeChatTab?.chatId}
           disabled={running || chatModelLoading || !hasModel || !chatModelLoaded}
           error={chatError}
+          traceArmed={activeChatTab ? (chatTraceArmed[activeChatTab.chatId] ?? false) : false}
+          tracePanelOpen={Boolean(activeTraceView)}
+          traceMessageId={activeTraceView?.messageId ?? null}
+          tracePayload={activeTraceKey ? (chatTracePayloads[activeTraceKey] ?? null) : null}
+          traceTokenIndex={activeTraceView?.tokenIndex ?? 0}
+          traceLoading={activeTraceKey ? Boolean(chatTraceLoading[activeTraceKey]) : false}
+          traceError={activeTraceKey ? (chatTraceErrors[activeTraceKey] || null) : null}
           onDraftChange={(draft) => {
             if (!activeChatTab) return;
             setChatDrafts((current) => ({ ...current, [activeChatTab.chatId]: draft }));
           }}
+          onTraceArmedChange={(armed) => {
+            if (!activeChatTab) return;
+            setChatTraceArmed((current) => ({ ...current, [activeChatTab.chatId]: armed }));
+          }}
+          onOpenTrace={openChatTrace}
+          onCloseTrace={closeChatTrace}
+          onTraceTokenChange={(tokenIndex) => {
+            if (!activeChatTab || !activeTraceView) return;
+            setChatTraceViews((current) => ({
+              ...current,
+              [activeChatTab.chatId]: { ...activeTraceView, tokenIndex },
+            }));
+          }}
           onSend={(content) => {
-            if (activeChatTab) onSendChatMessage(activeChatTab.chatId, content);
+            if (activeChatTab) onSendChatMessage(
+              activeChatTab.chatId,
+              content,
+              chatTraceArmed[activeChatTab.chatId] ?? false,
+            );
           }}
         />
       ) : (

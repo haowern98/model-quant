@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod chat_trace;
 pub mod export;
 pub mod hardware;
 pub mod model;

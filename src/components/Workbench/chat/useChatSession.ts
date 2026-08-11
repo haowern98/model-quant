@@ -93,7 +93,7 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
     }
   }, []);
 
-  const sendMessage = useCallback(async (conversationId: string, text: string) => {
+  const sendMessage = useCallback(async (conversationId: string, text: string, traceEnabled = false) => {
     const conversation = conversationsRef.current[conversationId];
     const content = text.trim();
     if (!conversation || !content || sendingConversationId || !modelLoaded) return;
@@ -137,7 +137,12 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
           };
         });
       });
-      const response = await generateChatResponse({ conversationId, messages: requestMessages });
+      const response = await generateChatResponse({
+        conversationId,
+        messages: requestMessages,
+        traceEnabled,
+        assistantMessageId: traceEnabled ? assistantMessage.id : undefined,
+      });
       const completedConversation = await finishConversation(
         assistantMessage.id,
         response,
@@ -205,6 +210,7 @@ async function finishConversation(
     durationSeconds: response.durationSeconds,
     finishReason: response.finishReason,
     seed: response.seed,
+    trace: response.trace,
   };
   return {
     ...conversation,

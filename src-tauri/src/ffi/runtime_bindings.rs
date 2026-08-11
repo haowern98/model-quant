@@ -113,13 +113,32 @@ pub enum ChatFinishReason {
     Eos = 2,
 }
 
+const NATIVE_CHAT_FINISH_REASON_CANCELLED: u32 = 3;
+const NATIVE_CHAT_STREAM_STATUS_CANCELLED: c_int = 2;
+
 impl ChatFinishReason {
     fn from_native(value: u32) -> Result<Self, String> {
         match value {
             0 => Ok(Self::Stop),
             1 => Ok(Self::Length),
             2 => Ok(Self::Eos),
+            NATIVE_CHAT_FINISH_REASON_CANCELLED => Ok(Self::Stop),
             _ => Err(format!("unknown native chat finish reason: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatStreamAction {
+    Continue,
+    Cancel,
+}
+
+impl ChatStreamAction {
+    fn native_status(self) -> c_int {
+        match self {
+            Self::Continue => 0,
+            Self::Cancel => NATIVE_CHAT_STREAM_STATUS_CANCELLED,
         }
     }
 }
@@ -140,7 +159,46 @@ pub struct ChatGenerationOutput {
     pub reasoning_text: Option<String>,
     pub benchmark: MsBaselineBenchmark,
     pub finish_reason: ChatFinishReason,
+    pub cancelled: bool,
     pub actual_seed: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatTraceCandidate {
+    pub token_id: i32,
+    pub logit: f32,
+    pub probability: f32,
+    pub token_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatTraceLayer {
+    pub layer: i32,
+    pub candidates: Vec<ChatTraceCandidate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatTraceToken {
+    pub index: u32,
+    pub token_id: i32,
+    pub token_text: String,
+    pub logit: f32,
+    pub rank: u32,
+    pub logit_normalizer: f64,
+    pub candidates: Vec<ChatTraceCandidate>,
+    pub layers: Vec<ChatTraceLayer>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatGenerationTrace {
+    pub supported: bool,
+    pub tokens: Vec<ChatTraceToken>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatGenerationTraceOutput {
+    pub generation: ChatGenerationOutput,
+    pub trace: ChatGenerationTrace,
 }
 
 #[repr(C)]
@@ -151,6 +209,39 @@ struct MsRuntimeChatSession {
 type MsRuntimeLogCallback = Option<unsafe extern "C" fn(*const c_char, *mut c_void)>;
 type MsChatStreamCallback =
     Option<unsafe extern "C" fn(*const c_char, *const c_char, *mut c_void) -> c_int>;
+
+#[repr(C)]
+struct MsChatTraceCandidate {
+    token_id: i32,
+    logit: f32,
+    probability: f32,
+    token_text: *const u8,
+    token_text_size: u64,
+}
+
+#[repr(C)]
+struct MsChatTraceLayer {
+    layer: i32,
+    candidates: *const MsChatTraceCandidate,
+    candidate_count: u32,
+}
+
+#[repr(C)]
+struct MsChatTraceToken {
+    index: u32,
+    token_id: i32,
+    logit: f32,
+    rank: u32,
+    logit_normalizer: f64,
+    token_text: *const u8,
+    token_text_size: u64,
+    candidates: *const MsChatTraceCandidate,
+    candidate_count: u32,
+    layers: *const MsChatTraceLayer,
+    layer_count: u32,
+}
+
+type MsChatTraceCallback = Option<unsafe extern "C" fn(*const MsChatTraceToken, *mut c_void)>;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -392,6 +483,21 @@ extern "C" {
         reasoning_format: *const c_char,
         stream_callback: MsChatStreamCallback,
         stream_user_data: *mut c_void,
+        out_result: *mut MsChatGenerationResult,
+    ) -> c_int;
+    fn ms_runtime_generate_recipe_chat_session_trace_stream(
+        session: *mut MsRuntimeChatSession,
+        messages: *const MsChatMessage,
+        message_count: u64,
+        params: *const ChatGenerationParams,
+        stop_strings: *const *const c_char,
+        stop_count: u64,
+        chat_template_kwargs_json: *const c_char,
+        reasoning_format: *const c_char,
+        stream_callback: MsChatStreamCallback,
+        stream_user_data: *mut c_void,
+        trace_callback: MsChatTraceCallback,
+        trace_user_data: *mut c_void,
         out_result: *mut MsChatGenerationResult,
     ) -> c_int;
     fn ms_runtime_generate_recipe_chat_session_multimodal_stream(
@@ -982,7 +1088,7 @@ impl Drop for RecipeChatSession {
 
 struct ChatStreamCallbackState<'a, F>
 where
-    F: FnMut(&str, &str) -> Result<(), String>,
+    F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
 {
     on_delta: &'a mut F,
     text: String,
@@ -996,7 +1102,7 @@ unsafe extern "C" fn recipe_chat_stream_trampoline<F>(
     user_data: *mut c_void,
 ) -> c_int
 where
-    F: FnMut(&str, &str) -> Result<(), String>,
+    F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
 {
     if user_data.is_null() {
         return 1;
@@ -1004,6 +1110,148 @@ where
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+        let text_delta = if text_delta.is_null() {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            unsafe { CStr::from_ptr(text_delta) }.to_string_lossy()
+        };
+        let reasoning_delta = if reasoning_delta.is_null() {
+            std::borrow::Cow::Borrowed("")
+        } else {
+            unsafe { CStr::from_ptr(reasoning_delta) }.to_string_lossy()
+        };
+
+        state.text.push_str(&text_delta);
+        state.reasoning_text.push_str(&reasoning_delta);
+        match (state.on_delta)(&text_delta, &reasoning_delta) {
+            Ok(action) => action.native_status(),
+            Err(error) => {
+                state.error = Some(error);
+                1
+            }
+        }
+    }));
+
+    match result {
+        Ok(status) => status,
+        Err(_) => {
+            let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+            state.error = Some("chat stream callback panicked".to_string());
+            1
+        }
+    }
+}
+
+struct ChatTraceCallbackState {
+    supported: bool,
+    tokens: Vec<ChatTraceToken>,
+}
+
+unsafe extern "C" fn recipe_chat_trace_trampoline(
+    native_token: *const MsChatTraceToken,
+    user_data: *mut c_void,
+) {
+    if native_token.is_null() || user_data.is_null() {
+        return;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let native = unsafe { &*native_token };
+        let state = unsafe { &mut *(user_data as *mut ChatTraceCallbackState) };
+        if native.token_id < 0 {
+            state.supported = false;
+            return;
+        }
+        let Ok(token_text_size) = usize::try_from(native.token_text_size) else {
+            return;
+        };
+        let token_text = if native.token_text.is_null() {
+            String::new()
+        } else {
+            String::from_utf8_lossy(unsafe {
+                std::slice::from_raw_parts(native.token_text, token_text_size)
+            })
+            .into_owned()
+        };
+        let decode_candidates = |candidates: *const MsChatTraceCandidate, count: u32| {
+            if count == 0 || candidates.is_null() {
+                Vec::new()
+            } else {
+                unsafe { std::slice::from_raw_parts(candidates, count as usize) }
+                    .iter()
+                    .map(|candidate| {
+                        let token_text = match usize::try_from(candidate.token_text_size) {
+                            Ok(size) if !candidate.token_text.is_null() => {
+                                String::from_utf8_lossy(unsafe {
+                                    std::slice::from_raw_parts(candidate.token_text, size)
+                                })
+                                .into_owned()
+                            }
+                            _ => String::new(),
+                        };
+                        ChatTraceCandidate {
+                            token_id: candidate.token_id,
+                            logit: candidate.logit,
+                            probability: candidate.probability,
+                            token_text,
+                        }
+                    })
+                    .collect()
+            }
+        };
+        let candidates = decode_candidates(native.candidates, native.candidate_count);
+        let layers = if native.layer_count == 0 || native.layers.is_null() {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(native.layers, native.layer_count as usize) }
+                .iter()
+                .map(|layer| ChatTraceLayer {
+                    layer: layer.layer,
+                    candidates: decode_candidates(layer.candidates, layer.candidate_count),
+                })
+                .collect()
+        };
+        state.tokens.push(ChatTraceToken {
+            index: native.index,
+            token_id: native.token_id,
+            token_text,
+            logit: native.logit,
+            rank: native.rank,
+            logit_normalizer: native.logit_normalizer,
+            candidates,
+            layers,
+        });
+    }));
+
+    if result.is_err() {
+        // Trace capture is observational; an allocation failure must not unwind across C FFI.
+    }
+}
+
+struct LegacyChatStreamCallbackState<'a, F>
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    on_delta: &'a mut F,
+    text: String,
+    reasoning_text: String,
+    error: Option<String>,
+}
+
+unsafe extern "C" fn legacy_recipe_chat_stream_trampoline<F>(
+    text_delta: *const c_char,
+    reasoning_delta: *const c_char,
+    user_data: *mut c_void,
+) -> c_int
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    if user_data.is_null() {
+        return 1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let state = unsafe { &mut *(user_data as *mut LegacyChatStreamCallbackState<F>) };
         let text_delta = if text_delta.is_null() {
             std::borrow::Cow::Borrowed("")
         } else {
@@ -1027,7 +1275,7 @@ where
     match result {
         Ok(status) => status,
         Err(_) => {
-            let state = unsafe { &mut *(user_data as *mut ChatStreamCallbackState<F>) };
+            let state = unsafe { &mut *(user_data as *mut LegacyChatStreamCallbackState<F>) };
             state.error = Some("chat stream callback panicked".to_string());
             1
         }
@@ -1133,6 +1381,7 @@ impl RecipeChatSession {
                 reasoning_text: (!reasoning_text.is_empty()).then_some(reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
                 actual_seed: native_result.actual_seed,
             })
         } else {
@@ -1151,6 +1400,50 @@ impl RecipeChatSession {
     ) -> Result<ChatGenerationOutput, String>
     where
         F: FnMut(&str, &str) -> Result<(), String>,
+    {
+        self.generate_chat_streaming_with_action(
+            messages,
+            params,
+            stop_strings,
+            chat_template_kwargs_json,
+            reasoning_format,
+            |text, reasoning| on_delta(text, reasoning).map(|()| ChatStreamAction::Continue),
+        )
+    }
+
+    pub fn generate_chat_streaming_cancellable<F>(
+        &mut self,
+        messages: &[(String, String)],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        on_delta: F,
+    ) -> Result<ChatGenerationOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
+    {
+        self.generate_chat_streaming_with_action(
+            messages,
+            params,
+            stop_strings,
+            chat_template_kwargs_json,
+            reasoning_format,
+            on_delta,
+        )
+    }
+
+    fn generate_chat_streaming_with_action<F>(
+        &mut self,
+        messages: &[(String, String)],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        mut on_delta: F,
+    ) -> Result<ChatGenerationOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
     {
         let c_roles = messages
             .iter()
@@ -1244,11 +1537,135 @@ impl RecipeChatSession {
                     .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
                 actual_seed: native_result.actual_seed,
             })
         } else {
             Err(unsafe { c_string(ms_runtime_last_error()) })
         }
+    }
+
+    pub fn generate_chat_streaming_cancellable_with_trace<F>(
+        &mut self,
+        messages: &[(String, String)],
+        params: &ChatGenerationParams,
+        stop_strings: &[String],
+        chat_template_kwargs_json: Option<&str>,
+        reasoning_format: Option<&str>,
+        mut on_delta: F,
+    ) -> Result<ChatGenerationTraceOutput, String>
+    where
+        F: FnMut(&str, &str) -> Result<ChatStreamAction, String>,
+    {
+        let c_roles = messages
+            .iter()
+            .map(|(role, _)| {
+                CString::new(role.as_str())
+                    .map_err(|_| format!("chat role contains an interior NUL byte: {}", role))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let c_contents = messages
+            .iter()
+            .map(|(_, content)| {
+                CString::new(content.as_str())
+                    .map_err(|_| "chat message content contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_messages = c_roles
+            .iter()
+            .zip(c_contents.iter())
+            .map(|(role, content)| MsChatMessage {
+                role: role.as_ptr(),
+                content: content.as_ptr(),
+            })
+            .collect::<Vec<_>>();
+        let c_stop_strings = stop_strings
+            .iter()
+            .map(|stop| {
+                CString::new(stop.as_str())
+                    .map_err(|_| "chat stop string contains an interior NUL byte".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let native_stop_strings = c_stop_strings
+            .iter()
+            .map(|stop| stop.as_ptr())
+            .collect::<Vec<_>>();
+        let c_chat_template_kwargs_json = chat_template_kwargs_json
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "chat_template_kwargs contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let c_reasoning_format = reasoning_format
+            .map(|value| {
+                CString::new(value)
+                    .map_err(|_| "reasoning_format contains an interior NUL byte".to_string())
+            })
+            .transpose()?;
+        let mut native_result = MsChatGenerationResult {
+            benchmark: empty_benchmark(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            finish_reason: ChatFinishReason::Stop as u32,
+            actual_seed: 0,
+        };
+        let mut callback_state = ChatStreamCallbackState {
+            on_delta: &mut on_delta,
+            text: String::new(),
+            reasoning_text: String::new(),
+            error: None,
+        };
+        let mut trace_state = ChatTraceCallbackState {
+            supported: true,
+            tokens: Vec::new(),
+        };
+
+        let status = unsafe {
+            ms_runtime_generate_recipe_chat_session_trace_stream(
+                self.ptr.as_ptr(),
+                native_messages.as_ptr(),
+                native_messages.len() as u64,
+                params,
+                native_stop_strings.as_ptr(),
+                native_stop_strings.len() as u64,
+                c_chat_template_kwargs_json
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                c_reasoning_format
+                    .as_ref()
+                    .map(|value| value.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                Some(recipe_chat_stream_trampoline::<F>),
+                &mut callback_state as *mut ChatStreamCallbackState<F> as *mut c_void,
+                Some(recipe_chat_trace_trampoline),
+                &mut trace_state as *mut ChatTraceCallbackState as *mut c_void,
+                &mut native_result,
+            )
+        };
+
+        if let Some(error) = callback_state.error {
+            return Err(error);
+        }
+        if status != 0 {
+            return Err(unsafe { c_string(ms_runtime_last_error()) });
+        }
+
+        Ok(ChatGenerationTraceOutput {
+            generation: ChatGenerationOutput {
+                text: callback_state.text,
+                reasoning_text: (!callback_state.reasoning_text.is_empty())
+                    .then_some(callback_state.reasoning_text),
+                benchmark: native_result.benchmark,
+                finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
+                actual_seed: native_result.actual_seed,
+            },
+            trace: ChatGenerationTrace {
+                supported: trace_state.supported,
+                tokens: trace_state.tokens,
+            },
+        })
     }
 
     pub fn generate_chat_multimodal_streaming<F>(
@@ -1327,7 +1744,7 @@ impl RecipeChatSession {
             finish_reason: ChatFinishReason::Stop as u32,
             actual_seed: 0,
         };
-        let mut callback_state = ChatStreamCallbackState {
+        let mut callback_state = LegacyChatStreamCallbackState {
             on_delta: &mut on_delta,
             text: String::new(),
             reasoning_text: String::new(),
@@ -1352,8 +1769,8 @@ impl RecipeChatSession {
                     .as_ref()
                     .map(|value| value.as_ptr())
                     .unwrap_or(std::ptr::null()),
-                Some(recipe_chat_stream_trampoline::<F>),
-                &mut callback_state as *mut ChatStreamCallbackState<F> as *mut c_void,
+                Some(legacy_recipe_chat_stream_trampoline::<F>),
+                &mut callback_state as *mut LegacyChatStreamCallbackState<F> as *mut c_void,
                 &mut native_result,
             )
         };
@@ -1369,6 +1786,7 @@ impl RecipeChatSession {
                     .then_some(callback_state.reasoning_text),
                 benchmark: native_result.benchmark,
                 finish_reason: ChatFinishReason::from_native(native_result.finish_reason)?,
+                cancelled: native_result.finish_reason == NATIVE_CHAT_FINISH_REASON_CANCELLED,
                 actual_seed: native_result.actual_seed,
             })
         } else {
@@ -2081,5 +2499,15 @@ mod tests {
     #[test]
     fn accepts_native_runtime_with_expected_chat_abi_marker() {
         validate_chat_runtime_abi_from_version("model-surgery-runtime/0.2 chat-abi=2").unwrap();
+    }
+
+    #[test]
+    fn recognises_native_cancelled_chat_finish_reason() {
+        assert_eq!(ChatFinishReason::from_native(3), Ok(ChatFinishReason::Stop),);
+    }
+
+    #[test]
+    fn reserves_a_dedicated_stream_status_for_graceful_chat_cancellation() {
+        assert_eq!(ChatStreamAction::Cancel.native_status(), 2);
     }
 }
