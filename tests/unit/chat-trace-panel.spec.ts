@@ -301,6 +301,105 @@ test("shows the clicked candidate token ID in the selection details", async ({ p
   await expect(details).toContainText("4242");
 });
 
+test("uses a table-wide red-yellow-blue heatmap while preserving cell outlines", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const upperCandidates = [
+      { tokenId: 0, tokenText: "highest", logit: 30, probability: 0.75 },
+      { tokenId: 4, tokenText: "between", logit: 26.25, probability: 0.5 },
+      { tokenId: 1, tokenText: "upper", logit: 20, probability: 0.25 },
+    ];
+    const lowerCandidates = [
+      { tokenId: 2, tokenText: "middle", logit: 15, probability: 0.75 },
+      { tokenId: 3, tokenText: "lowest", logit: 0, probability: 0.25 },
+    ];
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: {
+        supported: true,
+        tokens: [{
+          index: 1,
+          tokenId: 0,
+          tokenText: "highest",
+          logit: 30,
+          rank: 1,
+          logitNormalizer: 0,
+          candidates: upperCandidates,
+          layers: [{ layer: 0, candidates: upperCandidates }, { layer: 1, candidates: lowerCandidates }],
+        }],
+      },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  const grid = page.getByRole("grid", { name: "Logit Lens predictions" });
+  const highestCandidate = grid.getByRole("button", { name: /highest/ });
+  const betweenCandidate = grid.getByRole("button", { name: /between/ });
+  const middleCandidate = grid.getByRole("button", { name: /middle/ });
+  const lowestCandidate = grid.getByRole("button", { name: /lowest/ });
+  const heatmapToggle = page.getByRole("button", { name: "Heatmap: Off" });
+
+  await heatmapToggle.click();
+  await expect(page.getByRole("button", { name: "Heatmap: On" })).toBeVisible();
+  await expect(highestCandidate).toHaveCSS("background-color", "rgb(165, 0, 38)");
+  await expect(betweenCandidate).toHaveCSS("background-color", "rgb(205, 55, 53)");
+  await expect(middleCandidate).toHaveCSS("background-color", "rgb(255, 241, 184)");
+  await expect(lowestCandidate).toHaveCSS("background-color", "rgb(49, 54, 149)");
+  await expect(highestCandidate).toHaveCSS("box-shadow", "rgb(14, 99, 156) 0px 0px 0px 2px inset");
+
+  await lowestCandidate.click();
+  await expect(lowestCandidate).toHaveCSS("box-shadow", "rgb(244, 135, 113) 0px 0px 0px 2px inset");
+});
+
+test("renders very small probabilities in scientific notation", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(async () => {
+    const { default: React } = await import("/node_modules/.vite/deps/react.js");
+    const { default: ReactDomClient } = await import("/node_modules/.vite/deps/react-dom_client.js");
+    const { ChatTracePanel } = await import("/src/components/Workbench/ChatTracePanel.tsx");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const candidates = [
+      { tokenId: 0, tokenText: "tiny", logit: 1, probability: 0.0000032 },
+      { tokenId: 1, tokenText: "other", logit: 0, probability: 0.0000008 },
+    ];
+
+    ReactDomClient.createRoot(host).render(React.createElement(ChatTracePanel, {
+      trace: {
+        supported: true,
+        tokens: [{
+          index: 1,
+          tokenId: 0,
+          tokenText: "tiny",
+          logit: 1,
+          rank: 1,
+          logitNormalizer: 0,
+          candidates,
+          layers: [{ layer: 0, candidates }],
+        }],
+      },
+      selectedTokenIndex: 0,
+      onSelectTokenIndex: () => undefined,
+      loading: false,
+      error: null,
+    }));
+  });
+
+  await page.getByRole("button", { name: "Logit Lens (Logit)" }).click();
+  await page.getByRole("option", { name: "Logit Lens (Probability)" }).click();
+  await expect(page.getByRole("grid", { name: "Logit Lens predictions" }).getByRole("button", { name: /tiny/ })).toContainText("3.20e-6");
+});
+
 test("closes the trace below its minimum width and reopens it from Trace saved", async ({ page }) => {
   await mountResizableTraceChat(page);
 

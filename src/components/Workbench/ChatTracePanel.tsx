@@ -92,6 +92,7 @@ function TraceDropdown<T extends string | number>({
 export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, loading, error, maximized = false, onToggleMaximized, onClose }: ChatTracePanelProps) {
   const [candidateCount, setCandidateCount] = useState<(typeof candidateCounts)[number]>(12);
   const [view, setView] = useState<"logit" | "probability">("logit");
+  const [heatmap, setHeatmap] = useState(false);
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ layer: number; tokenId: number } | null>(null);
@@ -107,6 +108,8 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
     : null;
   const detailTokenId = selectedCell ? selectedCandidate?.tokenId : selectedToken?.tokenId;
   const hasProbabilities = layers.every((layer) => layer.candidates.every((candidate) => typeof candidate.probability === "number"));
+  const visibleHeatmapCandidates = layers.flatMap((layer) => layer.candidates.slice(0, candidateCount));
+  const heatmapScale = heatmapScaleFor(visibleHeatmapCandidates, view);
 
   useEffect(() => {
     const finalLayer = layers.at(-1);
@@ -203,6 +206,12 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
           options={candidateCounts.map((count) => ({ value: count, label: `Top ${count}` }))}
           onChange={setCandidateCount}
         />
+        <div className="chat-trace-control">
+          <span>Heatmap</span>
+          <button type="button" className="chat-trace-select-trigger" aria-pressed={heatmap} onClick={() => setHeatmap((enabled) => !enabled)}>
+            <span>{`Heatmap: ${heatmap ? "On" : "Off"}`}</span>
+          </button>
+        </div>
       </div>
       <p className="chat-trace-title">Predictions for token #{selectedToken.index}: “{displayToken(selectedToken.tokenText)}”</p>
       <p className="chat-trace-caption">
@@ -225,9 +234,10 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
               {layer.candidates.slice(0, candidateCount).map((candidate) => (
                 <button
                   type="button"
-                  className={`chat-trace-grid-rank-cell${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}${selectedCell?.layer === layer.layer && selectedCell.tokenId === candidate.tokenId ? " chat-trace-selected-cell" : ""}`}
+                  className={`chat-trace-grid-rank-cell${heatmap ? " chat-trace-heatmap" : ""}${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}${selectedCell?.layer === layer.layer && selectedCell.tokenId === candidate.tokenId ? " chat-trace-selected-cell" : ""}`}
                   key={`${layer.layer}-${candidate.tokenId}`}
                   onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); setSelectedCell({ layer: layer.layer, tokenId: candidate.tokenId }); }}
+                  style={heatmap ? heatmapStyle(heatmapScale, candidate, view) : undefined}
                 >
                   <span className="chat-trace-cell-token">{displayToken(candidate.tokenText)}</span>
                   <span className="chat-trace-cell-value">{metricValue(candidate, view)}</span>
@@ -257,7 +267,43 @@ function displayToken(token: string): string {
 }
 
 function metricValue(candidate: ChatTraceCandidate, view: "logit" | "probability"): string {
-  return view === "probability" && typeof candidate.probability === "number"
-    ? candidate.probability.toFixed(4)
-    : candidate.logit.toFixed(3);
+  if (view === "probability" && typeof candidate.probability === "number") {
+    return candidate.probability > 0 && candidate.probability < 0.0001
+      ? candidate.probability.toExponential(2)
+      : candidate.probability.toFixed(4);
+  }
+  return candidate.logit.toFixed(3);
+}
+
+const heatmapStops = [
+  [0, [49, 54, 149]],
+  [0.25, [116, 173, 209]],
+  [0.5, [255, 241, 184]],
+  [0.75, [244, 109, 67]],
+  [1, [165, 0, 38]],
+] as const;
+
+function heatmapScore(candidate: ChatTraceCandidate, view: "logit" | "probability"): number {
+  return view === "probability" && typeof candidate.probability === "number" ? candidate.probability : candidate.logit;
+}
+
+function heatmapScaleFor(candidates: ChatTraceCandidate[], view: "logit" | "probability") {
+  const values = candidates.map((candidate) => heatmapScore(candidate, view));
+  return { minimum: Math.min(...values), maximum: Math.max(...values) };
+}
+
+function heatmapStyle(scale: { minimum: number; maximum: number }, candidate: ChatTraceCandidate, view: "logit" | "probability"): CSSProperties {
+  const normalized = scale.maximum <= scale.minimum
+    ? 0.5
+    : Math.min(1, Math.max(0, (heatmapScore(candidate, view) - scale.minimum) / (scale.maximum - scale.minimum)));
+  const upperIndex = heatmapStops.findIndex(([position]) => normalized <= position);
+  const lower = heatmapStops[Math.max(0, upperIndex - 1)];
+  const upper = heatmapStops[Math.max(1, upperIndex)];
+  const progress = (normalized - lower[0]) / (upper[0] - lower[0]);
+  const color = lower[1].map((channel, index) => Math.round(channel + (upper[1][index] - channel) * progress));
+  const textColor = normalized > 0.15 && normalized < 0.85 ? "#1f1f1f" : "#e3e3e3";
+  return {
+    "--chat-trace-heatmap-color": `rgb(${color.join(", ")})`,
+    "--chat-trace-heatmap-text-color": textColor,
+  } as CSSProperties;
 }
