@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { type ChatMessageData, ChatMessage } from "./ChatMessage";
-import { cancelChatGeneration, type ChatTracePayload } from "../../lib/tauri-bridge";
+import { cancelChatGeneration, type ChatTraceManifest, type ChatTraceToken } from "../../lib/tauri-bridge";
 import { ChatTracePanel } from "./ChatTracePanel";
 
 const TRACE_PANEL_MIN_WIDTH = 520;
@@ -16,7 +16,8 @@ interface ChatEditorProps {
   traceArmed: boolean;
   tracePanelOpen: boolean;
   traceMessageId: string | null;
-  tracePayload: ChatTracePayload | null;
+  traceManifest: ChatTraceManifest | null;
+  traceToken: ChatTraceToken | null;
   traceTokenIndex: number;
   traceLoading: boolean;
   traceError: string | null;
@@ -28,7 +29,7 @@ interface ChatEditorProps {
   onSend: (content: string) => void;
 }
 
-export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, traceMessageId, tracePayload, traceTokenIndex, traceLoading, traceError, onDraftChange, onTraceArmedChange, onOpenTrace, onCloseTrace, onTraceTokenChange, onSend }: ChatEditorProps) {
+export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, traceMessageId, traceManifest, traceToken, traceTokenIndex, traceLoading, traceError, onDraftChange, onTraceArmedChange, onOpenTrace, onCloseTrace, onTraceTokenChange, onSend }: ChatEditorProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [tracePanelWidth, setTracePanelWidth] = useState(TRACE_PANEL_MIN_WIDTH);
   const [tracePanelFullscreen, setTracePanelFullscreen] = useState(false);
@@ -117,10 +118,12 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
           {messages.map((message) => <ChatMessage
             key={message.id}
             message={message}
-            traceTokenTexts={message.id === traceMessageId ? tracePayload?.tokens.map((token) => token.tokenText) : undefined}
+            traceTokenTexts={message.id === traceMessageId ? traceManifest?.tokens.map((token) => token.tokenText) : undefined}
             selectedTraceTokenIndex={message.id === traceMessageId ? traceTokenIndex : undefined}
-            onOpenTrace={message.trace ? () => onOpenTrace(message.id) : undefined}
-            onSelectTraceToken={message.id === traceMessageId && tracePayload?.supported ? onTraceTokenChange : undefined}
+            onOpenTrace={message.trace && message.trace.status !== "saving" && message.trace.status !== "failed"
+              ? () => onOpenTrace(message.id)
+              : undefined}
+            onSelectTraceToken={message.id === traceMessageId && traceManifest?.supported ? onTraceTokenChange : undefined}
           />)}
           {error ? <p className="chat-editor-error" role="alert">{error}</p> : null}
         </div>
@@ -189,7 +192,8 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
             />
           ) : null}
           <ChatTracePanel
-            trace={tracePayload}
+            trace={traceManifest}
+            selectedToken={traceToken}
             selectedTokenIndex={traceTokenIndex}
             onSelectTokenIndex={onTraceTokenChange}
             loading={traceLoading}

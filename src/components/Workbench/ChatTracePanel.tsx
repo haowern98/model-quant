@@ -1,8 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import type { ChatTraceCandidate, ChatTracePayload } from "../../lib/tauri-bridge";
+import type { ChatTraceCandidate, ChatTraceManifest, ChatTraceToken } from "../../lib/tauri-bridge";
 
 type ChatTracePanelProps = {
-  trace: ChatTracePayload | null;
+  trace: ChatTraceManifest | null;
+  selectedToken?: ChatTraceToken | null;
   selectedTokenIndex: number;
   onSelectTokenIndex: (index: number) => void;
   loading: boolean;
@@ -89,7 +90,7 @@ function TraceDropdown<T extends string | number>({
   );
 }
 
-export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, loading, error, maximized = false, onToggleMaximized, onClose }: ChatTracePanelProps) {
+export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSelectTokenIndex, loading, error, maximized = false, onToggleMaximized, onClose }: ChatTracePanelProps) {
   const [candidateCount, setCandidateCount] = useState<(typeof candidateCounts)[number]>(12);
   const [view, setView] = useState<"logit" | "probability">("logit");
   const [heatmap, setHeatmap] = useState(false);
@@ -99,14 +100,14 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
   const [gridScrollWidth, setGridScrollWidth] = useState(0);
   const gridWrapRef = useRef<HTMLDivElement>(null);
   const gridScrollbarRef = useRef<HTMLDivElement>(null);
-  const selectedToken = trace?.tokens[selectedTokenIndex] ?? null;
-  const layers = selectedToken?.layers ?? [];
+  const selectedTokenData = selectedToken ?? (trace?.tokens[selectedTokenIndex] as ChatTraceToken | undefined);
+  const layers = selectedTokenData?.layers ?? [];
   const selectedLayerData = layers.find((layer) => layer.layer === selectedLayer) ?? layers.at(-1) ?? null;
   const selectedCandidate = selectedLayerData?.candidates.find((candidate) => candidate.tokenId === selectedCandidateId) ?? null;
   const selectedRank = selectedCandidate && selectedLayerData
     ? selectedLayerData.candidates.findIndex((candidate) => candidate.tokenId === selectedCandidate.tokenId) + 1
     : null;
-  const detailTokenId = selectedCell ? selectedCandidate?.tokenId : selectedToken?.tokenId;
+  const detailTokenId = selectedCell ? selectedCandidate?.tokenId : selectedTokenData?.tokenId;
   const hasProbabilities = layers.every((layer) => layer.candidates.every((candidate) => typeof candidate.probability === "number"));
   const visibleHeatmapCandidates = layers.flatMap((layer) => layer.candidates.slice(0, candidateCount));
   const heatmapScale = heatmapScaleFor(visibleHeatmapCandidates);
@@ -144,7 +145,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
 
   if (loading) return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">Loading trace…</aside>;
   if (error) return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">{error}</aside>;
-  if (!trace || !trace.supported || !selectedToken || layers.length === 0) {
+  if (!trace || !trace.supported || !selectedTokenData || layers.length === 0) {
     return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">This message has no supported trace.</aside>;
   }
 
@@ -213,7 +214,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
           </button>
         </div>
       </div>
-      <p className="chat-trace-title">Predictions for token #{selectedToken.index}: “{displayToken(selectedToken.tokenText)}”</p>
+      <p className="chat-trace-title">Predictions for token #{selectedTokenData.index}: “{displayToken(selectedTokenData.tokenText)}”</p>
       <p className="chat-trace-caption">
         {hasProbabilities
           ? "The outlined token is the actual generated token when it appears in this layer’s displayed top candidates."
@@ -234,7 +235,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
               {layer.candidates.slice(0, candidateCount).map((candidate) => (
                 <button
                   type="button"
-                  className={`chat-trace-grid-rank-cell${heatmap ? " chat-trace-heatmap" : ""}${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}${selectedCell?.layer === layer.layer && selectedCell.tokenId === candidate.tokenId ? " chat-trace-selected-cell" : ""}`}
+                  className={`chat-trace-grid-rank-cell${heatmap ? " chat-trace-heatmap" : ""}${candidate.tokenId === selectedTokenData.tokenId ? " chat-trace-generated-token" : ""}${selectedCell?.layer === layer.layer && selectedCell.tokenId === candidate.tokenId ? " chat-trace-selected-cell" : ""}`}
                   key={`${layer.layer}-${candidate.tokenId}`}
                   onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); setSelectedCell({ layer: layer.layer, tokenId: candidate.tokenId }); }}
                   style={heatmap ? heatmapStyle(heatmapScale, candidate) : undefined}
@@ -253,7 +254,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
       </div>
       <div className="chat-trace-selection">Selected: layer {selectedLayer ?? "—"} × {selectedCandidate ? `‘${displayToken(selectedCandidate.tokenText)}’` : "no candidate"}</div>
       <div className="chat-trace-details">
-        <div><span>Generated token</span><strong>{displayToken(selectedToken.tokenText)}</strong><span>{selectedCell ? "Selected token ID" : "Token ID"}</span><strong>{detailTokenId ?? "—"}</strong><span>Position</span><strong>{`After token #${selectedToken.index}`}</strong></div>
+        <div><span>Generated token</span><strong>{displayToken(selectedTokenData.tokenText)}</strong><span>{selectedCell ? "Selected token ID" : "Token ID"}</span><strong>{detailTokenId ?? "—"}</strong><span>Position</span><strong>{`After token #${selectedTokenData.index}`}</strong></div>
         <div><span>{view === "logit" ? "Logit Lens" : "Probability"}</span><strong>{selectedCandidate ? metricValue(selectedCandidate, view) : "—"}</strong><span>Top-64 rank</span><strong>{selectedRank ?? "—"}</strong><span>Captured candidates</span><strong>{selectedLayerData?.candidates.length ?? 0}</strong></div>
         <div className="chat-trace-predictions"><span>Top predictions at this layer</span>{selectedLayerData?.candidates.slice(0, 5).map((candidate, index) => <strong key={candidate.tokenId}>{`${index + 1}. ${displayToken(candidate.tokenText)}  ${metricValue(candidate, view)}`}</strong>)}</div>
       </div>

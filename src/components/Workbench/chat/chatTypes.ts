@@ -41,6 +41,7 @@ export type ChatTraceReference = {
   assistantMessageId: string;
   modelFingerprint: string;
   tokenCount: number;
+  status?: "saving" | "saved" | "failed";
 };
 
 export type ChatConversation = {

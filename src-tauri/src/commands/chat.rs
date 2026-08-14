@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::chat_trace::{
-    encode_trace_payload, save_trace_artifact, ChatTraceArtifact, ChatTraceCandidate,
-    ChatTraceLayer, ChatTracePayload, ChatTraceToken,
+    save_paged_trace_artifact, ChatTraceCandidate, ChatTraceLayer, ChatTracePayload,
+    ChatTraceToken,
 };
 use crate::commands::quant::RecipeStore;
 use crate::ffi::runtime_bindings::{
@@ -20,6 +20,7 @@ use crate::ffi::runtime_bindings::{
 use crate::quant::recipe::{QuantType, RecipeState};
 
 const CHAT_STREAM_EVENT: &str = "chat-stream-delta";
+const CHAT_TRACE_STATUS_EVENT: &str = "chat-trace-status";
 const CHAT_KIND: &str = "model-quant-chat";
 
 pub struct ChatRuntimeState {
@@ -103,6 +104,23 @@ pub struct ChatTraceReference {
     pub assistant_message_id: String,
     pub model_fingerprint: String,
     pub token_count: u32,
+    #[serde(default)]
+    pub status: ChatTraceStatus,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatTraceStatus {
+    Saving,
+    #[default]
+    Saved,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatTraceStatusEvent {
+    trace: ChatTraceReference,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -391,12 +409,48 @@ fn generate(
         (output, None)
     };
     let duration_seconds = output.benchmark.generation_ms / 1000.0;
-    let trace = trace_payload.and_then(|payload| match persist_trace(runtime, request, payload) {
-        Ok(trace) => Some(trace),
-        Err(error) => {
-            eprintln!("Chat trace was not saved: {error}");
-            None
-        }
+    let trace = trace_payload.and_then(|payload| {
+        let assistant_message_id = request.assistant_message_id.clone()?;
+        let conversation_id = request.conversation_id.clone();
+        let model_fingerprint = model_fingerprint(runtime);
+        let token_count = u32::try_from(payload.tokens.len()).unwrap_or(u32::MAX);
+        let saving_trace = trace_reference(
+            conversation_id.clone(),
+            assistant_message_id.clone(),
+            model_fingerprint.clone(),
+            token_count,
+            ChatTraceStatus::Saving,
+        );
+        let Some(app) = app.cloned() else {
+            return None;
+        };
+        let _trace_save = tauri::async_runtime::spawn_blocking(move || {
+            let status = match persist_trace(
+                &conversation_id,
+                &assistant_message_id,
+                &model_fingerprint,
+                payload,
+            ) {
+                Ok(()) => ChatTraceStatus::Saved,
+                Err(error) => {
+                    eprintln!("Chat trace was not saved: {error}");
+                    ChatTraceStatus::Failed
+                }
+            };
+            let _ = app.emit(
+                CHAT_TRACE_STATUS_EVENT,
+                ChatTraceStatusEvent {
+                    trace: trace_reference(
+                        conversation_id,
+                        assistant_message_id,
+                        model_fingerprint,
+                        token_count,
+                        status,
+                    ),
+                },
+            );
+        });
+        Some(saving_trace)
     });
     Ok(ChatGenerationResponse {
         model: model_name(&runtime.base_model),
@@ -447,15 +501,11 @@ fn validate_generation_request(request: &ChatGenerationRequest) -> Result<(), St
 }
 
 fn persist_trace(
-    runtime: &ChatRuntime,
-    request: &ChatGenerationRequest,
+    conversation_id: &str,
+    assistant_message_id: &str,
+    model_fingerprint: &str,
     trace: crate::ffi::runtime_bindings::ChatGenerationTrace,
-) -> Result<ChatTraceReference, String> {
-    let assistant_message_id = request
-        .assistant_message_id
-        .as_ref()
-        .ok_or("Chat trace assistant message id is missing.")?;
-    let model_fingerprint = model_fingerprint(runtime);
+) -> Result<(), String> {
     let payload = ChatTracePayload {
         supported: trace.supported,
         tokens: trace
@@ -498,20 +548,30 @@ fn persist_trace(
             })
             .collect(),
     };
-    let token_count = u32::try_from(payload.tokens.len()).unwrap_or(u32::MAX);
-    let artifact = ChatTraceArtifact {
-        conversation_id: request.conversation_id.clone(),
-        assistant_message_id: assistant_message_id.clone(),
-        model_fingerprint: model_fingerprint.clone(),
-        payload: encode_trace_payload(&payload)?,
-    };
-    save_trace_artifact(&artifact)?;
-    Ok(ChatTraceReference {
-        conversation_id: request.conversation_id.clone(),
-        assistant_message_id: assistant_message_id.clone(),
+    save_paged_trace_artifact(
+        conversation_id,
+        assistant_message_id,
+        model_fingerprint,
+        payload.supported,
+        payload.tokens,
+    )?;
+    Ok(())
+}
+
+fn trace_reference(
+    conversation_id: String,
+    assistant_message_id: String,
+    model_fingerprint: String,
+    token_count: u32,
+    status: ChatTraceStatus,
+) -> ChatTraceReference {
+    ChatTraceReference {
+        conversation_id,
+        assistant_message_id,
         model_fingerprint,
         token_count,
-    })
+        status,
+    }
 }
 
 fn model_fingerprint(runtime: &ChatRuntime) -> String {

@@ -23,6 +23,10 @@ type ChatStreamDelta = {
   reasoning: string;
 };
 
+type ChatTraceStatusEvent = {
+  trace: NonNullable<ChatMessageData["trace"]>;
+};
+
 export function useChatSession(modelConfig: ModelLoadConfig) {
   const [conversations, setConversations] = useState<Record<string, ChatConversation>>({});
   const [summaries, setSummaries] = useState<ChatConversationSummary[]>([]);
@@ -31,6 +35,7 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const conversationsRef = useRef(conversations);
+  const traceStatusesRef = useRef<Record<string, NonNullable<ChatMessageData["trace"]>>>({});
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -38,6 +43,33 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
 
   useEffect(() => {
     void listChatConversations().then(setSummaries).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<ChatTraceStatusEvent>("chat-trace-status", (event) => {
+      const { trace } = event.payload;
+      traceStatusesRef.current[trace.assistantMessageId] = trace;
+      setConversations((current) => {
+        const conversation = current[trace.conversationId];
+        if (!conversation) return current;
+        const messages = conversation.messages.map((message) =>
+          message.id === trace.assistantMessageId ? { ...message, trace } : message,
+        );
+        if (messages.every((message, index) => message === conversation.messages[index])) return current;
+        const updated = { ...conversation, messages };
+        void saveChatConversation(updated)
+          .then((summary) => setSummaries((existing) => sortSummaries([
+            ...existing.filter((item) => item.id !== summary.id),
+            summary,
+          ])))
+          .catch((saveError) => setError(errorMessage(saveError)));
+        return { ...current, [trace.conversationId]: updated };
+      });
+    }).then((stop) => {
+      unlisten = stop;
+    }).catch(() => undefined);
+    return () => unlisten?.();
   }, []);
 
   const createConversation = useCallback((): ChatConversation => {
@@ -145,7 +177,10 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
       });
       const completedConversation = await finishConversation(
         assistantMessage.id,
-        response,
+        {
+          ...response,
+          trace: traceStatusesRef.current[assistantMessage.id] ?? response.trace,
+        },
         conversationsRef.current[conversationId] ?? pendingConversation,
       );
       setConversations((current) => ({ ...current, [conversationId]: completedConversation }));
@@ -199,6 +234,10 @@ async function finishConversation(
   conversation: ChatConversation,
 ): Promise<ChatConversation> {
   const parsed = response.reasoning ? { content: response.content, reasoning: response.reasoning } : splitThinking(response.content);
+  const completedTrace = conversation.messages.find((message) => message.id === assistantId)?.trace;
+  const trace = completedTrace?.status === "saved" || completedTrace?.status === "failed"
+    ? completedTrace
+    : response.trace;
   const assistant = {
     id: assistantId,
     role: "assistant" as const,
@@ -210,7 +249,7 @@ async function finishConversation(
     durationSeconds: response.durationSeconds,
     finishReason: response.finishReason,
     seed: response.seed,
-    trace: response.trace,
+    trace,
   };
   return {
     ...conversation,

@@ -73,7 +73,11 @@ export function ChatMessage({
           {message.promptTokens !== undefined ? <span>{message.promptTokens.toLocaleString()} prompt tokens</span> : null}
           {message.durationSeconds !== undefined ? <span>{message.durationSeconds.toFixed(2)} s</span> : null}
           {message.finishReason ? <span>Stop reason: {message.finishReason}</span> : null}
-          {message.trace ? <button type="button" className="chat-message-trace-button" onClick={onOpenTrace}>Trace saved</button> : null}
+          {message.trace?.status === "saving" ? <span className="chat-message-trace-button">Saving trace…</span> : null}
+          {message.trace?.status === "failed" ? <span className="chat-message-trace-button">Trace unavailable</span> : null}
+          {message.trace && message.trace.status !== "saving" && message.trace.status !== "failed" ? (
+            <button type="button" className="chat-message-trace-button" onClick={onOpenTrace}>Trace saved</button>
+          ) : null}
         </div>
       ) : null}
     </article>

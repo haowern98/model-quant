@@ -63,8 +63,10 @@ import {
   getTensorValues,
   installGpqaDiamondHarness,
   installHumanEvalHarness,
-  loadChatTrace,
-  type ChatTracePayload,
+  loadChatTraceManifest,
+  loadChatTraceToken,
+  type ChatTraceManifest,
+  type ChatTraceToken,
 } from "../../lib/tauri-bridge";
 
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 143;
@@ -243,7 +245,8 @@ export function EditorPane({
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [chatTraceArmed, setChatTraceArmed] = useState<Record<string, boolean>>({});
   const [chatTraceViews, setChatTraceViews] = useState<Record<string, ChatTraceView>>({});
-  const [chatTracePayloads, setChatTracePayloads] = useState<Record<string, ChatTracePayload>>({});
+  const [chatTraceManifests, setChatTraceManifests] = useState<Record<string, ChatTraceManifest>>({});
+  const [chatTraceTokens, setChatTraceTokens] = useState<Record<string, Record<number, ChatTraceToken>>>({});
   const [chatTraceLoading, setChatTraceLoading] = useState<Record<string, boolean>>({});
   const [chatTraceErrors, setChatTraceErrors] = useState<Record<string, string>>({});
   const activeEditor =
@@ -282,11 +285,16 @@ export function EditorPane({
       ...current,
       [activeChatTab.chatId]: { messageId, tokenIndex: 0 },
     }));
-    if (chatTracePayloads[key] || chatTraceLoading[key]) return;
+    if (chatTraceManifests[key] || chatTraceLoading[key]) return;
     setChatTraceLoading((current) => ({ ...current, [key]: true }));
     setChatTraceErrors((current) => ({ ...current, [key]: "" }));
-    void loadChatTrace(message.trace.conversationId, message.trace.assistantMessageId)
-      .then((payload) => setChatTracePayloads((current) => ({ ...current, [key]: payload })))
+    void loadChatTraceManifest(message.trace.conversationId, message.trace.assistantMessageId)
+      .then(async (manifest) => {
+        setChatTraceManifests((current) => ({ ...current, [key]: manifest }));
+        if (!manifest.supported || manifest.tokens.length === 0) return;
+        const token = await loadChatTraceToken(message.trace!.conversationId, message.trace!.assistantMessageId, 0);
+        setChatTraceTokens((current) => ({ ...current, [key]: { ...(current[key] ?? {}), 0: token } }));
+      })
       .catch((error: unknown) => setChatTraceErrors((current) => ({
         ...current,
         [key]: error instanceof Error ? error.message : "Could not load this trace.",
@@ -479,7 +487,8 @@ export function EditorPane({
           traceArmed={activeChatTab ? (chatTraceArmed[activeChatTab.chatId] ?? false) : false}
           tracePanelOpen={Boolean(activeTraceView)}
           traceMessageId={activeTraceView?.messageId ?? null}
-          tracePayload={activeTraceKey ? (chatTracePayloads[activeTraceKey] ?? null) : null}
+          traceManifest={activeTraceKey ? (chatTraceManifests[activeTraceKey] ?? null) : null}
+          traceToken={activeTraceKey && activeTraceView ? (chatTraceTokens[activeTraceKey]?.[activeTraceView.tokenIndex] ?? null) : null}
           traceTokenIndex={activeTraceView?.tokenIndex ?? 0}
           traceLoading={activeTraceKey ? Boolean(chatTraceLoading[activeTraceKey]) : false}
           traceError={activeTraceKey ? (chatTraceErrors[activeTraceKey] || null) : null}
@@ -499,6 +508,22 @@ export function EditorPane({
               ...current,
               [activeChatTab.chatId]: { ...activeTraceView, tokenIndex },
             }));
+            if (!activeTraceKey || !activeTraceMessage?.trace || chatTraceTokens[activeTraceKey]?.[tokenIndex]) return;
+            setChatTraceLoading((current) => ({ ...current, [activeTraceKey]: true }));
+            void loadChatTraceToken(
+              activeTraceMessage.trace.conversationId,
+              activeTraceMessage.trace.assistantMessageId,
+              tokenIndex,
+            )
+              .then((token) => setChatTraceTokens((current) => ({
+                ...current,
+                [activeTraceKey]: { ...(current[activeTraceKey] ?? {}), [tokenIndex]: token },
+              })))
+              .catch((error: unknown) => setChatTraceErrors((current) => ({
+                ...current,
+                [activeTraceKey]: error instanceof Error ? error.message : "Could not load this trace token.",
+              })))
+              .finally(() => setChatTraceLoading((current) => ({ ...current, [activeTraceKey]: false })));
           }}
           onSend={(content) => {
             if (activeChatTab) onSendChatMessage(

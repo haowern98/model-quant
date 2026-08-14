@@ -195,9 +195,18 @@ export type ChatTraceToken = {
   layers: ChatTraceLayer[];
 };
 
-export type ChatTracePayload = {
+export type ChatTraceManifest = {
   supported: boolean;
-  tokens: ChatTraceToken[];
+  tokens: ChatTraceTokenSummary[];
+};
+
+export type ChatTraceTokenSummary = {
+  index: number;
+  tokenId: number;
+  tokenText: string;
+  logit: number;
+  rank: number;
+  logitNormalizer: number;
 };
 
 export async function generateChatResponse(
@@ -238,11 +247,19 @@ export async function loadChatConversation(id: string): Promise<ChatConversation
   return invoke<ChatConversation>("load_chat_conversation", { id });
 }
 
-export async function loadChatTrace(
+export async function loadChatTraceManifest(
   conversationId: string,
   assistantMessageId: string,
-): Promise<ChatTracePayload> {
-  return invoke<ChatTracePayload>("load_chat_trace", { conversationId, assistantMessageId });
+): Promise<ChatTraceManifest> {
+  return invoke<ChatTraceManifest>("load_chat_trace_manifest", { conversationId, assistantMessageId });
+}
+
+export async function loadChatTraceToken(
+  conversationId: string,
+  assistantMessageId: string,
+  tokenIndex: number,
+): Promise<ChatTraceToken> {
+  return invoke<ChatTraceToken>("load_chat_trace_token", { conversationId, assistantMessageId, tokenIndex });
 }
 
 export async function getGpqaDiamondStatus(): Promise<GpqaDiamondStatus> {

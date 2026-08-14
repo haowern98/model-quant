@@ -1,10 +1,12 @@
 use std::fs;
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 const TRACE_MAGIC: &[u8; 8] = b"MITRACE1";
 const TRACE_VERSION: u32 = 2;
+const PAGED_TRACE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +54,24 @@ pub struct ChatTracePayload {
     pub tokens: Vec<ChatTraceToken>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTraceTokenSummary {
+    pub index: u32,
+    pub token_id: i32,
+    pub token_text: String,
+    pub logit: f32,
+    pub rank: u32,
+    pub logit_normalizer: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTraceManifest {
+    pub supported: bool,
+    pub tokens: Vec<ChatTraceTokenSummary>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TraceHeader {
@@ -59,6 +79,12 @@ struct TraceHeader {
     conversation_id: String,
     assistant_message_id: String,
     model_fingerprint: String,
+    #[serde(default)]
+    supported: Option<bool>,
+    #[serde(default)]
+    tokens: Vec<ChatTraceTokenSummary>,
+    #[serde(default)]
+    token_page_lengths: Vec<u64>,
 }
 
 pub fn save_trace_artifact(artifact: &ChatTraceArtifact) -> Result<PathBuf, String> {
@@ -72,6 +98,23 @@ pub fn load_trace_artifact(
     load_trace_artifact_from(&trace_directory(), conversation_id, assistant_message_id)
 }
 
+pub fn save_paged_trace_artifact(
+    conversation_id: &str,
+    assistant_message_id: &str,
+    model_fingerprint: &str,
+    supported: bool,
+    tokens: Vec<ChatTraceToken>,
+) -> Result<PathBuf, String> {
+    save_paged_trace_artifact_in(
+        &trace_directory(),
+        conversation_id,
+        assistant_message_id,
+        model_fingerprint,
+        supported,
+        tokens,
+    )
+}
+
 pub fn encode_trace_payload(payload: &ChatTracePayload) -> Result<Vec<u8>, String> {
     serde_json::to_vec(payload).map_err(|error| error.to_string())
 }
@@ -81,12 +124,25 @@ pub fn decode_trace_payload(payload: &[u8]) -> Result<ChatTracePayload, String> 
 }
 
 #[tauri::command]
-pub fn load_chat_trace(
+pub fn load_chat_trace_manifest(
     conversation_id: String,
     assistant_message_id: String,
-) -> Result<ChatTracePayload, String> {
-    let artifact = load_trace_artifact(&conversation_id, &assistant_message_id)?;
-    decode_trace_payload(&artifact.payload)
+) -> Result<ChatTraceManifest, String> {
+    load_trace_manifest_from(&trace_directory(), &conversation_id, &assistant_message_id)
+}
+
+#[tauri::command]
+pub fn load_chat_trace_token(
+    conversation_id: String,
+    assistant_message_id: String,
+    token_index: usize,
+) -> Result<ChatTraceToken, String> {
+    load_trace_token_page_from(
+        &trace_directory(),
+        &conversation_id,
+        &assistant_message_id,
+        token_index,
+    )
 }
 
 fn save_trace_artifact_in(
@@ -99,6 +155,9 @@ fn save_trace_artifact_in(
         conversation_id: artifact.conversation_id.clone(),
         assistant_message_id: artifact.assistant_message_id.clone(),
         model_fingerprint: artifact.model_fingerprint.clone(),
+        supported: None,
+        tokens: Vec::new(),
+        token_page_lengths: Vec::new(),
     };
     let header = serde_json::to_vec(&header).map_err(|error| error.to_string())?;
     let header_len =
@@ -119,6 +178,134 @@ fn save_trace_artifact_in(
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     fs::write(&path, bytes).map_err(|error| error.to_string())?;
     Ok(path)
+}
+
+fn save_paged_trace_artifact_in(
+    directory: &Path,
+    conversation_id: &str,
+    assistant_message_id: &str,
+    model_fingerprint: &str,
+    supported: bool,
+    tokens: Vec<ChatTraceToken>,
+) -> Result<PathBuf, String> {
+    if !valid_id(conversation_id) || !valid_id(assistant_message_id) || model_fingerprint.trim().is_empty() {
+        return Err("Trace artifact is invalid.".to_string());
+    }
+    let token_page_lengths = tokens
+        .iter()
+        .map(|token| {
+            let mut counter = ByteCounter::default();
+            serde_json::to_writer(&mut counter, token).map_err(|error| error.to_string())?;
+            Ok(counter.0)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let header = TraceHeader {
+        version: PAGED_TRACE_VERSION,
+        conversation_id: conversation_id.to_string(),
+        assistant_message_id: assistant_message_id.to_string(),
+        model_fingerprint: model_fingerprint.to_string(),
+        supported: Some(supported),
+        tokens: tokens
+            .iter()
+            .map(|token| ChatTraceTokenSummary {
+                index: token.index,
+                token_id: token.token_id,
+                token_text: token.token_text.clone(),
+                logit: token.logit,
+                rank: token.rank,
+                logit_normalizer: token.logit_normalizer,
+            })
+            .collect(),
+        token_page_lengths,
+    };
+    let header = serde_json::to_vec(&header).map_err(|error| error.to_string())?;
+    let header_len = u32::try_from(header.len()).map_err(|_| "Trace header is too large.".to_string())?;
+    let path = trace_artifact_path(directory, conversation_id, assistant_message_id)?;
+    let parent = path.parent().ok_or("Trace path is invalid.")?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("trace.tmp");
+    let mut file = BufWriter::new(fs::File::create(&temporary).map_err(|error| error.to_string())?);
+    file.write_all(TRACE_MAGIC).map_err(|error| error.to_string())?;
+    file.write_all(&header_len.to_le_bytes()).map_err(|error| error.to_string())?;
+    file.write_all(&header).map_err(|error| error.to_string())?;
+    for token in tokens {
+        serde_json::to_writer(&mut file, &token).map_err(|error| error.to_string())?;
+    }
+    file.flush().map_err(|error| error.to_string())?;
+    fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+#[derive(Default)]
+struct ByteCounter(u64);
+
+impl Write for ByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0 += buffer.len() as u64;
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn load_trace_manifest_from(
+    directory: &Path,
+    conversation_id: &str,
+    assistant_message_id: &str,
+) -> Result<ChatTraceManifest, String> {
+    let (header, payload_start) = read_trace_header(directory, conversation_id, assistant_message_id)?;
+    if header.version == PAGED_TRACE_VERSION {
+        return Ok(ChatTraceManifest {
+            supported: header.supported.unwrap_or(false),
+            tokens: header.tokens,
+        });
+    }
+    let payload = read_trace_payload(directory, conversation_id, assistant_message_id, payload_start)?;
+    let legacy = decode_trace_payload(&payload)?;
+    Ok(ChatTraceManifest {
+        supported: legacy.supported,
+        tokens: legacy.tokens.iter().map(token_summary).collect(),
+    })
+}
+
+fn load_trace_token_page_from(
+    directory: &Path,
+    conversation_id: &str,
+    assistant_message_id: &str,
+    token_index: usize,
+) -> Result<ChatTraceToken, String> {
+    let (header, payload_start) = read_trace_header(directory, conversation_id, assistant_message_id)?;
+    if header.version == PAGED_TRACE_VERSION {
+        let length = *header.token_page_lengths.get(token_index).ok_or("Trace token index is invalid.")?;
+        let offset = header.token_page_lengths.iter().take(token_index).try_fold(payload_start as u64, |offset, length| {
+            offset.checked_add(*length).ok_or("Trace artifact is not valid.")
+        })?;
+        let path = trace_artifact_path(directory, conversation_id, assistant_message_id)?;
+        let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+        let mut page = vec![0; usize::try_from(length).map_err(|_| "Trace page is too large.")?];
+        file.read_exact(&mut page).map_err(|error| error.to_string())?;
+        return serde_json::from_slice(&page).map_err(|_| "Trace token page is not valid.".to_string());
+    }
+    let payload = read_trace_payload(directory, conversation_id, assistant_message_id, payload_start)?;
+    decode_trace_payload(&payload)?
+        .tokens
+        .into_iter()
+        .nth(token_index)
+        .ok_or("Trace token index is invalid.".to_string())
+}
+
+fn token_summary(token: &ChatTraceToken) -> ChatTraceTokenSummary {
+    ChatTraceTokenSummary {
+        index: token.index,
+        token_id: token.token_id,
+        token_text: token.token_text.clone(),
+        logit: token.logit,
+        rank: token.rank,
+        logit_normalizer: token.logit_normalizer,
+    }
 }
 
 fn load_trace_artifact_from(
@@ -158,6 +345,47 @@ fn load_trace_artifact_from(
         model_fingerprint: header.model_fingerprint,
         payload: bytes[header_end..].to_vec(),
     })
+}
+
+fn read_trace_header(
+    directory: &Path,
+    conversation_id: &str,
+    assistant_message_id: &str,
+) -> Result<(TraceHeader, usize), String> {
+    let path = trace_artifact_path(directory, conversation_id, assistant_message_id)?;
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut prefix = [0; TRACE_MAGIC.len() + 4];
+    file.read_exact(&mut prefix).map_err(|error| error.to_string())?;
+    if &prefix[..TRACE_MAGIC.len()] != TRACE_MAGIC {
+        return Err("Trace artifact is not valid.".to_string());
+    }
+    let header_len = u32::from_le_bytes(prefix[TRACE_MAGIC.len()..].try_into().unwrap()) as usize;
+    let mut header = vec![0; header_len];
+    file.read_exact(&mut header).map_err(|error| error.to_string())?;
+    let header: TraceHeader = serde_json::from_slice(&header).map_err(|_| "Trace artifact is not valid.".to_string())?;
+    if !matches!(header.version, TRACE_VERSION | PAGED_TRACE_VERSION)
+        || header.conversation_id != conversation_id
+        || header.assistant_message_id != assistant_message_id
+    {
+        return Err("Trace artifact is not valid.".to_string());
+    }
+    if header.version == PAGED_TRACE_VERSION && header.tokens.len() != header.token_page_lengths.len() {
+        return Err("Trace artifact is not valid.".to_string());
+    }
+    Ok((header, TRACE_MAGIC.len() + 4 + header_len))
+}
+
+fn read_trace_payload(
+    directory: &Path,
+    conversation_id: &str,
+    assistant_message_id: &str,
+    payload_start: usize,
+) -> Result<Vec<u8>, String> {
+    let bytes = fs::read(trace_artifact_path(directory, conversation_id, assistant_message_id)?)
+        .map_err(|error| error.to_string())?;
+    bytes.get(payload_start..)
+        .map(ToOwned::to_owned)
+        .ok_or("Trace artifact is not valid.".to_string())
 }
 
 fn trace_directory() -> PathBuf {
@@ -208,6 +436,7 @@ fn valid_id(id: &str) -> bool {
 mod tests {
     use super::{
         decode_trace_payload, encode_trace_payload, load_trace_artifact_from,
+        load_trace_manifest_from, load_trace_token_page_from, save_paged_trace_artifact_in,
         save_trace_artifact_in, trace_directory_from_local_app_data, ChatTraceArtifact,
         ChatTraceCandidate, ChatTraceLayer, ChatTracePayload, ChatTraceToken,
     };
@@ -280,5 +509,57 @@ mod tests {
             decode_trace_payload(&encode_trace_payload(&payload).unwrap()).unwrap(),
             payload
         );
+    }
+
+    #[test]
+    fn reads_a_compact_manifest_and_only_the_requested_token_page() {
+        let directory =
+            std::env::temp_dir().join(format!("model-surgery-paged-trace-test-{}", std::process::id()));
+        let token = |index, token_id, token_text: &str| ChatTraceToken {
+            index,
+            token_id,
+            token_text: token_text.to_string(),
+            logit: index as f32,
+            rank: index,
+            logit_normalizer: index as f64,
+            candidates: vec![ChatTraceCandidate {
+                token_id,
+                logit: index as f32,
+                probability: Some(0.5),
+                token_text: token_text.to_string(),
+            }],
+            layers: vec![ChatTraceLayer {
+                layer: index as i32,
+                candidates: vec![ChatTraceCandidate {
+                    token_id,
+                    logit: index as f32,
+                    probability: Some(0.5),
+                    token_text: token_text.to_string(),
+                }],
+            }],
+        };
+
+        save_paged_trace_artifact_in(
+            &directory,
+            "conversation-1",
+            "assistant-1",
+            "model-fingerprint",
+            true,
+            vec![token(1, 41, "first"), token(2, 42, "second")],
+        )
+        .unwrap();
+
+        let manifest = load_trace_manifest_from(&directory, "conversation-1", "assistant-1").unwrap();
+        assert!(manifest.supported);
+        assert_eq!(manifest.tokens.len(), 2);
+        assert_eq!(manifest.tokens[0].token_text, "first");
+        assert_eq!(manifest.tokens[1].token_id, 42);
+
+        let page = load_trace_token_page_from(&directory, "conversation-1", "assistant-1", 1).unwrap();
+        assert_eq!(page.layers.len(), 1);
+        assert_eq!(page.layers[0].layer, 2);
+        assert_eq!(page.layers[0].candidates[0].token_text, "second");
+
+        fs::remove_dir_all(directory).unwrap();
     }
 }
