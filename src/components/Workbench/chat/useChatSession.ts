@@ -188,9 +188,20 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
         const title = completedConversation.title === "New chat"
           ? await titleForConversation(conversationId, completedConversation)
           : completedConversation.title;
-        const savedConversation = { ...completedConversation, title, updatedAt: new Date().toISOString() };
+        let savedConversation = withLatestTraceStatuses(
+          { ...completedConversation, title, updatedAt: new Date().toISOString() },
+          traceStatusesRef.current,
+        );
         await saveChatConversation(savedConversation);
-        setConversations((current) => ({ ...current, [conversationId]: savedConversation }));
+        const latestSavedConversation = withLatestTraceStatuses(savedConversation, traceStatusesRef.current);
+        if (latestSavedConversation !== savedConversation) {
+          savedConversation = latestSavedConversation;
+          await saveChatConversation(savedConversation);
+        }
+        setConversations((current) => ({
+          ...current,
+          [conversationId]: withLatestTraceStatuses(savedConversation, traceStatusesRef.current),
+        }));
         setSummaries((current) => sortSummaries([
           ...current.filter((summary) => summary.id !== conversationId),
           { id: conversationId, title, updatedAt: savedConversation.updatedAt },
@@ -282,6 +293,20 @@ function fallbackTitle(content: string): string {
 function splitThinking(content: string): { content: string; reasoning?: string } {
   const match = content.match(/^\s*<think>([\s\S]*?)<\/think>\s*/i);
   return match ? { content: content.slice(match[0].length), reasoning: match[1].trim() } : { content };
+}
+
+function withLatestTraceStatuses(
+  conversation: ChatConversation,
+  statuses: Record<string, NonNullable<ChatMessageData["trace"]>>,
+): ChatConversation {
+  let changed = false;
+  const messages = conversation.messages.map((message) => {
+    const trace = statuses[message.id];
+    if (!trace || message.trace?.status === trace.status) return message;
+    changed = true;
+    return { ...message, trace };
+  });
+  return changed ? { ...conversation, messages } : conversation;
 }
 
 function sortSummaries(summaries: ChatConversationSummary[]): ChatConversationSummary[] {
