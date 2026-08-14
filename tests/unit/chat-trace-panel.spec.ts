@@ -203,7 +203,7 @@ test("keeps the Layer lane aligned while Logit Lens ranks scroll horizontally", 
   expect(after?.x).toBeGreaterThanOrEqual(wrapBox!.x - 1);
 });
 
-test("uses a red selected-cell outline while preserving generated-token blue", async ({ page }) => {
+test("uses a red selected-cell outline while preserving generated-token green", async ({ page }) => {
   await page.goto("/");
 
   await page.evaluate(async () => {
@@ -247,14 +247,14 @@ test("uses a red selected-cell outline while preserving generated-token blue", a
     return { boxShadow: style.boxShadow, outlineStyle: style.outlineStyle };
   });
   expect(generatedHighlight.outlineStyle).toBe("none");
-  expect(generatedHighlight.boxShadow).toContain("rgb(14, 99, 156)");
+  expect(generatedHighlight.boxShadow).toContain("rgb(22, 163, 74)");
 
   await generatedCandidate.click();
   await expect(generatedCandidate).toHaveCSS("box-shadow", "rgb(244, 135, 113) 0px 0px 0px 2px inset");
 
   await otherCandidate.click();
   await expect(otherCandidate).toHaveCSS("box-shadow", "rgb(244, 135, 113) 0px 0px 0px 2px inset");
-  await expect(generatedCandidate).toHaveCSS("box-shadow", "rgb(14, 99, 156) 0px 0px 0px 2px inset");
+  await expect(generatedCandidate).toHaveCSS("box-shadow", "rgb(22, 163, 74) 0px 0px 0px 2px inset");
 });
 
 test("shows the clicked candidate token ID in the selection details", async ({ page }) => {
@@ -301,7 +301,7 @@ test("shows the clicked candidate token ID in the selection details", async ({ p
   await expect(details).toContainText("4242");
 });
 
-test("uses a table-wide red-yellow-blue heatmap while preserving cell outlines", async ({ page }) => {
+test("uses one raw-logit heatmap scale in both score views", async ({ page }) => {
   await page.goto("/");
 
   await page.evaluate(async () => {
@@ -354,10 +354,17 @@ test("uses a table-wide red-yellow-blue heatmap while preserving cell outlines",
   await expect(betweenCandidate).toHaveCSS("background-color", "rgb(205, 55, 53)");
   await expect(middleCandidate).toHaveCSS("background-color", "rgb(255, 241, 184)");
   await expect(lowestCandidate).toHaveCSS("background-color", "rgb(49, 54, 149)");
-  await expect(highestCandidate).toHaveCSS("box-shadow", "rgb(14, 99, 156) 0px 0px 0px 2px inset");
+  await expect(highestCandidate).toHaveCSS("box-shadow", "rgb(22, 163, 74) 0px 0px 0px 2px inset");
 
   await lowestCandidate.click();
   await expect(lowestCandidate).toHaveCSS("box-shadow", "rgb(244, 135, 113) 0px 0px 0px 2px inset");
+
+  await page.getByRole("button", { name: "Logit Lens (Logit)" }).click();
+  await page.getByRole("option", { name: "Logit Lens (Probability)" }).click();
+  await expect(highestCandidate).toHaveCSS("background-color", "rgb(165, 0, 38)");
+  await expect(betweenCandidate).toHaveCSS("background-color", "rgb(205, 55, 53)");
+  await expect(middleCandidate).toHaveCSS("background-color", "rgb(255, 241, 184)");
+  await expect(lowestCandidate).toHaveCSS("background-color", "rgb(49, 54, 149)");
 });
 
 test("renders very small probabilities in scientific notation", async ({ page }) => {

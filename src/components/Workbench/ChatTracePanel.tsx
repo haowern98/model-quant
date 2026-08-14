@@ -109,7 +109,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
   const detailTokenId = selectedCell ? selectedCandidate?.tokenId : selectedToken?.tokenId;
   const hasProbabilities = layers.every((layer) => layer.candidates.every((candidate) => typeof candidate.probability === "number"));
   const visibleHeatmapCandidates = layers.flatMap((layer) => layer.candidates.slice(0, candidateCount));
-  const heatmapScale = heatmapScaleFor(visibleHeatmapCandidates, view);
+  const heatmapScale = heatmapScaleFor(visibleHeatmapCandidates);
 
   useEffect(() => {
     const finalLayer = layers.at(-1);
@@ -237,7 +237,7 @@ export function ChatTracePanel({ trace, selectedTokenIndex, onSelectTokenIndex, 
                   className={`chat-trace-grid-rank-cell${heatmap ? " chat-trace-heatmap" : ""}${candidate.tokenId === selectedToken.tokenId ? " chat-trace-generated-token" : ""}${selectedCell?.layer === layer.layer && selectedCell.tokenId === candidate.tokenId ? " chat-trace-selected-cell" : ""}`}
                   key={`${layer.layer}-${candidate.tokenId}`}
                   onClick={() => { setSelectedLayer(layer.layer); setSelectedCandidateId(candidate.tokenId); setSelectedCell({ layer: layer.layer, tokenId: candidate.tokenId }); }}
-                  style={heatmap ? heatmapStyle(heatmapScale, candidate, view) : undefined}
+                  style={heatmap ? heatmapStyle(heatmapScale, candidate) : undefined}
                 >
                   <span className="chat-trace-cell-token">{displayToken(candidate.tokenText)}</span>
                   <span className="chat-trace-cell-value">{metricValue(candidate, view)}</span>
@@ -283,19 +283,15 @@ const heatmapStops = [
   [1, [165, 0, 38]],
 ] as const;
 
-function heatmapScore(candidate: ChatTraceCandidate, view: "logit" | "probability"): number {
-  return view === "probability" && typeof candidate.probability === "number" ? candidate.probability : candidate.logit;
-}
-
-function heatmapScaleFor(candidates: ChatTraceCandidate[], view: "logit" | "probability") {
-  const values = candidates.map((candidate) => heatmapScore(candidate, view));
+function heatmapScaleFor(candidates: ChatTraceCandidate[]) {
+  const values = candidates.map((candidate) => candidate.logit);
   return { minimum: Math.min(...values), maximum: Math.max(...values) };
 }
 
-function heatmapStyle(scale: { minimum: number; maximum: number }, candidate: ChatTraceCandidate, view: "logit" | "probability"): CSSProperties {
+function heatmapStyle(scale: { minimum: number; maximum: number }, candidate: ChatTraceCandidate): CSSProperties {
   const normalized = scale.maximum <= scale.minimum
     ? 0.5
-    : Math.min(1, Math.max(0, (heatmapScore(candidate, view) - scale.minimum) / (scale.maximum - scale.minimum)));
+    : Math.min(1, Math.max(0, (candidate.logit - scale.minimum) / (scale.maximum - scale.minimum)));
   const upperIndex = heatmapStops.findIndex(([position]) => normalized <= position);
   const lower = heatmapStops[Math.max(0, upperIndex - 1)];
   const upper = heatmapStops[Math.max(1, upperIndex)];
