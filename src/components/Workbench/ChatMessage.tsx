@@ -39,20 +39,22 @@ export function ChatMessage({
     return pieces.flatMap((piece) => piece.text
       .split(/(\s+)/)
       .filter((part) => part.length > 0)
-      .map((part, partIndex) => (
-        /^\s+$/.test(part)
-          ? <Fragment key={`${piece.tokenIndex}-${partIndex}`}>{part}</Fragment>
-          : (
-            <button
-              type="button"
-              key={`${piece.tokenIndex}-${partIndex}`}
-              className={`chat-trace-token${piece.tokenIndex === selectedTraceTokenIndex ? " chat-trace-token-selected" : ""}`}
-              onClick={() => onSelectTraceToken(piece.tokenIndex)}
-            >
-              {part}
-            </button>
-          )
-      )));
+      .map((part, partIndex) => {
+        const tokenIndex = piece.tokenIndex;
+        if (/^\s+$/.test(part) || tokenIndex === null) {
+          return <Fragment key={`${tokenIndex}-${partIndex}`}>{part}</Fragment>;
+        }
+        return (
+          <button
+            type="button"
+            key={`${tokenIndex}-${partIndex}`}
+            className={`chat-trace-token${tokenIndex === selectedTraceTokenIndex ? " chat-trace-token-selected" : ""}`}
+            onClick={() => onSelectTraceToken(tokenIndex)}
+          >
+            {part}
+          </button>
+        );
+      }));
   };
 
   return (

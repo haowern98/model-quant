@@ -24,3 +24,21 @@ test("maps displayed reasoning and answer text to their original raw trace token
     ],
   });
 });
+
+test("keeps a captured trace prefix clickable when a cancelled reply has an untraced tail", async ({ page }) => {
+  await page.goto("/");
+
+  const mapped = await page.evaluate(async () => {
+    const { mapTraceText } = await import("/src/components/Workbench/chat/traceText.ts");
+    return mapTraceText(
+      ["Yes, I am familiar with Genshin Impact. It is an open-world action role-playing game developed by mi", "Ho"],
+      "Yes, I am familiar with Genshin Impact. It is an open-world action role-playing game developed by miHoHo",
+    );
+  });
+
+  expect(mapped).toEqual([
+    { tokenIndex: 0, text: "Yes, I am familiar with Genshin Impact. It is an open-world action role-playing game developed by mi" },
+    { tokenIndex: 1, text: "Ho" },
+    { tokenIndex: null, text: "Ho" },
+  ]);
+});

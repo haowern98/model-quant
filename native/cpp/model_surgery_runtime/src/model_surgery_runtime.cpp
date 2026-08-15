@@ -2710,6 +2710,21 @@ int32_t run_session_generate_stream(
             out_finish_reason = MS_CHAT_FINISH_REASON_STOP;
         }
 
+        if (trace_active) {
+            const int trace_res = emit_chat_trace_token(
+                vocab,
+                session.ctx.get(),
+                token,
+                generated,
+                trace_callback,
+                trace_user_data);
+            if (trace_res == CHAT_TRACE_STATUS_UNAVAILABLE) {
+                trace_active = false;
+            } else if (trace_res != 0) {
+                return trace_res;
+            }
+        }
+
         const int stream_res = emit_chat_stream_parse_delta(
             generated_text,
             chat_params,
@@ -2725,21 +2740,6 @@ int32_t run_session_generate_stream(
         }
         if (stream_res != 0) {
             return stream_res;
-        }
-
-        if (trace_active) {
-            const int trace_res = emit_chat_trace_token(
-                vocab,
-                session.ctx.get(),
-                token,
-                generated,
-                trace_callback,
-                trace_user_data);
-            if (trace_res == CHAT_TRACE_STATUS_UNAVAILABLE) {
-                trace_active = false;
-            } else if (trace_res != 0) {
-                return trace_res;
-            }
         }
 
         if (out_finish_reason == MS_CHAT_FINISH_REASON_STOP) {

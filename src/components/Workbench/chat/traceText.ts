@@ -1,5 +1,5 @@
 export type TraceTextPiece = {
-  tokenIndex: number;
+  tokenIndex: number | null;
   text: string;
 };
 
@@ -11,10 +11,33 @@ export function mapTraceText(
   if (displayedText.length === 0) return [];
 
   const rawText = tokenTexts.join("");
-  const textStart = rawText.indexOf(displayedText, startAt);
-  if (textStart < 0) return undefined;
+  let textStart = rawText.indexOf(displayedText, startAt);
+  let tracedLength = displayedText.length;
+  if (textStart < 0) {
+    let bestStart = -1;
+    let bestLength = 0;
+    let candidateStart = rawText.indexOf(displayedText[0], startAt);
+    while (candidateStart >= 0) {
+      const candidateLimit = Math.min(rawText.length - candidateStart, displayedText.length);
+      let candidateLength = 0;
+      while (
+        candidateLength < candidateLimit
+        && rawText[candidateStart + candidateLength] === displayedText[candidateLength]
+      ) {
+        candidateLength += 1;
+      }
+      if (candidateLength > bestLength) {
+        bestStart = candidateStart;
+        bestLength = candidateLength;
+      }
+      candidateStart = rawText.indexOf(displayedText[0], candidateStart + 1);
+    }
+    if (bestLength === 0) return undefined;
+    textStart = bestStart;
+    tracedLength = bestLength;
+  }
 
-  const textEnd = textStart + displayedText.length;
+  const textEnd = textStart + tracedLength;
   const pieces: TraceTextPiece[] = [];
   let tokenStart = 0;
 
@@ -31,5 +54,11 @@ export function mapTraceText(
     tokenStart = tokenEnd;
   }
 
-  return pieces.map((piece) => piece.text).join("") === displayedText ? pieces : undefined;
+  if (pieces.map((piece) => piece.text).join("") !== displayedText.slice(0, tracedLength)) {
+    return undefined;
+  }
+  if (tracedLength < displayedText.length) {
+    pieces.push({ tokenIndex: null, text: displayedText.slice(tracedLength) });
+  }
+  return pieces;
 }
