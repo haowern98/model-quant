@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
@@ -301,6 +301,11 @@ pub async fn load_chat_conversation(id: String) -> Result<StoredChatConversation
         return Err("Chat conversation file is not valid.".to_string());
     }
     Ok(conversation)
+}
+
+#[tauri::command]
+pub async fn delete_chat_conversation(id: String) -> Result<(), String> {
+    delete_chat_conversation_in(&chat_directory(), &chat_trace_directory(), &id)
 }
 
 fn generate(
@@ -627,6 +632,36 @@ fn chat_directory_from_local_app_data(local_app_data: Option<std::ffi::OsString>
         .join("conversations")
 }
 
+fn chat_trace_directory() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MI")
+        .join("g")
+        .join("traces")
+}
+
+fn delete_chat_conversation_in(
+    conversation_directory: &Path,
+    trace_directory: &Path,
+    id: &str,
+) -> Result<(), String> {
+    if !valid_id(id) {
+        return Err("Chat conversation id is invalid.".to_string());
+    }
+
+    let conversation = conversation_directory.join(format!("model-quant-{id}.conversation.json"));
+    if conversation.exists() {
+        fs::remove_file(conversation).map_err(|error| error.to_string())?;
+    }
+
+    let traces = trace_directory.join(id);
+    if traces.exists() {
+        fs::remove_dir_all(traces).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn conversation_path(id: &str) -> Result<PathBuf, String> {
     if !valid_id(id) {
         return Err("Chat conversation id is invalid.".to_string());
@@ -713,8 +748,9 @@ fn normalise_title(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{chat_directory_from_local_app_data, normalise_title};
+    use super::{chat_directory_from_local_app_data, delete_chat_conversation_in, normalise_title};
     use std::ffi::OsString;
+    use std::fs;
     use std::path::PathBuf;
 
     #[test]
@@ -736,5 +772,42 @@ mod tests {
                 .join("g")
                 .join("conversations"),
         );
+    }
+
+    #[test]
+    fn deletes_only_the_requested_chat_and_its_trace_directory() {
+        let root = std::env::temp_dir().join(format!("model-surgery-chat-delete-test-{}", std::process::id()));
+        let conversations = root.join("conversations");
+        let traces = root.join("traces");
+        fs::create_dir_all(&conversations).unwrap();
+        fs::create_dir_all(traces.join("chat-one")).unwrap();
+        fs::create_dir_all(traces.join("chat-two")).unwrap();
+        fs::write(conversations.join("model-quant-chat-one.conversation.json"), "one").unwrap();
+        fs::write(conversations.join("model-quant-chat-two.conversation.json"), "two").unwrap();
+        fs::write(traces.join("chat-one").join("assistant-one.trace"), "one").unwrap();
+        fs::write(traces.join("chat-two").join("assistant-two.trace"), "two").unwrap();
+
+        delete_chat_conversation_in(&conversations, &traces, "chat-one").unwrap();
+
+        assert!(!conversations.join("model-quant-chat-one.conversation.json").exists());
+        assert!(!traces.join("chat-one").exists());
+        assert!(conversations.join("model-quant-chat-two.conversation.json").exists());
+        assert!(traces.join("chat-two").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_an_invalid_id_without_deleting_any_chat_data() {
+        let root = std::env::temp_dir().join(format!("model-surgery-chat-delete-invalid-test-{}", std::process::id()));
+        let conversations = root.join("conversations");
+        let traces = root.join("traces");
+        fs::create_dir_all(traces.join("chat-one")).unwrap();
+        fs::create_dir_all(&conversations).unwrap();
+        fs::write(conversations.join("model-quant-chat-one.conversation.json"), "one").unwrap();
+
+        assert!(delete_chat_conversation_in(&conversations, &traces, "../chat-one").is_err());
+        assert!(conversations.join("model-quant-chat-one.conversation.json").exists());
+        assert!(traces.join("chat-one").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

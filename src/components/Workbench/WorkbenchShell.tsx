@@ -80,6 +80,7 @@ interface WorkbenchShellProps {
   onOpenProjectorTensorValues: (tensor: TensorInfo, groupId: string) => void;
   onToggleLayer: (layerIndex: number) => void;
   onNewChat: () => void;
+  onDeleteChat: (id: string) => Promise<void>;
   chatConversations: Record<string, ChatConversation>;
   chatSummaries: ChatConversationSummary[];
   chatSendingConversationId: string | null;
@@ -180,6 +181,7 @@ export function WorkbenchShell({
   onOpenProjectorTensorValues,
   onToggleLayer,
   onNewChat,
+  onDeleteChat,
   chatConversations,
   chatSummaries,
   chatSendingConversationId,
@@ -246,6 +248,13 @@ export function WorkbenchShell({
   const humanevalEditorActive = activeEditor?.kind === "humaneval-details";
   const terminalBenchEditorActive = activeEditor?.kind === "terminal-bench-details";
   const mmmuProEditorActive = activeEditor?.kind === "mmmu-pro-details";
+  const activeChatId = activeEditor?.kind === "chat" ? activeEditor.chatId : null;
+  const deletionBlockedChatIds = new Set(
+    Object.values(chatConversations)
+      .filter((conversation) => conversation.messages.some((message) => message.trace?.status === "saving"))
+      .map((conversation) => conversation.id),
+  );
+  if (chatSendingConversationId) deletionBlockedChatIds.add(chatSendingConversationId);
 
   useEffect(() => {
     setProjectorExpanded(true);
@@ -348,7 +357,14 @@ export function WorkbenchShell({
         onSelectActivity={selectActivity}
       />
       {activeActivity === "chat" ? (
-        <ChatSidebar onNewChat={onNewChat} conversations={chatSummaries} onOpenChat={onOpenChat} />
+        <ChatSidebar
+          onNewChat={onNewChat}
+          conversations={chatSummaries}
+          onOpenChat={onOpenChat}
+          onDeleteChat={onDeleteChat}
+          activeConversationId={activeChatId}
+          deletionBlockedConversationIds={deletionBlockedChatIds}
+        />
       ) : activeActivity === "testing" ? (
         <TestingPanel
           running={running}

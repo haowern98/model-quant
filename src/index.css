@@ -1704,12 +1704,17 @@ body.resizing-projector * {
   scrollbar-gutter: stable;
 }
 
+.chat-sidebar-conversation-row {
+  position: relative;
+  height: 32px;
+}
+
 .chat-sidebar-conversation {
   display: block;
   width: 100%;
   height: 32px;
   overflow: hidden;
-  padding: 0 22px;
+  padding: 0 42px 0 22px;
   border: 0;
   background: transparent;
   color: #dcdcdc;
@@ -1720,9 +1725,84 @@ body.resizing-projector * {
   white-space: nowrap;
 }
 
+.chat-sidebar-conversation span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-sidebar-conversation:hover,
-.chat-sidebar-conversation:focus-visible {
+.chat-sidebar-conversation:focus-visible,
+.chat-sidebar-conversation-row.is-active .chat-sidebar-conversation {
   background: #3a3a3a;
+}
+
+.chat-sidebar-conversation-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #dcdcdc;
+  font: inherit;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.chat-sidebar-conversation-row:hover .chat-sidebar-conversation-actions,
+.chat-sidebar-conversation-row.is-active .chat-sidebar-conversation-actions,
+.chat-sidebar-conversation-row.has-open-menu .chat-sidebar-conversation-actions,
+.chat-sidebar-conversation-actions:focus-visible {
+  opacity: 1;
+}
+
+.chat-sidebar-conversation-actions:hover,
+.chat-sidebar-conversation-actions:focus-visible {
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.chat-sidebar-action-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 8px;
+  z-index: 100;
+  width: 176px;
+  padding: 4px 0;
+  border: 1px solid var(--vscode-border-soft);
+  border-radius: 8px;
+  background: #252526;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: #cccccc;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.chat-sidebar-action-menu button {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-sidebar-action-menu button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.chat-sidebar-action-menu button:disabled {
+  color: #888888;
+  cursor: default;
 }
 
 .editor-run-controls select {

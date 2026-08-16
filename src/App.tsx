@@ -916,6 +916,16 @@ function App() {
     });
   }, []);
 
+  const handleDeleteChat = useCallback(async (chatId: string) => {
+    try {
+      setAppError(null);
+      await chat.deleteConversation(chatId);
+      handleCloseEditor(`chat:${chatId}`);
+    } catch (deleteError) {
+      setAppError(errorMessage(deleteError));
+    }
+  }, [chat, handleCloseEditor]);
+
   const handleReorderEditor = useCallback((editorId: string, beforeEditorId: string | null) => {
     setOpenEditors((current) => {
       const moving = current.find((editor) => editor.id === editorId);
@@ -1876,6 +1886,7 @@ function App() {
           onOpenProjectorTensorValues={handleOpenProjectorTensorValues}
           onToggleLayer={handleToggleLayer}
           onNewChat={handleNewChat}
+          onDeleteChat={handleDeleteChat}
           chatConversations={chat.conversations}
           chatSummaries={chat.summaries}
           chatSendingConversationId={chat.sendingConversationId}

@@ -55,6 +55,7 @@ pub fn run() {
             commands::chat::save_chat_conversation,
             commands::chat::list_chat_conversations,
             commands::chat::load_chat_conversation,
+            commands::chat::delete_chat_conversation,
             commands::chat_trace::load_chat_trace_manifest,
             commands::chat_trace::load_chat_trace_token,
             commands::official_benchmarks::get_gpqa_diamond_status,

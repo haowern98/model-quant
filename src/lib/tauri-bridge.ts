@@ -247,6 +247,10 @@ export async function loadChatConversation(id: string): Promise<ChatConversation
   return invoke<ChatConversation>("load_chat_conversation", { id });
 }
 
+export async function deleteChatConversation(id: string): Promise<void> {
+  return invoke<void>("delete_chat_conversation", { id });
+}
+
 export async function loadChatTraceManifest(
   conversationId: string,
   assistantMessageId: string,

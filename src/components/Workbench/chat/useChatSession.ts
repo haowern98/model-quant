@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  deleteChatConversation,
   generateChatResponse,
   generateChatTitle,
   listChatConversations,
@@ -92,6 +93,25 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
     setConversations((existing) => ({ ...existing, [id]: conversation }));
     return conversation;
   }, []);
+
+  const deleteConversation = useCallback(async (id: string) => {
+    const conversation = conversationsRef.current[id];
+    if (sendingConversationId === id) {
+      throw new Error("Wait for this chat to finish generating before deleting it.");
+    }
+    if (conversation?.messages.some((message) => message.trace?.status === "saving")) {
+      throw new Error("Wait for this chat's trace to finish saving before deleting it.");
+    }
+
+    await deleteChatConversation(id);
+    for (const [assistantMessageId, trace] of Object.entries(traceStatusesRef.current)) {
+      if (trace.conversationId === id) delete traceStatusesRef.current[assistantMessageId];
+    }
+    setConversations((current) => Object.fromEntries(
+      Object.entries(current).filter(([conversationId]) => conversationId !== id),
+    ));
+    setSummaries((current) => current.filter((summary) => summary.id !== id));
+  }, [sendingConversationId]);
 
   const loadModel = useCallback(async () => {
     const config = chatConfigFromModelLoadConfig(modelConfig);
@@ -233,6 +253,7 @@ export function useChatSession(modelConfig: ModelLoadConfig) {
     error,
     createConversation,
     openConversation,
+    deleteConversation,
     loadModel,
     unloadModel,
     sendMessage,
