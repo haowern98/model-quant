@@ -1784,6 +1784,11 @@ body.resizing-projector * {
   font-weight: 400;
 }
 
+.chat-sidebar-action-menu.opens-upward {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+
 .chat-sidebar-action-menu button {
   width: 100%;
   min-height: 32px;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatConversationSummary } from "./chat/chatTypes";
 
 interface ChatSidebarProps {
@@ -20,7 +20,9 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
   const [query, setQuery] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPlacement, setMenuPlacement] = useState<"above" | "below">("below");
   const actionsRowRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
   const matchingConversations = useMemo(
     () => conversations.filter((conversation) => conversation.title.toLowerCase().includes(query.trim().toLowerCase())),
     [conversations, query],
@@ -33,6 +35,19 @@ export function ChatSidebar({
     };
     window.addEventListener("pointerdown", closeMenu);
     return () => window.removeEventListener("pointerdown", closeMenu);
+  }, [openMenuId]);
+
+  useLayoutEffect(() => {
+    const row = actionsRowRef.current;
+    const menu = actionsMenuRef.current;
+    const sidebar = row?.closest<HTMLElement>(".chat-sidebar-conversations");
+    if (!openMenuId || !row || !menu || !sidebar) return;
+
+    const rowBounds = row.getBoundingClientRect();
+    const sidebarBounds = sidebar.getBoundingClientRect();
+    const roomBelow = sidebarBounds.bottom - rowBounds.bottom;
+    const roomAbove = rowBounds.top - sidebarBounds.top;
+    setMenuPlacement(roomBelow < menu.getBoundingClientRect().height && roomAbove > roomBelow ? "above" : "below");
   }, [openMenuId]);
 
   const deleteConversation = async (conversation: ChatConversationSummary) => {
@@ -89,12 +104,19 @@ export function ChatSidebar({
                 aria-label={`Chat actions for ${conversation.title}`}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
-                onClick={() => setOpenMenuId((current) => current === conversation.id ? null : conversation.id)}
+                onClick={() => {
+                  setMenuPlacement("below");
+                  setOpenMenuId((current) => current === conversation.id ? null : conversation.id);
+                }}
               >
                 <span className="codicon codicon-ellipsis" aria-hidden="true" />
               </button>
               {menuOpen ? (
-                <div className="chat-sidebar-action-menu" role="menu">
+                <div
+                  ref={actionsMenuRef}
+                  className={`chat-sidebar-action-menu${menuPlacement === "above" ? " opens-upward" : ""}`}
+                  role="menu"
+                >
                   <button
                     type="button"
                     role="menuitem"
