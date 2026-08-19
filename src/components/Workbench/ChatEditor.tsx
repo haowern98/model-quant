@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { type ChatMessageData, ChatMessage } from "./ChatMessage";
 import { cancelChatGeneration, type ChatTraceManifest, type ChatTraceToken } from "../../lib/tauri-bridge";
-import { ChatTracePanel } from "./ChatTracePanel";
+import { ChatTracePanel, type ChatTraceSelection } from "./ChatTracePanel";
 
 const TRACE_PANEL_MIN_WIDTH = 520;
 const CHAT_MAIN_MIN_WIDTH = 320;
@@ -26,10 +26,11 @@ interface ChatEditorProps {
   onOpenTrace: (messageId: string) => void;
   onCloseTrace: () => void;
   onTraceTokenChange: (index: number) => void;
+  onTraceInspectorChange: (selection: ChatTraceSelection | null) => void;
   onSend: (content: string) => void;
 }
 
-export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, traceMessageId, traceManifest, traceToken, traceTokenIndex, traceLoading, traceError, onDraftChange, onTraceArmedChange, onOpenTrace, onCloseTrace, onTraceTokenChange, onSend }: ChatEditorProps) {
+export function ChatEditor({ messages, draft, modelReady, sending, disabled, error, traceArmed, tracePanelOpen, traceMessageId, traceManifest, traceToken, traceTokenIndex, traceLoading, traceError, onDraftChange, onTraceArmedChange, onOpenTrace, onCloseTrace, onTraceTokenChange, onTraceInspectorChange, onSend }: ChatEditorProps) {
   const editorRef = useRef<HTMLElement>(null);
   const [tracePanelWidth, setTracePanelWidth] = useState(TRACE_PANEL_MIN_WIDTH);
   const [tracePanelFullscreen, setTracePanelFullscreen] = useState(false);
@@ -38,7 +39,8 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
     if (tracePanelOpen) return;
     setTracePanelWidth(TRACE_PANEL_MIN_WIDTH);
     setTracePanelFullscreen(false);
-  }, [tracePanelOpen]);
+    onTraceInspectorChange(null);
+  }, [onTraceInspectorChange, tracePanelOpen]);
 
   const tracePanelMaxSplitWidth = () => {
     const editorWidth = editorRef.current?.getBoundingClientRect().width ?? 1280;
@@ -48,6 +50,7 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
   const closeTracePanel = () => {
     setTracePanelFullscreen(false);
     setTracePanelWidth(TRACE_PANEL_MIN_WIDTH);
+    onTraceInspectorChange(null);
     onCloseTrace();
   };
 
@@ -201,6 +204,7 @@ export function ChatEditor({ messages, draft, modelReady, sending, disabled, err
             maximized={tracePanelFullscreen}
             onToggleMaximized={toggleTracePanelFullscreen}
             onClose={closeTracePanel}
+            onSelectionChange={onTraceInspectorChange}
           />
         </>
       ) : null}

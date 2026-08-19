@@ -1,5 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import type { ChatTraceCandidate, ChatTraceManifest, ChatTraceToken } from "../../lib/tauri-bridge";
+import type { ChatTraceCandidate, ChatTraceLayer, ChatTraceManifest, ChatTraceToken } from "../../lib/tauri-bridge";
+
+export type ChatTraceSelection = {
+  token: ChatTraceToken;
+  layer: ChatTraceLayer;
+  candidate: ChatTraceCandidate | null;
+  rank: number | null;
+  view: "logit" | "probability";
+};
 
 type ChatTracePanelProps = {
   trace: ChatTraceManifest | null;
@@ -11,6 +19,7 @@ type ChatTracePanelProps = {
   maximized?: boolean;
   onToggleMaximized?: () => void;
   onClose?: () => void;
+  onSelectionChange?: (selection: ChatTraceSelection | null) => void;
 };
 
 const candidateCounts = [12, 24, 64] as const;
@@ -90,7 +99,7 @@ function TraceDropdown<T extends string | number>({
   );
 }
 
-export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSelectTokenIndex, loading, error, maximized = false, onToggleMaximized, onClose }: ChatTracePanelProps) {
+export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSelectTokenIndex, loading, error, maximized = false, onToggleMaximized, onClose, onSelectionChange }: ChatTracePanelProps) {
   const [candidateCount, setCandidateCount] = useState<(typeof candidateCounts)[number]>(12);
   const [view, setView] = useState<"logit" | "probability">("logit");
   const [heatmap, setHeatmap] = useState(false);
@@ -100,6 +109,7 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
   const [gridScrollWidth, setGridScrollWidth] = useState(0);
   const gridWrapRef = useRef<HTMLDivElement>(null);
   const gridScrollbarRef = useRef<HTMLDivElement>(null);
+  const selectionChangeRef = useRef(onSelectionChange);
   const selectedTokenData = selectedToken ?? (trace?.tokens[selectedTokenIndex] as ChatTraceToken | undefined);
   const layers = selectedTokenData?.layers ?? [];
   const selectedLayerData = layers.find((layer) => layer.layer === selectedLayer) ?? layers.at(-1) ?? null;
@@ -107,10 +117,13 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
   const selectedRank = selectedCandidate && selectedLayerData
     ? selectedLayerData.candidates.findIndex((candidate) => candidate.tokenId === selectedCandidate.tokenId) + 1
     : null;
-  const detailTokenId = selectedCell ? selectedCandidate?.tokenId : selectedTokenData?.tokenId;
   const hasProbabilities = layers.every((layer) => layer.candidates.every((candidate) => typeof candidate.probability === "number"));
   const visibleHeatmapCandidates = layers.flatMap((layer) => layer.candidates.slice(0, candidateCount));
   const heatmapScale = heatmapScaleFor(visibleHeatmapCandidates);
+
+  useEffect(() => {
+    selectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
 
   useEffect(() => {
     const finalLayer = layers.at(-1);
@@ -119,6 +132,20 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
     setSelectedCell(null);
     if (!hasProbabilities) setView("logit");
   }, [selectedTokenIndex, trace]);
+
+  useEffect(() => {
+    selectionChangeRef.current?.(
+      selectedTokenData && selectedLayerData
+        ? {
+            token: selectedTokenData,
+            layer: selectedLayerData,
+            candidate: selectedCandidate,
+            rank: selectedRank,
+            view,
+          }
+        : null,
+    );
+  }, [selectedCandidate, selectedLayerData, selectedRank, selectedTokenData, view]);
 
   useLayoutEffect(() => {
     const gridWrap = gridWrapRef.current;
@@ -252,13 +279,6 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
           <div className="chat-trace-grid-scrollbar-spacer" style={{ width: gridScrollWidth }} />
         </div>
       </div>
-      <div className="chat-trace-selection">Selected: layer {selectedLayer ?? "—"} × {selectedCandidate ? `‘${displayToken(selectedCandidate.tokenText)}’` : "no candidate"}</div>
-      <div className="chat-trace-details">
-        <div><span>Generated token</span><strong>{displayToken(selectedTokenData.tokenText)}</strong><span>{selectedCell ? "Selected token ID" : "Token ID"}</span><strong>{detailTokenId ?? "—"}</strong><span>Position</span><strong>{`After token #${selectedTokenData.index}`}</strong></div>
-        <div><span>{view === "logit" ? "Logit Lens" : "Probability"}</span><strong>{selectedCandidate ? metricValue(selectedCandidate, view) : "—"}</strong><span>Top-64 rank</span><strong>{selectedRank ?? "—"}</strong><span>Captured candidates</span><strong>{selectedLayerData?.candidates.length ?? 0}</strong></div>
-        <div className="chat-trace-predictions"><span>Top predictions at this layer</span>{selectedLayerData?.candidates.slice(0, 5).map((candidate, index) => <strong key={candidate.tokenId}>{`${index + 1}. ${displayToken(candidate.tokenText)}  ${metricValue(candidate, view)}`}</strong>)}</div>
-      </div>
-      <div className="chat-trace-footer">Trace buffer: {trace.tokens.length} generated tokens · {layers.length} layers · 64 candidates/layer</div>
     </aside>
   );
 }

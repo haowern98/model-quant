@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useRef,
   useState,
   type ChangeEvent,
@@ -40,6 +41,7 @@ import type {
 import { EvalResultsView } from "../EvalResults/EvalResultsView";
 import { BottomPanel } from "./BottomPanel";
 import { ChatEditor } from "./ChatEditor";
+import type { ChatTraceSelection } from "./ChatTracePanel";
 import { EditorTabs } from "./EditorTabs";
 import { ModelLoadControls } from "./ModelLoadControls";
 import { RunControls } from "./RunControls";
@@ -249,6 +251,7 @@ export function EditorPane({
   const [chatTraceTokens, setChatTraceTokens] = useState<Record<string, Record<number, ChatTraceToken>>>({});
   const [chatTraceLoading, setChatTraceLoading] = useState<Record<string, boolean>>({});
   const [chatTraceErrors, setChatTraceErrors] = useState<Record<string, string>>({});
+  const [chatTraceSelections, setChatTraceSelections] = useState<Record<string, ChatTraceSelection>>({});
   const activeEditor =
     openEditors.find((editor) => editor.id === activeEditorId) ?? null;
   const activeTitle = activeEditor ? editorTabLabel(activeEditor) : "No layer selected";
@@ -268,6 +271,9 @@ export function EditorPane({
   const activeTraceKey = activeTraceMessage?.trace
     ? `${activeTraceMessage.trace.conversationId}:${activeTraceMessage.trace.assistantMessageId}`
     : null;
+  const activeTraceInspector = activeChatTab && activeTraceView
+    ? (chatTraceSelections[activeChatTab.chatId] ?? null)
+    : null;
   const showingTensorValues = activeEditor?.kind === "tensor-values";
   const tensorValuesEditor = showingTensorValues
     ? (activeEditor as Extract<EditorTab, { kind: "tensor-values" }>)
@@ -281,6 +287,10 @@ export function EditorPane({
     const message = activeChat.messages.find((item) => item.id === messageId);
     if (!message?.trace) return;
     const key = `${message.trace.conversationId}:${message.trace.assistantMessageId}`;
+    setChatTraceSelections((current) => {
+      const { [activeChatTab.chatId]: _previousSelection, ...remaining } = current;
+      return remaining;
+    });
     setChatTraceViews((current) => ({
       ...current,
       [activeChatTab.chatId]: { messageId, tokenIndex: 0 },
@@ -308,7 +318,22 @@ export function EditorPane({
       const { [activeChatTab.chatId]: _closedTrace, ...remaining } = current;
       return remaining;
     });
+    setChatTraceSelections((current) => {
+      const { [activeChatTab.chatId]: _closedSelection, ...remaining } = current;
+      return remaining;
+    });
   };
+
+  const setActiveTraceInspector = useCallback((selection: ChatTraceSelection | null) => {
+    if (!activeChatTab) return;
+    setChatTraceSelections((current) => {
+      if (!selection) {
+        const { [activeChatTab.chatId]: _clearedSelection, ...remaining } = current;
+        return remaining;
+      }
+      return { ...current, [activeChatTab.chatId]: selection };
+    });
+  }, [activeChatTab]);
 
   const bottomPanelMaxHeight = () => {
     const editorHeight = editorRef.current?.getBoundingClientRect().height ?? 800;
@@ -525,6 +550,7 @@ export function EditorPane({
               })))
               .finally(() => setChatTraceLoading((current) => ({ ...current, [activeTraceKey]: false })));
           }}
+          onTraceInspectorChange={setActiveTraceInspector}
           onSend={(content) => {
             if (activeChatTab) onSendChatMessage(
               activeChatTab.chatId,
@@ -580,6 +606,8 @@ export function EditorPane({
             profile={profile}
             outputLines={outputLines}
             apiOutputLines={apiOutputLines}
+            traceInspectorOpen={Boolean(activeTraceView)}
+            traceInspector={activeTraceInspector}
             onClose={onHideBottomPanel}
             maximized={bottomPanelMaximized}
             onToggleMaximized={() => setBottomPanelMaximized((maximized) => !maximized)}
