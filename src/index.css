@@ -78,7 +78,7 @@ button {
   .tensor-table-scroll,
   .chat-sidebar-conversations,
   .chat-editor-messages,
-  .chat-trace-panel,
+  .chat-trace-panel-content,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -100,7 +100,7 @@ button {
   .tensor-table-scroll,
   .chat-sidebar-conversations,
   .chat-editor-messages,
-  .chat-trace-panel,
+  .chat-trace-panel-content,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -121,7 +121,7 @@ button {
   .tensor-table-scroll,
   .chat-sidebar-conversations,
   .chat-editor-messages,
-  .chat-trace-panel,
+  .chat-trace-panel-content,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -143,7 +143,7 @@ button {
   .tensor-table-scroll,
   .chat-sidebar-conversations,
   .chat-editor-messages,
-  .chat-trace-panel,
+  .chat-trace-panel-content,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -164,7 +164,7 @@ button {
   .tensor-table-scroll,
   .chat-sidebar-conversations,
   .chat-editor-messages,
-  .chat-trace-panel,
+  .chat-trace-panel-content,
   .chat-composer textarea,
   .overflow-auto,
   .overflow-y-auto,
@@ -2323,12 +2323,20 @@ body.resizing-projector * {
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 18px;
+  overflow: hidden;
   border-left: 1px solid #353535;
   background: #1f1f1f;
   color: #d6d6d6;
   font-size: 12px;
+}
+
+.chat-trace-panel-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .chat-trace-controls {
@@ -2593,41 +2601,39 @@ body.resizing-projector * {
 }
 
 .chat-trace-grid-scrollbar {
-  display: none;
-}
-
-.chat-trace-grid-scrollbar-spacer {
-  height: 1px;
+  position: relative;
+  min-width: 0;
+  height: 18px;
+  margin: 0 10px;
+  cursor: pointer;
+  touch-action: none;
 }
 
 .chat-trace-grid-wrap {
   overflow-x: auto;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-width: none;
 }
 
 .chat-trace-grid-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-trace-grid-scrollbar-thumb {
+  position: absolute;
+  top: 4px;
+  left: 0;
   height: 10px;
-}
-
-.chat-trace-grid-wrap::-webkit-scrollbar-track {
+  min-width: 32px;
+  border-radius: 5px;
   background: transparent;
+  pointer-events: none;
 }
 
-.chat-trace-grid-wrap::-webkit-scrollbar-thumb {
-  background: transparent;
-}
-
-.chat-trace-grid-wrap:hover {
-  scrollbar-color: rgba(121, 121, 121, 0.7) transparent;
-}
-
-.chat-trace-grid-wrap:hover::-webkit-scrollbar-thumb {
+.chat-trace-panel:hover .chat-trace-grid-scrollbar-thumb {
   background: rgba(121, 121, 121, 0.45);
 }
 
-.chat-trace-grid-wrap::-webkit-scrollbar-thumb:hover {
+.chat-trace-grid-scrollbar:hover .chat-trace-grid-scrollbar-thumb {
   background: rgba(121, 121, 121, 0.7);
 }
 

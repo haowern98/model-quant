@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ChatTraceCandidate, ChatTraceLayer, ChatTraceManifest, ChatTraceToken } from "../../lib/tauri-bridge";
 
 export type ChatTraceSelection = {
@@ -51,7 +51,7 @@ function TraceDropdown<T extends string | number>({
     const closeOnOutsidePress = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    const closeOnEscape = (event: KeyboardEvent) => {
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
     document.addEventListener("pointerdown", closeOnOutsidePress);
@@ -106,9 +106,9 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ layer: number; tokenId: number } | null>(null);
-  const [gridScrollWidth, setGridScrollWidth] = useState(0);
+  const [gridScrollbar, setGridScrollbar] = useState({ left: 0, maximum: 0, trackWidth: 0, thumbWidth: 0 });
   const gridWrapRef = useRef<HTMLDivElement>(null);
-  const gridScrollbarRef = useRef<HTMLDivElement>(null);
+  const gridScrollbarTrackRef = useRef<HTMLDivElement>(null);
   const selectionChangeRef = useRef(onSelectionChange);
   const selectedTokenData = selectedToken ?? (trace?.tokens[selectedTokenIndex] as ChatTraceToken | undefined);
   const layers = selectedTokenData?.layers ?? [];
@@ -147,27 +147,57 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
     );
   }, [selectedCandidate, selectedLayerData, selectedRank, selectedTokenData, view]);
 
+  const updateGridScrollbar = useCallback(() => {
+    const gridWrap = gridWrapRef.current;
+    const track = gridScrollbarTrackRef.current;
+    if (!gridWrap || !track) return;
+
+    const maximum = Math.max(0, gridWrap.scrollWidth - gridWrap.clientWidth);
+    const thumbWidth = maximum === 0 ? 0 : Math.max(32, track.clientWidth * (gridWrap.clientWidth / gridWrap.scrollWidth));
+    setGridScrollbar({ left: gridWrap.scrollLeft, maximum, trackWidth: track.clientWidth, thumbWidth });
+  }, []);
+
   useLayoutEffect(() => {
     const gridWrap = gridWrapRef.current;
-    if (!gridWrap) return undefined;
+    const track = gridScrollbarTrackRef.current;
+    if (!gridWrap || !track) return undefined;
 
-    const updateScrollWidth = () => setGridScrollWidth(gridWrap.scrollWidth);
-    updateScrollWidth();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateScrollWidth);
+    updateGridScrollbar();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateGridScrollbar);
     observer?.observe(gridWrap);
-    window.addEventListener("resize", updateScrollWidth);
+    observer?.observe(track);
+    window.addEventListener("resize", updateGridScrollbar);
     return () => {
       observer?.disconnect();
-      window.removeEventListener("resize", updateScrollWidth);
+      window.removeEventListener("resize", updateGridScrollbar);
     };
-  }, [candidateCount, selectedTokenIndex, trace]);
+  }, [candidateCount, selectedTokenIndex, trace, updateGridScrollbar]);
 
-  const syncGridScroll = (source: "grid" | "scrollbar") => {
+  const scrollGridFromPointer = (clientX: number) => {
     const gridWrap = gridWrapRef.current;
-    const scrollbar = gridScrollbarRef.current;
-    if (!gridWrap || !scrollbar) return;
-    if (source === "grid") scrollbar.scrollLeft = gridWrap.scrollLeft;
-    else gridWrap.scrollLeft = scrollbar.scrollLeft;
+    const track = gridScrollbarTrackRef.current;
+    if (!gridWrap || !track || gridScrollbar.maximum === 0) return;
+
+    const bounds = track.getBoundingClientRect();
+    const availableWidth = Math.max(1, bounds.width - gridScrollbar.thumbWidth);
+    const position = Math.min(availableWidth, Math.max(0, clientX - bounds.left - gridScrollbar.thumbWidth / 2));
+    gridWrap.scrollLeft = (position / availableWidth) * gridScrollbar.maximum;
+  };
+
+  const thumbLeft = gridScrollbar.maximum === 0
+    ? 0
+    : (gridScrollbar.left / gridScrollbar.maximum) * Math.max(0, gridScrollbar.trackWidth - gridScrollbar.thumbWidth);
+
+  const handleGridScrollbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const gridWrap = gridWrapRef.current;
+    if (!gridWrap) return;
+    const distance = Math.max(40, gridWrap.clientWidth * 0.1);
+    if (event.key === "ArrowLeft") gridWrap.scrollLeft -= distance;
+    else if (event.key === "ArrowRight") gridWrap.scrollLeft += distance;
+    else if (event.key === "Home") gridWrap.scrollLeft = 0;
+    else if (event.key === "End") gridWrap.scrollLeft = gridWrap.scrollWidth;
+    else return;
+    event.preventDefault();
   };
 
   if (loading) return <aside className="chat-trace-panel chat-trace-empty" aria-label="Logit Lens">Loading trace…</aside>;
@@ -184,6 +214,7 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
 
   return (
     <aside className="chat-trace-panel" aria-label="Logit Lens">
+      <div className="chat-trace-panel-content">
       <div className="chat-trace-tabs" aria-label="Trace views">
         <span className="chat-trace-tab-active">LOGIT LENS</span>
         {onToggleMaximized && onClose ? (
@@ -248,7 +279,7 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
           : "This older trace has logits only. Regenerate this reply with Trace On to view exact probabilities."}
       </p>
       <div className="chat-trace-grid-region">
-        <div className="chat-trace-grid-wrap" ref={gridWrapRef} onScroll={() => syncGridScroll("grid")}>
+        <div className="chat-trace-grid-wrap" ref={gridWrapRef} onScroll={updateGridScrollbar}>
           <div className="chat-trace-grid" role="grid" aria-label="Logit Lens predictions" style={traceGridStyle}>
           <div className="chat-trace-grid-row chat-trace-grid-header-row" role="row">
             <div className="chat-trace-grid-layer-cell chat-trace-grid-header-cell" role="columnheader">Layer</div>
@@ -275,9 +306,28 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
           ))}
           </div>
         </div>
-        <div className="chat-trace-grid-scrollbar" ref={gridScrollbarRef} aria-label="Scroll Logit Lens ranks horizontally" onScroll={() => syncGridScroll("scrollbar")}>
-          <div className="chat-trace-grid-scrollbar-spacer" style={{ width: gridScrollWidth }} />
-        </div>
+      </div>
+      </div>
+      <div
+        ref={gridScrollbarTrackRef}
+        className="chat-trace-grid-scrollbar"
+        role="scrollbar"
+        tabIndex={gridScrollbar.maximum > 0 ? 0 : -1}
+        aria-label="Scroll Logit Lens ranks horizontally"
+        aria-orientation="horizontal"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(gridScrollbar.maximum)}
+        aria-valuenow={Math.round(gridScrollbar.left)}
+        onKeyDown={handleGridScrollbarKeyDown}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          scrollGridFromPointer(event.clientX);
+        }}
+        onPointerMove={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollGridFromPointer(event.clientX);
+        }}
+      >
+        <span className="chat-trace-grid-scrollbar-thumb" style={{ width: gridScrollbar.thumbWidth, transform: `translateX(${thumbLeft}px)` }} />
       </div>
     </aside>
   );
