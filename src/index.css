@@ -2620,11 +2620,11 @@ body.resizing-projector * {
 
 .chat-trace-grid-scrollbar-thumb {
   position: absolute;
-  top: 4px;
+  top: 6px;
   left: 0;
-  height: 10px;
+  height: 6px;
   min-width: 32px;
-  border-radius: 5px;
+  border-radius: 3px;
   background: transparent;
   pointer-events: none;
 }
