@@ -3643,7 +3643,7 @@ body.resizing-projector * {
 
 .trace-inspector-title {
   color: #d4d4d4;
-  font-size: 14px;
+  font-size: 12px;
   margin-bottom: 8px;
 }
 
@@ -3669,13 +3669,13 @@ body.resizing-projector * {
 .trace-inspector-meta,
 .trace-inspector-summary small {
   color: #a9a9a9;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .trace-inspector-summary strong {
   overflow: hidden;
   color: #e3e3e3;
-  font-size: 15px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
