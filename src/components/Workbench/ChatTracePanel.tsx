@@ -127,11 +127,12 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
 
   useEffect(() => {
     const finalLayer = layers.at(-1);
+    const generatedCandidate = finalLayer?.candidates.find((candidate) => candidate.tokenId === selectedTokenData?.tokenId);
     setSelectedLayer(finalLayer?.layer ?? null);
-    setSelectedCandidateId(finalLayer?.candidates[0]?.tokenId ?? null);
-    setSelectedCell(null);
+    setSelectedCandidateId(generatedCandidate?.tokenId ?? null);
+    setSelectedCell(generatedCandidate && finalLayer ? { layer: finalLayer.layer, tokenId: generatedCandidate.tokenId } : null);
     if (!hasProbabilities) setView("logit");
-  }, [selectedTokenIndex, trace]);
+  }, [selectedTokenData, selectedTokenIndex, trace]);
 
   useEffect(() => {
     selectionChangeRef.current?.(
