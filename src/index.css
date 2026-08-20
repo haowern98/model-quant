@@ -3638,7 +3638,41 @@ body.resizing-projector * {
 .trace-inspector-empty {
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   padding: 10px 16px;
+}
+
+.trace-inspector:hover,
+.trace-inspector-empty:hover {
+  scrollbar-color: rgba(121, 121, 121, 0.7) transparent;
+}
+
+.trace-inspector::-webkit-scrollbar,
+.trace-inspector-empty::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.trace-inspector::-webkit-scrollbar-track,
+.trace-inspector-empty::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.trace-inspector::-webkit-scrollbar-thumb,
+.trace-inspector-empty::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.trace-inspector:hover::-webkit-scrollbar-thumb,
+.trace-inspector-empty:hover::-webkit-scrollbar-thumb {
+  background: rgba(121, 121, 121, 0.45);
+}
+
+.trace-inspector::-webkit-scrollbar-thumb:hover,
+.trace-inspector-empty::-webkit-scrollbar-thumb:hover {
+  background: rgba(121, 121, 121, 0.7);
 }
 
 .trace-inspector-title {
