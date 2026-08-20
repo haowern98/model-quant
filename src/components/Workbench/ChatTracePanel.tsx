@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { ChatTraceCandidate, ChatTraceLayer, ChatTraceManifest, ChatTraceToken } from "../../lib/tauri-bridge";
 
 export type ChatTraceSelection = {
@@ -185,6 +185,22 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
     gridWrap.scrollLeft = (position / availableWidth) * gridScrollbar.maximum;
   };
 
+  const startGridScrollbarDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    scrollGridFromPointer(event.clientX);
+
+    const handleMove = (moveEvent: PointerEvent) => scrollGridFromPointer(moveEvent.clientX);
+    const stopDrag = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stopDrag);
+      window.removeEventListener("pointercancel", stopDrag);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
+  };
+
   const thumbLeft = gridScrollbar.maximum === 0
     ? 0
     : (gridScrollbar.left / gridScrollbar.maximum) * Math.max(0, gridScrollbar.trackWidth - gridScrollbar.thumbWidth);
@@ -320,13 +336,7 @@ export function ChatTracePanel({ trace, selectedToken, selectedTokenIndex, onSel
         aria-valuemax={Math.round(gridScrollbar.maximum)}
         aria-valuenow={Math.round(gridScrollbar.left)}
         onKeyDown={handleGridScrollbarKeyDown}
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          scrollGridFromPointer(event.clientX);
-        }}
-        onPointerMove={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) scrollGridFromPointer(event.clientX);
-        }}
+        onPointerDown={startGridScrollbarDrag}
       >
         <span className="chat-trace-grid-scrollbar-thumb" style={{ width: gridScrollbar.thumbWidth, transform: `translateX(${thumbLeft}px)` }} />
       </div>
